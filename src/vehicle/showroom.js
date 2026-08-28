@@ -23,6 +23,18 @@ import { instantiateSkill } from '../data/skills.js';
 /** How fast the turntable goes, in radians per second. */
 const SPIN = 0.55;
 
+// What the framing has to hold, in metres, measured off the roster rather than
+// off any one car: the longest is 4.6 m, and a turntable shows it broadside
+// once a revolution, so the horizontal case is half its length plus a margin.
+// The vertical is its height plus what the camera's slight downward tilt adds
+// of that same length.
+const FRAME_HALF_WIDTH = 2.55;
+const FRAME_HALF_HEIGHT = 1.10;
+
+// Where the two framings apply. Between them the camera blends.
+const BAND_ASPECT = 4.5;
+const TALL_ASPECT = 1.8;
+
 export class Showroom {
   constructor() {
     this.scene = new THREE.Scene();
@@ -51,11 +63,23 @@ export class Showroom {
     this.scene.add(this.floor);
 
     this.camera = new THREE.PerspectiveCamera(34, 16 / 9, 0.15, 120);
-    // Close, and near eye level. The stage is a wide, short band, so the height
-    // is what the framing is limited by: back the camera off far enough to fit
-    // the length and the car becomes a model on a shelf.
+    // Close, and near eye level. The title screen's stage is a wide, short
+    // band, so the height is what the framing is limited by there: back the
+    // camera off far enough to fit the length and the car becomes a model on
+    // a shelf. This is that tuned position, and `render` keeps it unless the
+    // rectangle it is drawing into is too narrow to hold the car.
+    this.target = new THREE.Vector3(0, 0.66, 0);
     this.camera.position.set(3.0, 1.40, 3.7);
-    this.camera.lookAt(0, 0.66, 0);
+    this.camera.lookAt(this.target);
+    this.dir = this.camera.position.clone().sub(this.target);
+    this.minDist = this.dir.length();
+    this.dir.normalize();
+    // The second framing, for a rectangle tall enough to be worth looking down
+    // into. Fitting a car's length across a near-square stage leaves a lot of
+    // vertical slack; raising the eye spends that on the car's top surfaces
+    // instead of on empty air above it.
+    this.dirTall = new THREE.Vector3(3.0, 1.45, 3.7).normalize();
+    this._dir = new THREE.Vector3();
 
     this.mesh = null;
     this.vehicleId = null;
@@ -94,12 +118,37 @@ export class Showroom {
     if (this.mesh) this.mesh.group.rotation.y = this.yaw;
   }
 
-  /** @param aspect  the aspect of the rectangle this will be drawn into */
+  /**
+   * @param aspect  the aspect of the rectangle this will be drawn into
+   *
+   * The same camera serves a band across the top of the title screen at an
+   * aspect near eight and a near-square stage on the machine screen at one and
+   * a third. A fixed position cannot do both: the vertical field is what the
+   * `fov` fixes, so a narrower rectangle has a narrower *horizontal* field,
+   * and at the tuned distance the machine screen cut a hand's width off each
+   * end of the car. So the distance is fitted to the rectangle — and floored
+   * at the tuned one, because the band was framed deliberately and pulling
+   * closer there would crop it instead.
+   */
   render(aspect) {
     if (this.camera.aspect !== aspect) {
       this.camera.aspect = aspect;
       this.camera.updateProjectionMatrix();
     }
+    const tanY = Math.tan((this.camera.fov * Math.PI) / 360);
+    const tanX = tanY * aspect;
+    const dist = Math.max(
+      this.minDist,
+      FRAME_HALF_WIDTH / tanX,
+      FRAME_HALF_HEIGHT / tanY,
+    );
+    // Wide band keeps the tuned eye line; a squarer stage rises to look down
+    // into it. Blended rather than switched, so a window being dragged never
+    // makes the camera jump.
+    const t = Math.min(1, Math.max(0, (BAND_ASPECT - aspect) / (BAND_ASPECT - TALL_ASPECT)));
+    this._dir.copy(this.dir).lerp(this.dirTall, t).normalize();
+    this.camera.position.copy(this._dir).multiplyScalar(dist).add(this.target);
+    this.camera.lookAt(this.target);
     return this.camera;
   }
 

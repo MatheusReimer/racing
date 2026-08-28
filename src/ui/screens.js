@@ -1,7 +1,9 @@
 import { ATTRIBUTES, ATTRIBUTE_BY_ID, GROUPS } from '../stats/attributes.js';
 import { NODE_TYPES } from '../run/nodemap.js';
 import { RARITY, SLOTS } from '../data/parts.js';
-import { VEHICLES, STARTER_VEHICLE_IDS } from '../data/vehicles.js';
+import { VEHICLES, VEHICLE_BY_ID } from '../data/vehicles.js';
+import { SKILL_BY_ID } from '../data/skills.js';
+import { Build } from '../build/build.js';
 import { clamp01 } from '../core/math.js';
 
 // Every screen that is not the in-race HUD.
@@ -291,7 +293,7 @@ export class Screens {
 
   // --- title / vehicle select ----------------------------------------------
 
-  title({ onStart, onPreview, lastSummary }) {
+  title({ onSelect, onPreview, lastSummary }) {
     const { root, body, head, hint } = frame('ROGUE RACER',
       'Build a machine. Find out how far it goes.', null);
     // The showroom renders behind this screen, into the rectangle `.showroom`
@@ -336,7 +338,7 @@ export class Screens {
         + (v.startingSkill ? ` · ${esc(v.startingSkill.replace(/_/g, ' '))}` : '')));
       foot.appendChild(el('span', 'card-go', 'Select'));
       card.appendChild(foot);
-      card.onclick = () => onStart(v.id);
+      card.onclick = () => onSelect(v.id);
       // Pointing at a machine is asking to see it. Focus counts too, so the
       // showroom follows a keyboard just as it follows a mouse.
       const show = () => { onPreview?.(v.id); highlight(card); };
@@ -353,11 +355,104 @@ export class Screens {
     onPreview?.(VEHICLES[0].id);
     highlight(cards.children[0]);
 
-    hint.textContent =
-      'W/S throttle & brake · A/D steer · SHIFT drift · 1-4 skills · F1 perf overlay';
+    hint.textContent = 'Pick a machine to look at it properly';
     const node = this._show(root);
     // After `_show`, which clears the previous screen — and with it whatever
     // stage that screen had registered.
+    this.showroomStage = stage;
+    return node;
+  }
+
+  // --- one machine, in detail ----------------------------------------------
+
+  /**
+   * The screen between picking a machine off the roster and committing to it.
+   *
+   * A roster card that starts a run the moment it is clicked asks for the
+   * decision before showing you what you are deciding: six cars at thumbnail
+   * size, a paragraph each. This is the car at the size it deserves with its
+   * whole specification beside it, and the run does not begin until you say
+   * so. The arrows either side of it move along the roster, so comparing two
+   * machines does not mean going back and forth through a menu.
+   */
+  machine(vehicleId, { onStart, onBack, onSwitch }) {
+    const v = VEHICLE_BY_ID[vehicleId];
+    const { root, body, foot, hint } = frame(v.name, v.tagline, null);
+    root.classList.add('has-showroom', 'screen--machine');
+    root.style.setProperty('--machine', v.accent || v.color);
+    root.style.setProperty('--machine-body', v.color);
+
+    const wrap = el('div', 'machine');
+    const stage = el('div', 'machine-stage');
+
+    // Along the roster without leaving the screen.
+    const at = VEHICLES.findIndex((x) => x.id === v.id);
+    for (const [dir, cls] of [[-1, 'prev'], [1, 'next']]) {
+      const other = VEHICLES[(at + dir + VEHICLES.length) % VEHICLES.length];
+      const b = el('button', `stage-nav ${cls}`, dir < 0 ? '‹' : '›');
+      b.title = other.name;
+      b.onclick = () => onSwitch(other.id);
+      stage.appendChild(b);
+    }
+    wrap.appendChild(stage);
+
+    const info = el('div', 'machine-info');
+    info.appendChild(el('div', 'section-label', 'What it is'));
+    info.appendChild(el('div', 'machine-identity', esc(v.identity)));
+    if (v.rule) info.appendChild(el('div', 'rule', esc(v.rule.text)));
+
+    // The whole specification, in absolutes, computed by the same StatBlock
+    // the race will run on — not the deltas the card shows, which only say
+    // what is unusual about this machine rather than what it actually is.
+    const build = new Build(v.id);
+    const stats = build.stats.all();
+    info.appendChild(el('div', 'section-label', 'Specification'));
+    for (const group of Object.values(GROUPS)) {
+      const attrs = ATTRIBUTES.filter((a) => a.group === group.id);
+      if (!attrs.length) continue;
+      info.appendChild(el('h4', 'machine-group', esc(group.name)));
+      for (const a of attrs) {
+        const row = el('div', 'statrow');
+        row.appendChild(el('span', 'nm', esc(a.name)));
+        const bar = el('div', 'bar');
+        const fill = el('div', 'fill');
+        fill.style.width = `${clamp01(stats[a.id] / 250) * 100}%`;
+        fill.style.background = group.accent;
+        bar.appendChild(fill);
+        row.appendChild(bar);
+        row.appendChild(el('span', 'vl', String(Math.round(stats[a.id]))));
+        info.appendChild(row);
+      }
+    }
+
+    info.appendChild(el('div', 'section-label', 'Loadout'));
+    const slots = el('div', 'tally tally--tight');
+    slots.innerHTML =
+      `<div class="item"><div class="v">${build.partSlots}</div><div class="k">Part slots</div></div>`
+      + `<div class="item"><div class="v">${build.skillSlots}</div><div class="k">Skill slots</div></div>`;
+    info.appendChild(slots);
+
+    const skill = SKILL_BY_ID[v.startingSkill];
+    if (skill) {
+      const line = el('div', 'machine-skill');
+      line.appendChild(el('div', 'lbl', `${skill.icon || ''} ${esc(skill.name)}`));
+      line.appendChild(el('div', 'det',
+        esc(typeof skill.desc === 'function' ? skill.desc(1) : skill.desc || '')));
+      info.appendChild(line);
+    }
+
+    wrap.appendChild(info);
+    body.appendChild(wrap);
+
+    hint.textContent = 'Nothing is committed until you take the grid';
+    const back = el('button', 'btn', 'Back to the roster');
+    back.onclick = onBack;
+    foot.appendChild(back);
+    const go = el('button', 'btn primary', `Start a run in the ${v.name}`);
+    go.onclick = () => onStart(v.id);
+    foot.appendChild(go);
+
+    const node = this._show(root);
     this.showroomStage = stage;
     return node;
   }
@@ -557,7 +652,7 @@ export class Screens {
   briefing(run, cfg, { onGo }) {
     const node = run.pending;
     const def = NODE_TYPES[node.type];
-    const { root, body, foot } = frame(
+    const { root, body, foot, hint } = frame(
       cfg.boss ? cfg.boss.name : def.name,
       cfg.boss ? cfg.boss.title : run.biome.name,
       run, { withPanel: true },
@@ -591,6 +686,12 @@ export class Screens {
       `<div class="item"><div class="v">${(1 + cfg.difficulty).toFixed(1)}</div><div class="k">Difficulty</div></div>` +
       `<div class="item"><div class="v">${Math.round(run.durability)}</div><div class="k">Durability</div></div>`;
     body.appendChild(tally);
+
+    // The controls legend, which used to sit under the roster — three screens
+    // and several minutes before anybody could use it. This is the last screen
+    // before you are driving.
+    hint.textContent =
+      'W/S throttle & brake · A/D steer · SHIFT drift · 1-4 skills · F1 perf overlay';
 
     const go = el('button', 'btn primary', 'To the grid');
     go.onclick = onGo;

@@ -100,7 +100,31 @@ await shot('title');
 // identical every time. Without it the check count drifts between runs and a
 // regression is impossible to spot.
 await page.evaluate(() => { window.__game.forcedSeed = 'UIFLOW1'; });
+
+// Picking a machine off the roster no longer starts a run: it opens the
+// machine screen, and the run begins from there. A card that committed on
+// click is exactly the regression this step exists to catch.
 await page.click('.cards .card >> nth=2');   // The Drifter
+await page.waitForSelector('.screen--machine', { timeout: 10000 });
+s = await state();
+check('picking a machine opens it rather than starting a run', !s.run,
+  s.run ? 'a run started on the roster click' : `screen="${s.screen}"`);
+check('the machine screen shows a full specification',
+  (await page.$$('.machine-info .statrow')).length >= 12,
+  `${(await page.$$('.machine-info .statrow')).length} rows`);
+await shot('machine');
+
+// And the arrows walk the roster without leaving the screen.
+const firstMachine = s.screen;
+await page.click('.stage-nav.next');
+await page.waitForTimeout(150);
+s = await state();
+check('the arrows move along the roster', s.screen !== firstMachine,
+  `${firstMachine} -> ${s.screen}`);
+await page.click('.stage-nav.prev');
+await page.waitForTimeout(150);
+
+await page.click('.screen-foot .btn.primary');
 await page.waitForSelector('.mapnode', { timeout: 10000 });
 s = await state();
 check('starting a vehicle creates a run', !!s.run, s.run ? `dur=${s.run.durability} scrap=${s.run.scrap}` : '');

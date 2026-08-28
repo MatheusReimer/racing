@@ -118,8 +118,24 @@ class Game {
     this.showroom = this.showroom || new Showroom();
     this.screens.title({
       lastSummary: this.lastSummary,
-      onStart: (vehicleId) => this.startRun(vehicleId),
+      // Picking is not committing. The roster hands off to the machine screen,
+      // which is where a run actually starts.
+      onSelect: (vehicleId) => this.showMachine(vehicleId),
       onPreview: (vehicleId) => this.showroom?.setVehicle(vehicleId),
+    });
+  }
+
+  /** One machine at the size it deserves, with everything known about it. */
+  showMachine(vehicleId) {
+    this.hud.hide();
+    this.loop.setMode('menu');
+    this.input.enabled = false;
+    this.showroom = this.showroom || new Showroom();
+    this.showroom.setVehicle(vehicleId);
+    this.screens.machine(vehicleId, {
+      onStart: (id) => this.startRun(id),
+      onBack: () => this.showTitle(),
+      onSwitch: (id) => this.showMachine(id),
     });
   }
 
