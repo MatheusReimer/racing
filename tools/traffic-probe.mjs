@@ -256,24 +256,27 @@ for (const biome of BIOMES) {
 // them" was. Two cars in a row is the case that failed.
 {
   const { stepTraffic } = await import('../src/race/traffic.js');
+  // The real body, because the contact is a two-body impulse now and a stub
+  // with no mass cannot take one.
+  const { VehicleBody } = await import('../src/vehicle/physics.js');
+  const rb = new VehicleBody({ mass: 1200, maxSpeed: 70 });
+  rb.vz = 45;
   const racer = {
-    alive: true, finished: false, halfWidth: 0.95, _trafficCd: 0,
-    body: {
-      x: 0, z: 0, vx: 0, vz: 45, yawRate: 0, speed: 45,
-      gripPenalty: 1, gripPenaltyTimer: 0, jolt() {},
-    },
+    alive: true, finished: false, halfWidth: 0.95, radius: 2.3, _trafficCd: 0,
+    body: rb,
     awardNearMiss() {},
   };
   // Two civilians dead ahead, one right behind the other.
   // `stepTraffic` derives x and z from `s`, so that is what a car is placed by.
   const mk = (z) => ({ alive: true, s: z, x: 0, y: 0, z, yaw: 0, dir: 1, speed: 20,
-    lane: 0, lateralPush: 0, _missCd: 0 });
+    lane: 0, lateralPush: 0, _missCd: 0, mass: 1500,
+    vx: 0, vz: 20, yawRate: 0, dazed: 0 });
   const cars = [mk(30), mk(38)];
   racer.body.z = 0;
   const track = { length: 1000, halfWidthAt: () => 10, path: {
     offsetPoint: (s, l, o) => { o.x = l; o.y = 0; o.z = s; return o; },
     yawAt: () => 0,
-  } };
+  }, sample: (x, z, o) => { o.s = z; o.side = x; o.groundY = 0; return o; } };
 
   let deepest = 0;
   for (let i = 0; i < 400; i++) {
@@ -294,6 +297,54 @@ for (const biome of BIOMES) {
   if (bad) problems++;
   console.log(`\n  two civilians in a row, driven into at 45 m/s`.padEnd(50)
     + `deepest ${deepest.toFixed(2)} m inside  ${bad ? 'FAIL — drove through one' : 'ok'}`);
+}
+
+// --- and a civilian goes where you sent it ---------------------------------
+//
+// Traffic is on rails: position recomputed each step from distance along the
+// road and a lane. Cheap, and it kept a hundred cars flowing, but it also meant
+// nothing could ever happen to one — a hit could nudge a lateral offset that
+// sprang back and scale a number, so the car you had just driven into carried
+// on down its lane while your own car shook. A hit takes it off the rails now.
+{
+  const { VehicleBody } = await import('../src/vehicle/physics.js');
+  const { stepTraffic } = await import('../src/race/traffic.js');
+  const rb = new VehicleBody({ mass: 1200, maxSpeed: 70 });
+  rb.vz = 40;
+  // Offset the racer, not the civilian: a rail car's position is recomputed
+  // from its lane every step, so anything put in its `x` is gone before the
+  // first contact — which made the first version of this test a square hit
+  // that correctly produced no spin.
+  rb.x = 1.5;
+  const racer = {
+    alive: true, finished: false, halfWidth: 0.95, radius: 2.3, _trafficCd: 0,
+    body: rb, awardNearMiss() {},
+  };
+  // Caught on its right rear corner, which is the hit that should send it.
+  const car = {
+    alive: true, s: 30, x: 0, y: 0, z: 31, yaw: 0, dir: 1, speed: 18,
+    lane: 0, lateralPush: 0, _missCd: 0, mass: 1500,
+    vx: 0, vz: 18, yawRate: 0, dazed: 0,
+  };
+  const track = { length: 1000, halfWidthAt: () => 10, path: {
+    offsetPoint: (s, l, o) => { o.x = l; o.y = 0; o.z = s; return o; },
+    yawAt: () => 0,
+  }, sample: (x, z, o) => { o.s = z; o.side = x; o.groundY = 0; return o; } };
+
+  const before = { x: car.x, yaw: car.yaw, vz: car.vz };
+  for (let i = 0; i < 120; i++) {
+    stepTraffic([car], track, [racer], DT, {});
+    rb.z += rb.vz * DT;
+    rb.x += rb.vx * DT;
+  }
+  const shoved = Math.abs(car.x - before.x);
+  const spun = Math.abs(car.yaw - before.yaw) * 180 / Math.PI;
+  const slowed = before.vz - car.vz;
+  const bad = shoved < 0.5 || spun < 5 || slowed < 0.5;
+  if (bad) problems++;
+  console.log(`\n  a civilian clipped on the corner`.padEnd(50)
+    + `moved ${shoved.toFixed(1)} m, turned ${spun.toFixed(0)} deg, lost ${slowed.toFixed(0)} m/s  `
+    + (bad ? 'FAIL — still on its rails' : 'ok'));
 }
 
 console.log('');

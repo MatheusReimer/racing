@@ -130,11 +130,35 @@ for (const [name, def] of Object.entries(PROP_TYPES)) {
 // too — they are put at the kerb facing the street on purpose and their bulk
 // runs away from it, so their radius is not a reach into the road.
 {
-  console.log('\nNothing standing in the road, which ends at the rail:\n');
+  console.log('\nNothing standing in any road, which ends at the rail:\n');
   const scratch = {};
   for (const biome of BIOMES) {
     const track = generateTrack(new RNG(`ROAD-${biome.id}`), biome, {});
     const props = generateProps(new RNG(`ROAD-P-${biome.id}`), track, biome);
+
+    // Every road, projected against directly.
+    //
+    // This used to ask `track.sample`, which only claims a branch when the
+    // point is already inside it — so anything beside a shortcut was measured
+    // against the main line, somewhere else entirely, and reported clean. It
+    // reported clean three times while there were between eighteen and
+    // fifty-six props standing in a shortcut, one of them a ridge a hundred and
+    // forty metres into one. A probe that shares the blind spot of the code it
+    // checks is worse than no probe: it is a reason to stop looking.
+    const roads = [{ path: track.path, halfWidth: (s) => track.halfWidthAt(s), closed: true }]
+      .concat((track.branches ?? []).map((b) => ({
+        path: b.path, halfWidth: () => b.halfWidth, closed: false,
+      })));
+    const intoRoad = (x, z, reach) => {
+      let worst = -Infinity;
+      for (const road of roads) {
+        const q = road.path.project(x, z, scratch);
+        if (!road.closed && (q.s <= 0.01 || q.s >= road.path.length - 0.01)) continue;
+        worst = Math.max(worst, road.halfWidth(q.s) + BARRIER_RAIL_OFFSET + reach - Math.abs(q.side));
+      }
+      return worst;
+    };
+
     let worst = 0;
     let offender = '';
     let count = 0;
@@ -145,24 +169,20 @@ for (const [name, def] of Object.entries(PROP_TYPES)) {
       if (def?.frontage) {
         // A frontage stands at the kerb on purpose, so what matters is the
         // thirty metres of block behind it — which on a folded circuit can be
-        // the next straight over. Swept rather than sampled at a point.
+        // the next straight over.
         const c = Math.cos(p.yaw);
         const sn = Math.sin(p.yaw);
         for (let u = 0.1; u <= 1.0; u += 0.15) {
           for (let v = -0.5; v <= 0.5; v += 0.25) {
             const lx = u * def.frontage.depth * (p.scale ?? 1);
             const lz = v * def.frontage.width * (p.scale ?? 1);
-            const sm = track.sample(p.x + c * lx + sn * lz, p.z - sn * lx + c * lz, scratch);
-            if (sm.halfWidth == null) continue;
-            into = Math.max(into, sm.halfWidth + BARRIER_RAIL_OFFSET - Math.abs(sm.side));
+            into = Math.max(into, intoRoad(p.x + c * lx + sn * lz, p.z - sn * lx + c * lz, 0));
           }
         }
       } else {
         const reach = def?.footprint ?? p.radius;
         if (!reach) continue;
-        const sm = track.sample(p.x, p.z, scratch);
-        if (sm.halfWidth == null) continue;
-        into = (sm.halfWidth + BARRIER_RAIL_OFFSET + reach * (p.scale ?? 1)) - Math.abs(sm.side);
+        into = intoRoad(p.x, p.z, reach * (p.scale ?? 1));
       }
       if (into > 0) {
         count++;
@@ -171,7 +191,7 @@ for (const [name, def] of Object.entries(PROP_TYPES)) {
     }
     const bad = worst > 0.01;
     if (bad) problems++;
-    console.log(`  ${biome.id.padEnd(12)} ${String(count).padStart(3)} in the road`
+    console.log(`  ${biome.id.padEnd(12)} ${String(count).padStart(3)} in a road`
       + `${count ? `, worst ${worst.toFixed(2)} m of ${offender}` : ''}`.padEnd(38)
       + (bad ? 'FAIL' : 'ok'));
   }

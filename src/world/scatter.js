@@ -95,18 +95,45 @@ export function generateProps(rng, track, biome, opts = {}) {
    * actually landed. It is one sample per prop at generation time and it closes
    * both, plus whichever third one exists that nobody has found yet.
    */
+  // Every road, not just the racing line.
+  //
+  // This asked `track.sample`, and `sample` only claims a branch when the point
+  // is inside it — a shortcut's own width. So anything sitting beside a
+  // shortcut was measured against the main line, which is somewhere else
+  // entirely, and sailed through. Between eighteen and fifty-six props per
+  // biome were standing in a shortcut, one of them a ridge a hundred and forty
+  // metres into it, and both the placement check and the probe that was
+  // supposed to catch it were blind the same way, so it kept being reported and
+  // kept measuring clean.
+  //
+  // A branch is a road. It has tarmac, it has rails, and driving down it into
+  // the side of a building is the same experience as doing it on the main line.
+  const roads = [{ path: track.path, halfWidth: (s) => track.halfWidthAt(s), closed: true }]
+    .concat((track.branches ?? []).map((b) => ({
+      path: b.path,
+      halfWidth: () => b.halfWidth,
+      closed: false,
+    })));
+
   const landsOnRoad = (x, z, clearance) => {
-    const sm = track.sample(x, z, scratch);
-    if (sm.halfWidth == null || sm.side == null) return false;
-    // The road ends at the rail, not at the tarmac.
-    //
-    // This measured against `halfWidth`, which is the painted surface, and the
-    // red-and-white barrier stands 2.3 m outside that — so a prop could clear
-    // the asphalt by its whole footprint and still be planted in, or through,
-    // the wall. Anything sharing space with the barrier reads as being on the
-    // track, because from the driver's seat the barrier *is* where the track
-    // ends.
-    return Math.abs(sm.side) < sm.halfWidth + BARRIER_RAIL_OFFSET + clearance;
+    for (const road of roads) {
+      const q = road.path.project(x, z, scratch);
+      // An open branch's projection clamps to its ends, which would have
+      // anything past the exit measured against the exit point. Only the span
+      // the road actually covers counts.
+      if (!road.closed) {
+        const L = road.path.length;
+        if (q.s <= 0.01 || q.s >= L - 0.01) continue;
+      }
+      // The road ends at the rail, not at the tarmac: the red-and-white barrier
+      // stands 2.3 m outside the painted surface, and anything sharing space
+      // with it reads as being on the track, because from the driver's seat the
+      // barrier is where the track ends.
+      if (Math.abs(q.side) < road.halfWidth(q.s) + BARRIER_RAIL_OFFSET + clearance) {
+        return true;
+      }
+    }
+    return false;
   };
 
   const place = (type, s, lateral, extra = {}) => {
