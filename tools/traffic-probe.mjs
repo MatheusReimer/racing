@@ -11,6 +11,8 @@
 //   - is it survivable — does a race still finish?
 //   - does traffic stay on the road and out of the grid?
 
+import * as THREE from 'three';
+import { TrafficMesh } from '../src/race/trafficmesh.js';
 import { RaceSim } from '../src/race/sim.js';
 import { Build } from '../src/build/build.js';
 import { BIOMES } from '../src/data/biomes.js';
@@ -394,6 +396,59 @@ for (const biome of BIOMES) {
 }
 
 console.log('');
+// --- the paint tint reaches the paint, and only the paint ------------------
+//
+// A civilian's colour is a per-instance multiply on a shared geometry, so the
+// bodywork has to be told apart from the tyres, bumpers and mirrors inside the
+// shader. That is done by patching one line of Three's own vertex chunk. If
+// Three ever renames or reflows that line the patch stops matching, no error
+// is raised, and every car in the street gets tyres the colour of its paint.
+{
+  console.log('\nPer-car paint reaches the bodywork and nothing else:\n');
+  const cars = Array.from({ length: 12 }, (_, i) => ({ kind: i % 4 }));
+  const mesh = new TrafficMesh(cars, { shadows: true }, 11);
+  const bad = [];
+
+  // The mask covers the bodywork and leaves the furniture alone.
+  for (let k = 0; k < mesh.bodyGeos.length; k++) {
+    const mask = mesh.bodyGeos[k]?.getAttribute('paintMask');
+    if (!mask) { bad.push(`body ${k} has no paintMask`); continue; }
+    let painted = 0;
+    for (let i = 0; i < mask.count; i++) if (mask.getX(i) === 1) painted++;
+    const share = painted / mask.count;
+    if (share < 0.03 || share > 0.35) bad.push(`body ${k} paints ${(share * 100).toFixed(0)}%`);
+  }
+
+  // The patch still matches the chunk Three actually ships.
+  const shader = { vertexShader: THREE.ShaderChunk.color_vertex.replace(/^/, 'void main() {\n') };
+  mesh.bodyMat.onBeforeCompile(shader);
+  if (!shader.vertexShader.includes('attribute float paintMask;')) {
+    bad.push('paintMask never declared');
+  }
+  if (shader.vertexShader.includes('vColor.xyz *= instanceColor.xyz;')) {
+    bad.push('instanceColor still multiplies every surface — the chunk moved');
+  }
+  if (!shader.vertexShader.includes('mix( vec3( 1.0 ), instanceColor.xyz, paintMask )')) {
+    bad.push('tint is not masked');
+  }
+
+  // And the cars are not all one colour.
+  const seen = new Set();
+  for (const body of mesh.bodies) {
+    if (!body?.instanceColor) continue;
+    for (let i = 0; i < body.count; i++) {
+      seen.add([body.instanceColor.getX(i), body.instanceColor.getY(i),
+        body.instanceColor.getZ(i)].map((v) => v.toFixed(3)).join(','));
+    }
+  }
+  if (seen.size < 4) bad.push(`only ${seen.size} distinct colours in the street`);
+
+  if (bad.length) problems++;
+  console.log(`  ${seen.size} distinct paints, mask and shader patch`.padEnd(48)
+    + (bad.length ? `FAIL ${bad.join('; ')}` : 'ok'));
+  mesh.dispose();
+}
+
 if (problems) {
   console.log(`${problems} problem(s) with traffic`);
   process.exitCode = 1;

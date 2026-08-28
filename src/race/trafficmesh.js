@@ -43,6 +43,18 @@ import { RNG } from '../core/rng.js';
 // stop asking the lighting.
 const TRAFFIC_GLASS = 0x070a0f;
 
+// The tints a civilian's paint is multiplied by, one per car.
+//
+// Multipliers rather than colours: each body type already has a base — the
+// van's cream, the estate's brown — and these shift it rather than replace it,
+// so a van still reads as a van. Kept near 1 and mostly desaturated, because
+// what is wanted is a street that is not one colour, not a rally paddock.
+const PAINTS = [
+  0xffffff, 0xf2f4f7, 0xd8dde4, 0xb9c0c8, 0x9aa2ab,
+  0xd9c9b4, 0xc7d2dc, 0xb8c8bb, 0xe0c9c2, 0xcfc4d6,
+  0xa8b4c4, 0xd6d0bc, 0x8f9aa6, 0xe6dcc8, 0xc2b8ae,
+];
+
 const BODIES = [
   // width, length, height, roof drop, colour
   { w: 1.70, l: 3.80, h: 0.58, roof: 0.48, c: 0x9aa0a8 },   // hatchback
@@ -53,6 +65,12 @@ const BODIES = [
 
 function buildBody(spec, rng) {
   const { w, l, h, roof, c } = spec;
+  // Bodywork apart from everything bolted to it. The four boxes painted `c`
+  // are the only surfaces a car's colour belongs on; the bumpers, shuts,
+  // mirrors, arches and tyres are the same on every car in the street. Keeping
+  // them in separate lists is what lets one instanced draw carry a hundred
+  // cars in a hundred colours without red tyres. See PAINT_MASK.
+  const paint = [];
   const parts = [];
   // Where the bodywork starts above the road. A third of a metre is an
   // off-roader's clearance and it had every civilian car standing on stilts;
@@ -76,18 +94,18 @@ function buildBody(spec, rng) {
 
   // Lower body, stepped: the middle is fractionally wider and taller, the way
   // a car's waist is.
-  parts.push(boxOf(w * 0.97, h * 0.86, bonnet, c,
+  paint.push(boxOf(w * 0.97, h * 0.86, bonnet, c,
     { y: rideH + h * 0.43, z: zNose - bonnet / 2, rng, variation: 0.04 }));
-  parts.push(boxOf(w, h, cabinL, c,
+  paint.push(boxOf(w, h, cabinL, c,
     { y: rideH + h / 2, z: zNose - bonnet - cabinL / 2, rng, variation: 0.04 }));
-  parts.push(boxOf(w * 0.98, h * 0.92, boot, c,
+  paint.push(boxOf(w * 0.98, h * 0.92, boot, c,
     { y: rideH + h * 0.46, z: -l / 2 + boot / 2, rng, variation: 0.04 }));
 
   // Greenhouse: a cabin box with a raked panel at each end, which is most of
   // the difference between a saloon and a shipping container.
   const cabY = rideH + h;
   const cabW = w * 0.88;
-  parts.push(boxOf(cabW, roof, cabinL * 0.88, c,
+  paint.push(boxOf(cabW, roof, cabinL * 0.88, c,
     { y: cabY + roof / 2 - 0.04, z: zNose - bonnet - cabinL / 2, rng, variation: 0.03 }));
   for (const [iz, len] of [[1, 0.34], [-1, 0.28]]) {
     const g = boxOf(cabW * 0.98, roof * 0.96, cabinL * len, TRAFFIC_GLASS, {
@@ -162,7 +180,16 @@ function buildBody(spec, rng) {
       parts.push(rim);
     }
   }
-  return { body: mergeFaceted(parts), glass: mergeFaceted(glass) };
+  const painted = mergeFaceted(paint);
+  const fitted = mergeFaceted(parts);
+  const nPaint = painted.attributes.position.count;
+  const body = mergeFaceted([painted, fitted]);
+  // 1 on bodywork, 0 on everything else. The paint geometry goes in first, so
+  // the split is a count rather than a search.
+  const mask = new Float32Array(body.attributes.position.count);
+  mask.fill(1, 0, nPaint);
+  body.setAttribute('paintMask', new THREE.BufferAttribute(mask, 1));
+  return { body, glass: mergeFaceted(glass) };
 }
 
 function buildLights(spec) {
@@ -192,7 +219,31 @@ export class TrafficMesh {
     // Glass rides with the lamps, on the unlit material.
     this.lightGeos = BODIES.map((b, i) => mergeFaceted([buildLights(b), built[i].glass]));
 
-    this.bodyMat = facetedMaterial({ roughness: 0.62, metalness: 0.18 });
+    // Lit like the cars you are racing, not like scenery.
+    //
+    // At metalness 0.18 a civilian's paint barely answered the sun or the sky,
+    // so a street of them read as flat grey cutouts moving past bodywork that
+    // did answer. The racers sit between 0.30 and 0.58; a civilian is a duller
+    // finish than a tuner's, not a different substance.
+    this.bodyMat = facetedMaterial({ roughness: 0.52, metalness: 0.34 });
+    this.bodyMat.onBeforeCompile = (shader) => {
+      // Per-car paint, restricted to the bodywork.
+      //
+      // `instanceColor` multiplies the whole vertex colour, which on this
+      // geometry means a red car gets red tyres, a red bumper and red mirrors.
+      // The mask says which surfaces are paint, and the tint is mixed toward
+      // white everywhere else — so one draw call carries a street of colours
+      // and the furniture stays the colour furniture is.
+      shader.vertexShader = shader.vertexShader
+        .replace('void main() {', 'attribute float paintMask;\nvoid main() {')
+        .replace(
+          'vColor.xyz *= instanceColor.xyz;',
+          'vColor.xyz *= mix( vec3( 1.0 ), instanceColor.xyz, paintMask );',
+        );
+    };
+    // Two materials compiled from the same source need different keys or Three
+    // hands the second one the first one's program.
+    this.bodyMat.customProgramCacheKey = () => 'traffic-paint';
     this.lightMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
 
     // One instanced draw per body type, for bodies and for lights.
@@ -207,14 +258,26 @@ export class TrafficMesh {
 
       const body = new THREE.InstancedMesh(this.bodyGeos[kind], this.bodyMat, mine.length);
       const light = new THREE.InstancedMesh(this.lightGeos[kind], this.lightMat, mine.length);
+      // A car with no shadow is a sticker on the road. Civilians cast none at
+      // all while every racer did, which is most of why they read as pasted on
+      // rather than driving. One extra shadow-pass draw per body type.
+      body.castShadow = !!quality?.shadows;
+      body.receiveShadow = !!quality?.shadows;
       for (const m of [body, light]) {
-        m.castShadow = false;
-        m.receiveShadow = false;
         m.frustumCulled = false;   // they move every frame; the bounds would be stale
         m.matrixAutoUpdate = false;
         this.group.add(m);
       }
-      mine.forEach((car, i) => this.slots.set(car, { kind, index: i }));
+      // A colour per car. Same four shapes, a hundred different cars.
+      body.instanceColor = new THREE.InstancedBufferAttribute(
+        new Float32Array(mine.length * 3), 3);
+      mine.forEach((car, i) => {
+        this.slots.set(car, { kind, index: i });
+        const t = PAINTS[new RNG(`paint:${seed}:${kind}:${i}`).int(0, PAINTS.length - 1)];
+        const col = new THREE.Color(t);
+        body.instanceColor.setXYZ(i, col.r, col.g, col.b);
+      });
+      body.instanceColor.needsUpdate = true;
       this.bodies.push(body);
       this.lights.push(light);
       tris += (triCount(this.bodyGeos[kind]) + triCount(this.lightGeos[kind])) * mine.length;
