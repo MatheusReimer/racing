@@ -1,4 +1,5 @@
 import { wrap, clamp01, TAU } from '../core/math.js';
+import { ROAD_LIFT } from '../track/track.js';
 
 // Civilian traffic.
 //
@@ -103,7 +104,9 @@ export function stepTraffic(cars, track, racers, dt, hooks = {}) {
     const hw = track.halfWidthAt(car.s);
     const lateral = car.lane * hw + car.lateralPush;
     const p = track.path.offsetPoint(car.s, lateral, { x: 0, y: 0, z: 0 });
-    car.x = p.x; car.y = p.y; car.z = p.z;
+    // On the tarmac, not in it. The road is drawn `ROAD_LIFT` above the path it
+    // follows, and civilian cars were reading the path.
+    car.x = p.x; car.y = p.y + ROAD_LIFT; car.z = p.z;
     // Oncoming cars face back down the road.
     car.yaw = track.path.yawAt(car.s) + (car.dir < 0 ? Math.PI : 0);
   }

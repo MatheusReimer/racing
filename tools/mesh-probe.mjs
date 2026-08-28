@@ -128,10 +128,51 @@ for (const c of cases) {
   m.dispose();
 }
 
+// --- and every one of them points forward ----------------------------------
+//
+// A body decimated off a reference inherits whichever way that reference was
+// modelled, and half the catalogue faces the other way. Nothing downstream can
+// tell: the car drives, corners and collides perfectly well backwards, it just
+// does it rear-first, and the GC8 did exactly that until somebody watched it.
+//
+// Two readings, because no single one covers every car. Where there is glass,
+// the cabin of a front-engined car sits behind the middle — decisive, and every
+// car here has a healthy margin on it. Where there is none, the rear deck of a
+// car is higher than its bonnet, which is weak on a hatchback and unmistakable
+// on the saloon that needed it.
+{
+  console.log('');
+  for (const [name, hull] of Object.entries(HULLS)) {
+    let glassZ = 0;
+    let glassN = 0;
+    for (let t = 0; t < hull.classes.length; t++) {
+      if (hull.classes[t] !== 1) continue;
+      for (let k = 0; k < 3; k++) glassZ += hull.positions[hull.indices[t * 3 + k] * 3 + 2];
+      glassN += 3;
+    }
+    const lim = hull.length * 0.36;
+    let fs = 0; let fn = 0; let rs = 0; let rn = 0;
+    for (let i = 0; i < hull.positions.length; i += 3) {
+      const z = hull.positions[i + 2];
+      const y = hull.positions[i + 1];
+      if (z > lim) { fs += y; fn++; } else if (z < -lim) { rs += y; rn++; }
+    }
+    const byGlass = glassN > 600;
+    // Both readings are stated as "how far forward this car faces", so a
+    // negative answer means it is the wrong way round either way.
+    const value = byGlass ? -(glassZ / glassN) : (rs / rn) - (fs / fn);
+    const bad = !(value > 0.05);
+    if (bad) problems++;
+    console.log(`  ${name.padEnd(13)} faces forward by `
+      + `${byGlass ? 'cabin' : 'deck '} ${value.toFixed(3).padStart(7)}   ${bad ? 'FAIL — built back to front' : 'ok'}`);
+  }
+}
+
 console.log('');
 if (problems) {
   console.log(`${problems} mesh piece(s) are not closed and consistently wound —`);
-  console.log('flipped faces are invisible from outside and read as see-through holes.');
+  console.log('flipped faces are invisible from outside and read as see-through holes,');
+  console.log('and a body built back to front drives rear-first.');
   process.exit(1);
 }
 console.log('every vehicle mesh is closed and consistently wound');

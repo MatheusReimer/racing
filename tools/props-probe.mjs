@@ -67,6 +67,48 @@ for (const [name, def] of Object.entries(PROP_TYPES)) {
 }
 
 // --- scatter: density, and nothing on the grid ----------------------------
+
+// --- and none of them standing in the road ---------------------------------
+//
+// Placement tested a prop's origin against a flat two-metre margin, which is
+// right for a barrel and useless for anything wider than the margin: a building
+// whose origin clears the kerb by two metres still leaves four metres of
+// building in the street, and that is what kept turning up there. Asked here of
+// the props that were actually placed, at the size they were actually built,
+// rather than of the arithmetic that placed them.
+//
+// Gantries are exempt: they are built to stand over the road. Frontages are
+// too — they are put at the kerb facing the street on purpose and their bulk
+// runs away from it, so their radius is not a reach into the road.
+{
+  console.log('\nNothing standing in the road:\n');
+  const scratch = {};
+  for (const biome of BIOMES) {
+    const track = generateTrack(new RNG(`ROAD-${biome.id}`), biome, {});
+    const props = generateProps(new RNG(`ROAD-P-${biome.id}`), track, biome);
+    let worst = 0;
+    let offender = '';
+    let count = 0;
+    for (const p of props) {
+      const def = PROP_TYPES[p.type];
+      const reach = def?.footprint ?? p.radius;
+      if (def?.spanning || def?.frontage || !reach) continue;
+      const sm = track.sample(p.x, p.z, scratch);
+      if (sm.halfWidth == null) continue;
+      const into = (sm.halfWidth + reach * (p.scale ?? 1)) - Math.abs(sm.side);
+      if (into > 0) {
+        count++;
+        if (into > worst) { worst = into; offender = p.type; }
+      }
+    }
+    const bad = worst > 0.01;
+    if (bad) problems++;
+    console.log(`  ${biome.id.padEnd(12)} ${String(count).padStart(3)} in the road`
+      + `${count ? `, worst ${worst.toFixed(2)} m of ${offender}` : ''}`.padEnd(38)
+      + (bad ? 'FAIL' : 'ok'));
+  }
+}
+
 console.log('\nScatter, per biome:\n');
 for (const biome of BIOMES) {
   const rng = new RNG(`scatter:${biome.id}`);

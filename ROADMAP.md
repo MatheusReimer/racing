@@ -31,20 +31,26 @@ should be a probe.
 Two faults found by probes while working on something else, neither caused by
 it, both left alone rather than fixed badly in passing.
 
-**`tools/realtime-probe.mjs` fails at every tier.** p50 frame time is a healthy
-3–7 ms, but p99 is four to five *seconds*: something stalls hard rather than
-rendering slowly. The shape points at mesh construction when cars spawn, and
-`VehicleMesh` is a candidate by construction — for a body with a hull it builds
-the whole generated car, ten thousand triangles of boxes and lofts, and then
-throws it away and uses the hull instead. That was a deliberate trade when the
-alternative was threading a condition through four hundred lines; if this is the
-stall, the trade has come due. Measured at three thousand triangles per car and
-at fifty thousand: 0.24x and 0.25x real time. So it is not the body budget, and
-it predates all of that work.
+**`tools/realtime-probe.mjs` fails at every tier**, and it is now known to be
+what is behind the cars appearing to teleport at speed. p50 frame time is a
+healthy 3–7 ms but p99 is four to five *seconds*, and the loop is taking seven
+to eight sim steps per drawn frame — a hundred and thirty milliseconds of game
+between pictures, which at fifty metres a second is nearly seven metres of road
+per frame. Nothing is jumping; there is simply nothing drawn in between.
 
-**`tools/balance.mjs` reports the Kanzen 1.6 winning 87% of races.** Also
-predates the bodies, the scale change and the collision rewrite — checked
-against each. Worth a look before the roster is tuned around anything else.
+One measured contributor, worth taking first because it is certain: `VehicleMesh`
+builds the entire generated car — ten thousand triangles of boxes and lofts —
+and then throws it away when the body type has a hull. Ten milliseconds a car,
+seventy across a grid of seven, spent on geometry nobody ever sees. That was a
+deliberate trade when the alternative was threading a condition through four
+hundred lines, and it has come due. It is not the whole story: measured at three
+thousand triangles per car and at fifty thousand, the ratio was 0.24x and 0.25x,
+so the body budget is not the problem either.
+
+**`tools/balance.mjs` reports the Kanzen 1.6 winning around 85% of races.**
+Checked against the commits before the bodies, the scale change and the collision
+rewrite — it predates all of them. Worth a look before the roster is tuned around
+anything else.
 
 ---
 

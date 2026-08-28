@@ -16,18 +16,30 @@ import { RNG } from '../core/rng.js';
 // paint, and at night that difference is most of what tells you which way a car
 // is facing before you are committed.
 
+// Sized against the cars they share a road with.
+//
+// The racers used to be invented, and 4.5 to 5.6 m of invented; they are taken
+// off real cars now and come out at 3.55 to 4.52. Traffic did not move, so a
+// civilian van stood half again as long as the machine you were driving and
+// two metres tall beside a car of 1.2 — which read, correctly, as the traffic
+// being from a different game. These are the real figures for what each one is
+// meant to be, so a hatchback is still bigger than a Peugeot 205 and a van is
+// still a van, by the margin those actually differ by.
 const BODIES = [
   // width, length, height, roof drop, colour
-  { w: 1.78, l: 4.30, h: 0.72, roof: 0.52, c: 0x9aa0a8 },   // hatchback
-  { w: 1.86, l: 4.85, h: 0.66, roof: 0.48, c: 0x6b7480 },   // saloon
-  { w: 1.92, l: 5.40, h: 0.96, roof: 0.74, c: 0xb8b2a4 },   // van
-  { w: 1.82, l: 4.55, h: 0.70, roof: 0.50, c: 0x7d5a4a },   // estate
+  { w: 1.76, l: 4.08, h: 0.62, roof: 0.50, c: 0x9aa0a8 },   // hatchback
+  { w: 1.82, l: 4.70, h: 0.60, roof: 0.48, c: 0x6b7480 },   // saloon
+  { w: 1.94, l: 5.05, h: 0.90, roof: 0.72, c: 0xb8b2a4 },   // van
+  { w: 1.79, l: 4.60, h: 0.62, roof: 0.50, c: 0x7d5a4a },   // estate
 ];
 
 function buildBody(spec, rng) {
   const { w, l, h, roof, c } = spec;
   const parts = [];
-  const rideH = 0.34;
+  // Where the bodywork starts above the road. A third of a metre is an
+  // off-roader's clearance and it had every civilian car standing on stilts;
+  // a saloon's floor is nearer sixteen centimetres.
+  const rideH = 0.16;
 
   parts.push(boxOf(w, h, l, c, { y: rideH + h / 2, rng, variation: 0.05 }));
   // Cabin, set back and narrower — the one shape difference that separates a

@@ -1276,7 +1276,16 @@ export const PROP_TYPES = {
   marker: { build: markerBoard, place: TRACKSIDE, radius: 0.35, toughness: 25, height: 2.2 },
 
   gantry: { build: gantry, place: SCENERY, radius: 0, toughness: null, height: 6.5, spanning: true },
-  grandstand: { build: grandstand, place: SCENERY, radius: 0, toughness: null, height: 6 },
+  // `footprint` is how much room a prop needs, which is not `radius`.
+  //
+  // `radius` is what a car collides against, and scenery has none — a building
+  // is not something you hit, it is something that is there. Placement was
+  // reading it anyway and so treated a twenty-five-metre building as a point
+  // with two metres of margin. On a circuit that folds back on itself, a
+  // building put sixty metres off one straight lands on another part of the
+  // lap, and thirteen metres of it ends up in the road. These are half-extents
+  // at the largest each generator builds.
+  grandstand: { build: grandstand, place: SCENERY, radius: 0, footprint: 13, toughness: null, height: 6 },
 
   wreck: { build: wreck, place: TRACKSIDE, radius: 1.6, toughness: 190, height: 1.2 },
   shack: { build: shack, place: SCENERY, radius: 2.4, toughness: null, height: 3 },
@@ -1370,8 +1379,8 @@ export const PROP_TYPES = {
     place: TRACKSIDE, radius: 1.4, toughness: null, height: 2.7, faceRoad: -1,
   },
 
-  building: { build: building, place: SCENERY, radius: 0, toughness: null, height: 40, horizon: true },
-  ridge: { build: ridge, place: SCENERY, radius: 0, toughness: null, height: 22, horizon: true },
+  building: { build: building, place: SCENERY, radius: 0, footprint: 17, toughness: null, height: 40, horizon: true },
+  ridge: { build: ridge, place: SCENERY, radius: 0, footprint: 25, toughness: null, height: 22, horizon: true },
 
   brazier: { build: brazier, place: TRACKSIDE, radius: 0.9, toughness: 90, height: 2.2, emissive: 0xff5a1e },
 };

@@ -105,13 +105,29 @@ export function generateProps(rng, track, biome, opts = {}) {
     const def = PROP_TYPES[type];
     if (!def) return;
     const p = track.path.offsetPoint(s, lateral, { x: 0, y: 0, z: 0 });
+    const scale = extra.scale ?? (1 + rng.spread(0.22));
     // Spanning structures are built to stand over the road on purpose.
     if (!def.spanning) {
-      const clearance = extra.clearance ?? (def.frontage ? 0.5 : 2.0);
+      // A prop is not a point.
+      //
+      // This tested the origin against a flat two-metre margin, which is fine
+      // for a barrel and useless for anything larger than the margin: a
+      // building whose origin clears the kerb by two metres still puts the
+      // other four metres of building in the road, and that is exactly what was
+      // turning up in the middle of the street. The margin is the prop's own
+      // footprint now, so a bigger thing is held further out — and `scale` is
+      // drawn before the test rather than after it, so the size being checked
+      // is the size that gets built.
+      //
+      // Frontages are the exception and stay on a small fixed margin: they are
+      // placed deliberately at the kerb with their face to the road, and their
+      // bulk extends away from it, so their radius is not a reach into the
+      // street.
+      const clearance = extra.clearance
+        ?? (def.frontage ? 0.5 : Math.max(2.0, (def.footprint ?? def.radius) * scale));
       if (landsOnRoad(p.x, p.z, clearance)) return;
     }
     const off = Math.abs(lateral) - track.halfWidthAt(s);
-    const scale = extra.scale ?? (1 + rng.spread(0.22));
 
     // Which way an aligned prop faces.
     //

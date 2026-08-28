@@ -875,10 +875,19 @@ export class RaceSim {
         const total = ma + mb;
 
         // Separate in proportion to mass: the lighter car gives way.
-        ab.x -= nx * depth * (mb / total);
-        ab.z -= nz * depth * (mb / total);
-        bb.x += nx * depth * (ma / total);
-        bb.z += nz * depth * (ma / total);
+        //
+        // Clamped, for the same reason the barrier push is. When the frame rate
+        // drops the loop takes several sim steps between drawn frames, and at
+        // fifty metres a second a car covers most of its own length inside one
+        // of them — so two of them can arrive already deeply inside each other
+        // rather than just touching. Undoing that in one go teleports both,
+        // which reads far worse than the overlap it fixes. Half a metre a step
+        // has them apart within a few steps and never jumps.
+        const sep = Math.min(depth, 0.5);
+        ab.x -= nx * sep * (mb / total);
+        ab.z -= nz * sep * (mb / total);
+        bb.x += nx * sep * (ma / total);
+        bb.z += nz * sep * (ma / total);
 
         // Lever arms from each centre of mass to where the cars are touching.
         const rax = px - ab.x;
