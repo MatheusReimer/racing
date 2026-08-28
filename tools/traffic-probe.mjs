@@ -247,6 +247,55 @@ for (const biome of BIOMES) {
   }
 }
 
+// --- and you cannot drive through it ---------------------------------------
+//
+// The hit cooldown used to skip the entire contact rather than only what it
+// cost, so for eight tenths of a second after touching one car you passed clean
+// through the next. Traffic arrives in groups, so that was most of the time
+// anyone spent in it, and it is exactly what "sometimes I go straight through
+// them" was. Two cars in a row is the case that failed.
+{
+  const { stepTraffic } = await import('../src/race/traffic.js');
+  const racer = {
+    alive: true, finished: false, halfWidth: 0.95, _trafficCd: 0,
+    body: {
+      x: 0, z: 0, vx: 0, vz: 45, yawRate: 0, speed: 45,
+      gripPenalty: 1, gripPenaltyTimer: 0, jolt() {},
+    },
+    awardNearMiss() {},
+  };
+  // Two civilians dead ahead, one right behind the other.
+  // `stepTraffic` derives x and z from `s`, so that is what a car is placed by.
+  const mk = (z) => ({ alive: true, s: z, x: 0, y: 0, z, yaw: 0, dir: 1, speed: 20,
+    lane: 0, lateralPush: 0, _missCd: 0 });
+  const cars = [mk(30), mk(38)];
+  racer.body.z = 0;
+  const track = { length: 1000, halfWidthAt: () => 10, path: {
+    offsetPoint: (s, l, o) => { o.x = l; o.y = 0; o.z = s; return o; },
+    yawAt: () => 0,
+  } };
+
+  let deepest = 0;
+  for (let i = 0; i < 400; i++) {
+    stepTraffic(cars, track, [racer], DT, {});
+    racer.body.z += racer.body.vz * DT;
+    for (const c of cars) {
+      const d = Math.hypot(racer.body.x - c.x, racer.body.z - c.z);
+      deepest = Math.max(deepest, (2.6 + racer.halfWidth) - d);
+    }
+  }
+  // A metre and a bit. At forty-five metres a second a car covers three
+  // quarters of a metre between steps, so it is always slightly inside a
+  // civilian before anything can push it out — that is discrete time, not a
+  // fault. Driving *through* one looks completely different: with the contact
+  // being skipped this measured 3.52 m, which is the whole hit radius, and with
+  // it fixed it measures 0.63.
+  const bad = deepest > 1.2;
+  if (bad) problems++;
+  console.log(`\n  two civilians in a row, driven into at 45 m/s`.padEnd(50)
+    + `deepest ${deepest.toFixed(2)} m inside  ${bad ? 'FAIL — drove through one' : 'ok'}`);
+}
+
 console.log('');
 if (problems) {
   console.log(`${problems} problem(s) with traffic`);

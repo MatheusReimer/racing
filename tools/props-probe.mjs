@@ -91,11 +91,30 @@ for (const [name, def] of Object.entries(PROP_TYPES)) {
     let count = 0;
     for (const p of props) {
       const def = PROP_TYPES[p.type];
-      const reach = def?.footprint ?? p.radius;
-      if (def?.spanning || def?.frontage || !reach) continue;
-      const sm = track.sample(p.x, p.z, scratch);
-      if (sm.halfWidth == null) continue;
-      const into = (sm.halfWidth + reach * (p.scale ?? 1)) - Math.abs(sm.side);
+      if (def?.spanning) continue;
+      let into = -Infinity;
+      if (def?.frontage) {
+        // A frontage stands at the kerb on purpose, so what matters is the
+        // thirty metres of block behind it — which on a folded circuit can be
+        // the next straight over. Swept rather than sampled at a point.
+        const c = Math.cos(p.yaw);
+        const sn = Math.sin(p.yaw);
+        for (let u = 0.1; u <= 1.0; u += 0.15) {
+          for (let v = -0.5; v <= 0.5; v += 0.25) {
+            const lx = u * def.frontage.depth * (p.scale ?? 1);
+            const lz = v * def.frontage.width * (p.scale ?? 1);
+            const sm = track.sample(p.x + c * lx + sn * lz, p.z - sn * lx + c * lz, scratch);
+            if (sm.halfWidth == null) continue;
+            into = Math.max(into, sm.halfWidth - Math.abs(sm.side));
+          }
+        }
+      } else {
+        const reach = def?.footprint ?? p.radius;
+        if (!reach) continue;
+        const sm = track.sample(p.x, p.z, scratch);
+        if (sm.halfWidth == null) continue;
+        into = (sm.halfWidth + reach * (p.scale ?? 1)) - Math.abs(sm.side);
+      }
       if (into > 0) {
         count++;
         if (into > worst) { worst = into; offender = p.type; }

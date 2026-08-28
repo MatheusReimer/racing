@@ -124,6 +124,8 @@ export class Race extends RaceSim {
         energyFrac: racer.energyFrac,
         boosting: racer.body.boostTimer > 0,
         steer: racer.input.steer,
+        // The brake lights need to know, and nothing else was telling them.
+        brake: racer.input.brake,
       });
     }
 

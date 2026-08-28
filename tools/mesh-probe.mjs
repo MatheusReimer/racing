@@ -168,6 +168,43 @@ for (const c of cases) {
   }
 }
 
+// --- and each of them has lamps that say something -------------------------
+//
+// A car with no brake light is worse than one with an approximate light: it is
+// the single thing the driver behind you reads. Only three of seven references
+// mark their lamps — the MX-5's headlights are pop-ups and the model has them
+// shut, and several name every material `Material.005` — so the rest are placed
+// from the car's own shape, and this is what says whether that happened.
+{
+  console.log('');
+  for (const c of cases) {
+    const m = new VehicleMesh(visualProfile(c.build.stats.all(), c.build.tags, c.def),
+      { shadows: false });
+    const f = m.lampFront?.geometry.attributes.position.count ?? 0;
+    const r = m.lampRear?.geometry.attributes.position.count ?? 0;
+
+    // And that the rear pair actually changes with what the car is doing.
+    const drive = (over) => {
+      m.update(0.016, {
+        x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, bodyPitch: 0, terrainPitch: 0,
+        slipAngle: 0, drifting: false, driftQuality: 0, forwardSpeed: 20, ...over,
+      }, over.state ?? {});
+      return m.lampRearMat.color.getHex();
+    };
+    const cruise = drive({});
+    const braking = drive({ state: { brake: 1 } });
+    const reversing = drive({ forwardSpeed: -3 });
+
+    const bad = f === 0 || r === 0 || cruise === braking || braking === reversing;
+    if (bad) problems++;
+    console.log(`  ${c.label.padEnd(13)} lamps ${String(f / 3).padStart(5)} front `
+      + `${String(r / 3).padStart(5)} rear   `
+      + `cruise/brake/reverse ${[cruise, braking, reversing].map((h) => h.toString(16).padStart(6, '0')).join(' ')}  `
+      + (bad ? 'FAIL' : 'ok'));
+    m.dispose();
+  }
+}
+
 console.log('');
 if (problems) {
   console.log(`${problems} mesh piece(s) are not closed and consistently wound —`);

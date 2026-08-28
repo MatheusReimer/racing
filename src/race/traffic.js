@@ -124,8 +124,16 @@ export function stepTraffic(cars, track, racers, dt, hooks = {}) {
 
       const hitR = HIT_RADIUS + (r.halfWidth ?? 1.0);
       if (d2 < hitR * hitR) {
-        if ((r._trafficCd ?? 0) > 0) continue;
-        r._trafficCd = HIT_COOLDOWN;
+        // The cooldown limits what a hit *costs*, never whether it happens.
+        //
+        // It used to skip the whole contact, which meant that for eight tenths
+        // of a second after touching one car you passed clean through the next
+        // — and traffic comes in groups, so this was most of the time you spent
+        // in it. Two solid objects have to stop being in the same place whatever
+        // the damage bookkeeping thinks, so the push-out and the speed the
+        // contact scrubs happen every step of every contact; only the damage,
+        // the grip penalty and the noise are rate-limited.
+        const billable = (r._trafficCd ?? 0) <= 0;
 
         // Closing speed along the line between them is what hurts. A car
         // drifting into traffic at the same speed should barely register;
@@ -141,17 +149,27 @@ export function stepTraffic(cars, track, racers, dt, hooks = {}) {
         // corner and often the place.
         b.x += nx * (hitR - d);
         b.z += nz * (hitR - d);
-        const keep = clamp01(1 - closing / 55) * 0.55 + 0.20;
-        b.vx *= keep;
-        b.vz *= keep;
-        b.yawRate *= 0.35;
-        b.gripPenalty = Math.min(b.gripPenalty, 0.55);
-        b.gripPenaltyTimer = Math.max(b.gripPenaltyTimer, 0.5);
-
-        car.lateralPush += -nx * 0 + Math.sign(-(car.lane)) * 0.6;
-        car.speed *= 0.6;
-
-        hooks.onHit?.(r, car, closing);
+        if (billable) {
+          r._trafficCd = HIT_COOLDOWN;
+          const keep = clamp01(1 - closing / 55) * 0.55 + 0.20;
+          b.vx *= keep;
+          b.vz *= keep;
+          b.yawRate *= 0.35;
+          b.gripPenalty = Math.min(b.gripPenalty, 0.55);
+          b.gripPenaltyTimer = Math.max(b.gripPenaltyTimer, 0.5);
+          car.speed *= 0.6;
+          hooks.onHit?.(r, car, closing);
+        } else if (closing > 0) {
+          // Still in contact, still being slowed by it — just not billed twice.
+          // Without this, leaning on a car after the first frame of the hit is
+          // free, and traffic becomes something to lie against rather than
+          // something to avoid.
+          const scrub = Math.exp(-2.5 * dt);
+          b.vx *= scrub;
+          b.vz *= scrub;
+        }
+        b.jolt?.(-nx * closing * 0.5, -nz * closing * 0.5);
+        car.lateralPush += Math.sign(-(car.lane)) * 0.6;
         continue;
       }
 

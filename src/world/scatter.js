@@ -106,6 +106,23 @@ export function generateProps(rng, track, biome, opts = {}) {
     if (!def) return;
     const p = track.path.offsetPoint(s, lateral, { x: 0, y: 0, z: 0 });
     const scale = extra.scale ?? (1 + rng.spread(0.22));
+    // Which way an aligned prop faces.
+    //
+    // `alignToTrack` gives a prop the road's yaw, and that rotation always maps
+    // its local +X onto the *positive lateral* direction — which is toward the
+    // road on one side of it and away on the other. Anything with a front, a
+    // boom or a lit face therefore came out backwards on half the circuit: half
+    // the street lamps hung their heads over the block behind them, and forty
+    // per cent of the frontages put their shopfront, their canopy and their lit
+    // windows in the alley. A type declares which local X sign is its front and
+    // gets turned to face the road when it lands on the wrong side.
+    let yaw = extra.alignToTrack
+      ? track.path.yawAt(s) + rng.spread(0.25)
+      : rng.range(0, TAU);
+    if (extra.alignToTrack && def.faceRoad && def.faceRoad * Math.sign(lateral) > 0) {
+      yaw += Math.PI;
+    }
+
     // Spanning structures are built to stand over the road on purpose.
     if (!def.spanning) {
       // A prop is not a point.
@@ -126,25 +143,24 @@ export function generateProps(rng, track, biome, opts = {}) {
       const clearance = extra.clearance
         ?? (def.frontage ? 0.5 : Math.max(2.0, (def.footprint ?? def.radius) * scale));
       if (landsOnRoad(p.x, p.z, clearance)) return;
+
+      // A frontage is thirty metres deep, and all of that is behind it.
+      //
+      // Its origin sits at the kerb by design, so it cannot be held out by a
+      // margin the way loose scenery is — but the block it fills has to land
+      // somewhere, and on a circuit that folds back on itself "into the block"
+      // can be "onto the next straight". Checking along its depth costs a few
+      // samples and catches the one that was standing in a downtown street.
+      if (def.frontage) {
+        const depth = def.frontage.depth * scale;
+        const ux = Math.cos(yaw);
+        const uz = -Math.sin(yaw);
+        for (let u = 0.25; u <= 1.0; u += 0.25) {
+          if (landsOnRoad(p.x + ux * depth * u, p.z + uz * depth * u, 1.0)) return;
+        }
+      }
     }
     const off = Math.abs(lateral) - track.halfWidthAt(s);
-
-    // Which way an aligned prop faces.
-    //
-    // `alignToTrack` gives a prop the road's yaw, and that rotation always maps
-    // its local +X onto the *positive lateral* direction — which is toward the
-    // road on one side of it and away on the other. Anything with a front, a
-    // boom or a lit face therefore came out backwards on half the circuit: half
-    // the street lamps hung their heads over the block behind them, and forty
-    // per cent of the frontages put their shopfront, their canopy and their lit
-    // windows in the alley. A type declares which local X sign is its front and
-    // gets turned to face the road when it lands on the wrong side.
-    let yaw = extra.alignToTrack
-      ? track.path.yawAt(s) + rng.spread(0.25)
-      : rng.range(0, TAU);
-    if (extra.alignToTrack && def.faceRoad && def.faceRoad * Math.sign(lateral) > 0) {
-      yaw += Math.PI;
-    }
 
     props.push({
       type,

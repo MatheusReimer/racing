@@ -213,6 +213,72 @@ function loft(sections, color, opts = {}) {
 const HULL_GLASS = 0x0d1520;
 const HULL_DARK = 0x15181c;
 const HULL_CHROME = 0xb9bec6;
+// Lamp colours. Headlights are warm rather than white — a cold headlight reads
+// as a highlight on paint, and the whole point of these is that they do not.
+const LAMP_HEAD = 0xfff0cc;
+const LAMP_TAIL = 0x5a0f0a;      // running: present, not shouting
+const LAMP_BRAKE = 0xff2a18;
+const LAMP_REVERSE = 0xeef2ff;
+
+/**
+ * Lamps for a car whose reference never said where its lamps were.
+ *
+ * Four of the seven references do not mark them: the MX-5's headlights are
+ * pop-ups and the model has them shut, and the others simply name every
+ * material `Material.005`. A car with no brake light is worse than a car with
+ * an approximate one — it is the single thing the driver behind you reads — so
+ * where the reference is silent a pair is placed from the car's own shape.
+ *
+ * The patch is put where a lamp goes: outboard, in the band between a third and
+ * two thirds of the way up that end, and pushed to whatever depth the bodywork
+ * actually reaches across that patch rather than to the tip of the nose, which
+ * on a curved front would leave it hanging in the air off the corners.
+ */
+function synthLamps(hull, sx, sy, sz, atFront) {
+  const { positions } = hull;
+  const sign = atFront ? 1 : -1;
+  const endZ = sign * hull.length * 0.5;
+  const band = hull.length * 0.14;
+
+  let x1 = 0;
+  let y0 = Infinity;
+  let y1 = -Infinity;
+  for (let i = 0; i < positions.length; i += 3) {
+    if (Math.abs(positions[i + 2] - endZ) > band) continue;
+    x1 = Math.max(x1, Math.abs(positions[i]));
+    y0 = Math.min(y0, positions[i + 1]);
+    y1 = Math.max(y1, positions[i + 1]);
+  }
+  if (!Number.isFinite(y0) || x1 <= 0) return null;
+
+  const loY = y0 + (y1 - y0) * 0.34;
+  const hiY = y0 + (y1 - y0) * 0.58;
+  const inX = x1 * 0.40;
+  const outX = x1 * 0.86;
+
+  const out = [];
+  for (const side of [-1, 1]) {
+    // How far forward the bodywork reaches across this patch.
+    let depth = -Infinity;
+    for (let i = 0; i < positions.length; i += 3) {
+      const px = positions[i] * side;
+      const py = positions[i + 1];
+      if (px < inX || px > outX || py < loY || py > hiY) continue;
+      const pz = positions[i + 2] * sign;
+      if (pz > depth) depth = pz;
+    }
+    if (!Number.isFinite(depth)) continue;
+    const z = (depth - 0.01) * sign;
+    const a = [side * inX, loY, z];
+    const b = [side * outX, loY, z];
+    const c = [side * outX, hiY, z];
+    const d = [side * inX, hiY, z];
+    // Wound so the lamp faces out of the end it is on.
+    const quad = (side * sign > 0) ? [a, b, c, a, c, d] : [a, c, b, a, d, c];
+    for (const q of quad) out.push(q[0] * sx, (q[1] - hull.ground) * sy, q[2] * sz);
+  }
+  return out.length ? out : null;
+}
 
 /**
  * Build a car from a body decimated off a real one by tools/decimate.mjs.
@@ -239,25 +305,47 @@ function hullGeometry(hull, L, W, color, accent) {
   const byClass = [color, HULL_GLASS, HULL_DARK, HULL_CHROME, accent ?? 0xfff2d0]
     .map((c) => new THREE.Color(c));
 
-  const pos = new Float32Array(n * 9);
-  const col = new Float32Array(n * 9);
+  // Lamps come out into their own meshes.
+  //
+  // A headlight that is shaded like paint is not a headlight, it is a pale
+  // patch — the thing that makes it read as a lamp is that it does not care
+  // about the scene's lighting. And they have to be separable front from rear,
+  // because a brake light and a headlight do different things at different
+  // times, and the class the reference gave us says "lamp" without saying
+  // which. Their position does: the ones ahead of the middle face forward.
+  const CENTRE_BIAS = 0.02;
+  const body = [];
+  const bodyCol = [];
+  const front = [];
+  const rear = [];
+
   for (let t = 0; t < n; t++) {
-    const c = byClass[classes[t]] ?? byClass[0];
-    for (let k = 0; k < 3; k++) {
-      const v = indices[t * 3 + k] * 3;
-      const o = t * 9 + k * 3;
-      pos[o] = positions[v] * sx;
-      pos[o + 1] = (positions[v + 1] - hull.ground) * sy;
-      pos[o + 2] = positions[v + 2] * sz;
-      col[o] = c.r; col[o + 1] = c.g; col[o + 2] = c.b;
+    const cls = classes[t];
+    const p0 = indices[t * 3] * 3;
+    const p1 = indices[t * 3 + 1] * 3;
+    const p2 = indices[t * 3 + 2] * 3;
+    const midZ = (positions[p0 + 2] + positions[p1 + 2] + positions[p2 + 2]) / 3;
+    const dst = cls === 4 ? (midZ > hull.length * CENTRE_BIAS ? front : rear) : body;
+    const c = byClass[cls] ?? byClass[0];
+    for (const v of [p0, p1, p2]) {
+      dst.push(positions[v] * sx, (positions[v + 1] - hull.ground) * sy, positions[v + 2] * sz);
+      if (dst === body) bodyCol.push(c.r, c.g, c.b);
     }
   }
 
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  geo.computeVertexNormals();
-  return geo;
+  const make = (arr, colours) => {
+    if (!arr.length) return null;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(arr), 3));
+    if (colours) g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colours), 3));
+    g.computeVertexNormals();
+    return g;
+  };
+  // Where the reference marked too few faces to be a lamp, make a pair.
+  const MIN_FACES = 24;
+  const frontGeo = front.length / 9 >= MIN_FACES ? front : synthLamps(hull, sx, sy, sz, true);
+  const rearGeo = rear.length / 9 >= MIN_FACES ? rear : synthLamps(hull, sx, sy, sz, false);
+  return { body: make(body, bodyCol), lampFront: make(frontGeo), lampRear: make(rearGeo) };
 }
 
 function mergeGeometries(list) {
@@ -1082,11 +1170,14 @@ export class VehicleMesh {
     // triangles that are built and dropped once per car, at mesh build, and
     // keeps the two paths from tangling. The generated route is still the one
     // any body type without a reference takes.
+    let hullLampGeo = null;
     if (hull) {
       opaque.length = 0;
       glass.length = 0;
       emissive.length = 0;
-      opaque.push(hullGeometry(hull, L, W, body, accent));
+      const built = hullGeometry(hull, L, W, body, accent);
+      opaque.push(built.body);
+      hullLampGeo = built;
     }
 
     this.bodyGeo = mergeGeometries(opaque);
@@ -1149,6 +1240,26 @@ export class VehicleMesh {
     // legitimately be empty — `mergeGeometries` answers null for an empty list.
     this.trimMesh = this.trimGeo ? new THREE.Mesh(this.trimGeo, this.trimMat) : null;
     if (this.trimMesh) this.chassis.add(this.trimMesh);
+
+    // --- lamps --------------------------------------------------------------
+    //
+    // Unlit, so they are light rather than a pale patch, and separate front from
+    // rear so they can say different things. Headlights burn steadily; the rear
+    // pair is a dim running red that goes hard red under braking and white in
+    // reverse. One reference in seven marks its reversing lamps apart from its
+    // tail lights, so both come off the same faces and the colour carries the
+    // meaning — which is what a driver behind you reads anyway.
+    this.lampFrontMat = new THREE.MeshBasicMaterial({ color: LAMP_HEAD, toneMapped: false });
+    this.lampRearMat = new THREE.MeshBasicMaterial({ color: LAMP_TAIL, toneMapped: false });
+    this.lampFront = hullLampGeo?.lampFront
+      ? new THREE.Mesh(hullLampGeo.lampFront, this.lampFrontMat) : null;
+    this.lampRear = hullLampGeo?.lampRear
+      ? new THREE.Mesh(hullLampGeo.lampRear, this.lampRearMat) : null;
+    for (const m of [this.lampFront, this.lampRear]) {
+      if (!m) continue;
+      m.geometry.translate(0, -wheelR, 0);
+      this.chassis.add(m);
+    }
 
     // --- wheels -------------------------------------------------------------
     this.wheels = [];
@@ -1332,6 +1443,16 @@ export class VehicleMesh {
       w.pivot.rotation.y = w.steered ? steerAngle : 0;
     }
 
+    // Lamps. What the car behind you can read: dim red always, hard red the
+    // instant you touch the brake, white when you are backing up.
+    if (this.lampRear) {
+      const reversing = body.forwardSpeed < -0.4;
+      const braking = !reversing && (state.brake ?? 0) > 0.05;
+      this.lampRearMat.color.setHex(
+        reversing ? LAMP_REVERSE : (braking ? LAMP_BRAKE : LAMP_TAIL),
+      );
+    }
+
     // Heat drives the trim toward white-hot; a cool car sits at its element's
     // colour. This is the "you can see the build" feedback loop.
     const heat = clamp01((state.heatPct ?? 0) / 100);
@@ -1350,6 +1471,10 @@ export class VehicleMesh {
   }
 
   dispose() {
+    this.lampFront?.geometry.dispose();
+    this.lampRear?.geometry.dispose();
+    this.lampFrontMat?.dispose();
+    this.lampRearMat?.dispose();
     for (const geo of [this.bodyGeo, this.glassGeo, this.trimGeo,
       this.wheelGeo, this.treadGeo, this.hubGeo, this.underglow.geometry]) {
       geo?.dispose();
