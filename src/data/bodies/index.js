@@ -37,7 +37,7 @@ export function parseHull(buf) {
   const dv = new DataView(buf);
   if (dv.getUint32(0, true) !== MAGIC) throw new Error('not a body file');
   const version = dv.getUint32(4, true);
-  if (version !== 1) throw new Error(`body file version ${version} is not readable here`);
+  if (version !== 2) throw new Error(`body file version ${version} is not readable here`);
   const nv = dv.getUint32(8, true);
   const nt = dv.getUint32(12, true);
   const radius = dv.getFloat32(32, true);
@@ -58,6 +58,9 @@ export function parseHull(buf) {
       width: dv.getFloat32(36, true),
       front: dv.getFloat32(40, true),
       rear: dv.getFloat32(44, true),
+      // Centre to centre. Not derivable from the hull's width, which includes
+      // the mirrors — take it from there and the wheels sit outside the arches.
+      track: dv.getFloat32(48, true),
     } : null,
   };
 }

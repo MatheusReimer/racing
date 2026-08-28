@@ -5,42 +5,25 @@ and what it will touch, so picking one up does not start from scratch.
 
 ---
 
-## Physics: crash impacts
+## A five-second frame, and a car that wins 87% of the time
 
-Impacts do not read as impacts — contact behaves like a scripted nudge rather
-than like the real thing. This is what is left of a group of three faults
-reported from play; the other two are done and are described below, because what
-was wrong with them says something about where to look for this one.
+Two faults found by probes while working on something else, neither caused by
+it, both left alone rather than fixed badly in passing.
 
-**Wheels on the road — fixed.** The car used to hover above the surface or sink
-into it in most situations. The physics was innocent: it holds `y` exactly at the
-ground. Two pieces of geometry were at fault. Pitch and roll were applied to the
-whole car about the group's origin, which sits on the tarmac, so five degrees of
-pitch swung the front wheels ten centimetres; the body now turns on a child node
-at the axle line and the wheels are not its children, so no attitude can lift
-them. And the axle sat at the tyre's nominal radius while the tread blocks stand
-proud of it, burying twenty-seven millimetres of every tyre in the road on every
-car, permanently; the axle sits at the measured lowest point of the wheel now.
+**`tools/realtime-probe.mjs` fails at every tier.** p50 frame time is a healthy
+3–7 ms, but p99 is four to five *seconds*: something stalls hard rather than
+rendering slowly. The shape points at mesh construction when cars spawn, and
+`VehicleMesh` is a candidate by construction — for a body with a hull it builds
+the whole generated car, ten thousand triangles of boxes and lofts, and then
+throws it away and uses the hull instead. That was a deliberate trade when the
+alternative was threading a condition through four hundred lines; if this is the
+stall, the trade has come due. Measured at three thousand triangles per car and
+at fifty thousand: 0.24x and 0.25x real time. So it is not the body budget, and
+it predates all of that work.
 
-**Squat and dive — fixed.** Accelerating lifted the car. `pitch` summed two
-different motions into one angle: lying along the road's slope, which has to turn
-the tyres too, and squatting on the springs, which must not. Whichever the
-renderer assumed, the other was wrong. They are `terrainPitch` and `bodyPitch`
-now and go to different nodes. The travel was also unreal — ±0.12 rad of dive put
-the nose of a four-metre car twenty centimetres under the tarmac, and roll of
-±0.30 was a boat. Two degrees and three and a half, chosen against the cars: the
-bodies carry real ride heights, about a hundred millimetres of sill clearance.
-
-`tools/contact-probe.mjs` measures all of it and runs in `npm run probe`. Both
-faults were invisible in a still frame and neither was catchable by any probe
-that existed, because all three physics probes ask about forces and none of them
-asked where the tyre was.
-
-For crashes, the same suspicion is worth carrying in: the three probes that pass
-today do not test what impacts feel like either. `src/vehicle/physics.js` has
-`applyImpulse`, which changes velocity and nothing else — no rotation, no
-attitude, no energy going anywhere. Whatever is built should come with the probe
-that would have caught it.
+**`tools/balance.mjs` reports the Kanzen 1.6 winning 87% of races.** Also
+predates the bodies, the scale change and the collision rewrite — checked
+against each. Worth a look before the roster is tuned around anything else.
 
 ---
 

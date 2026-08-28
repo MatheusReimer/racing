@@ -3,7 +3,7 @@ import { Racer } from './racer.js';
 import { Driver, ARCHETYPES } from '../ai/driver.js';
 import { RNG } from '../core/rng.js';
 import { Build } from '../build/build.js';
-import { clamp01, angleDelta, wrapAngle } from '../core/math.js';
+import { clamp, clamp01, angleDelta, wrapAngle } from '../core/math.js';
 import { CombatSystem } from '../combat/combat.js';
 import { generateProps, collidableProps } from '../world/scatter.js';
 import { generateTraffic, stepTraffic } from './traffic.js';
@@ -54,9 +54,121 @@ const STUCK_MIN_PROGRESS = 15;
 // gets back on the road. Nine unbroken seconds off the racing surface is not
 // ambiguous at any speed.
 const OFF_TRACK_RESCUE_TIME = 9;
-const CAR_RADIUS_PAD = 0.15;
+// Bounce and scrub between two cars. Sheet metal is not springy: most of a
+// crash goes into deforming it, which is why 0.28 rather than anything near 1.
+const CAR_RESTITUTION = 0.28;
+// How much of the normal impulse friction across the contact can spend. This is
+// what turns a sideswipe from a clean bounce into two cars dragging along each
+// other, and it is where the rotation in a door-to-door fight comes from.
+const CAR_FRICTION = 0.5;
 const RAM_CONTACT_COOLDOWN = 0.4;
 const BARRIER_CONTACT_COOLDOWN = 0.35;
+
+/**
+ * A car's resistance to being spun, kg·m², as a rectangular slab.
+ *
+ * The bodies carry their real dimensions now, so this is the real figure rather
+ * than a tuning constant — which matters, because it is the whole reason a long
+ * car and a short one of the same weight do not react to the same shunt the
+ * same way.
+ */
+export function yawInertia(racer) {
+  const L = racer.halfLength * 2;
+  const W = racer.halfWidth * 2;
+  return Math.max(1, (racer.body.p.mass * (L * L + W * W)) / 12);
+}
+
+/** The corner of a car furthest along `ux, uz`. */
+function support(r, ux, uz) {
+  const b = r.body;
+  const fx = b.forwardX;
+  const fz = b.forwardZ;
+  const sx = -fz;
+  const sz = fx;
+  const sf = (fx * ux + fz * uz) >= 0 ? 1 : -1;
+  const ss = (sx * ux + sz * uz) >= 0 ? 1 : -1;
+  return [
+    b.x + fx * r.halfLength * sf + sx * r.halfWidth * ss,
+    b.z + fz * r.halfLength * sf + sz * r.halfWidth * ss,
+  ];
+}
+
+/**
+ * Where and how deeply two cars overlap, as rectangles.
+ *
+ * Separating-axis: two rectangles miss each other if and only if one of their
+ * four edge directions separates them, so testing those four both answers
+ * whether they touch and, when they do, hands back the shallowest direction —
+ * which is the one a real contact would push along.
+ *
+ * The contact point is the midpoint of the two cars' deepest corners into each
+ * other. It is an approximation of a contact patch that is really a short line,
+ * but it is on the right side of the car and the right distance off centre,
+ * which is all the impulse needs to know to decide how much of the blow becomes
+ * spin.
+ */
+export function obbContact(a, b) {
+  const ax = a.body.forwardX;
+  const az = a.body.forwardZ;
+  const bx = b.body.forwardX;
+  const bz = b.body.forwardZ;
+  const axes = [[ax, az], [-az, ax], [bx, bz], [-bz, bx]];
+
+  const dx = b.body.x - a.body.x;
+  const dz = b.body.z - a.body.z;
+
+  let best = Infinity;
+  let nx = 0;
+  let nz = 0;
+  for (const [ux, uz] of axes) {
+    const ra = a.halfLength * Math.abs(ax * ux + az * uz)
+      + a.halfWidth * Math.abs(-az * ux + ax * uz);
+    const rb = b.halfLength * Math.abs(bx * ux + bz * uz)
+      + b.halfWidth * Math.abs(-bz * ux + bx * uz);
+    const dist = Math.abs(dx * ux + dz * uz);
+    const overlap = ra + rb - dist;
+    if (overlap <= 0) return null;          // this axis separates them
+    if (overlap < best) {
+      best = overlap;
+      // Point the normal from a toward b, so the sign of every impulse below
+      // follows from the order the pair was taken in.
+      const sign = (dx * ux + dz * uz) < 0 ? -1 : 1;
+      nx = ux * sign;
+      nz = uz * sign;
+    }
+  }
+
+  // Where along the contact the cars actually meet.
+  //
+  // Taking a corner of each box and splitting the difference is wrong, and
+  // wrong in the way that matters: it puts every contact point half a car-width
+  // off the centre line, so a dead-square rear-ending spun the car in front at
+  // four radians a second. Two rectangles meeting face to face touch along a
+  // segment, and the blow lands in the middle of it. Projecting both boxes onto
+  // the contact tangent and taking the middle of the overlap gives that — zero
+  // for a square hit, offset for a clipped corner, which is exactly the
+  // distinction the impulse is being asked to make.
+  const tx = -nz;
+  const tz = nx;
+  const span = (r) => {
+    const fx = r.body.forwardX;
+    const fz = r.body.forwardZ;
+    const c = r.body.x * tx + r.body.z * tz;
+    const e = r.halfLength * Math.abs(fx * tx + fz * tz)
+      + r.halfWidth * Math.abs(-fz * tx + fx * tz);
+    return [c - e, c + e];
+  };
+  const [a0, a1] = span(a);
+  const [b0, b1] = span(b);
+  const tMid = (Math.max(a0, b0) + Math.min(a1, b1)) / 2;
+
+  // And how far along the normal: halfway between the two surfaces in contact.
+  const [pax, paz] = support(a, nx, nz);
+  const [pbx, pbz] = support(b, -nx, -nz);
+  const nMid = ((pax * nx + paz * nz) + (pbx * nx + pbz * nz)) / 2;
+
+  return { nx, nz, depth: best, px: nx * nMid + tx * tMid, pz: nz * nMid + tz * tMid };
+}
 
 /**
  * Default rival machine for an archetype: the vehicle whose identity matches
@@ -551,6 +663,8 @@ export class RaceSim {
           const ratio = clamp01(prop.toughness / Math.max(smash, 1));
           b.vx -= nx * closing * 0.22 * ratio;
           b.vz -= nz * closing * 0.22 * ratio;
+          // Going through still shakes the car — less than bouncing off it.
+          b.jolt(-nx * closing * 0.35 * ratio, -nz * closing * 0.35 * ratio);
           r.damage(prop.toughness * 0.020, { type: 'prop', prop: prop.type }, this);
           this.events?.emit('race:propSmashed', { prop, racer: r });
           this.onPropSmashed?.(prop, r, closing);
@@ -567,6 +681,7 @@ export class RaceSim {
           b.vz -= nz * closing * 1.35;
           b.gripPenalty = Math.min(b.gripPenalty, 0.6);
           b.gripPenaltyTimer = Math.max(b.gripPenaltyTimer, 0.35);
+          b.jolt(-nx * closing, -nz * closing);
           // Nudge the car sideways off the obstacle so repeatedly driving into
           // something unsmashable does not become a permanent stop.
           b.x += -nz * 0.12 * (Math.random() < 0.5 ? 1 : -1);
@@ -690,6 +805,8 @@ export class RaceSim {
       // there, which deletes a car for a mistake that only looked like a graze.
       if (approach > 6 && (r._barrierCd ?? 0) <= 0) {
         r._barrierCd = BARRIER_CONTACT_COOLDOWN;
+        // The wall is what threw the car, so the jolt comes from the wall.
+        b.jolt(nx * approach, nz * approach);
         const applied = r.damage((approach - 6) * 1.2, { type: 'barrier' }, this);
         b.gripPenalty = Math.min(b.gripPenalty, 0.6);
         b.gripPenaltyTimer = Math.max(b.gripPenaltyTimer, 0.3);
@@ -704,9 +821,21 @@ export class RaceSim {
   }
 
   /**
-   * Car on car. Equal and opposite impulses scaled by mass, plus damage that
-   * favours whoever carried more Impact into the contact — which is what makes
-   * ramming a build choice rather than a coin flip.
+   * Car on car, as two rectangles rather than two circles.
+   *
+   * Circles were wrong in both directions at once. A car is 4.3 m by 1.8 m and
+   * its bounding circle has a radius of about 1.3, so two cars running side by
+   * side bounced off each other with two thirds of a metre of clear air
+   * between them, while one tucked into another's slipstream drove a metre into
+   * its boot before anything noticed. Neither reads as contact, because neither
+   * happens where the contact is.
+   *
+   * With boxes the collision has a *place*, and that is what the response has
+   * been missing. An impulse through the centre of mass can only ever shove;
+   * clipping somebody's rear quarter and hitting them square in the back were
+   * the same event. Applied at the point it actually landed, the same blow
+   * splits into shove and spin according to how far off centre it was, which is
+   * the difference between a nudge and losing the car.
    */
   _resolveCars(dt) {
     const n = this.racers.length;
@@ -717,35 +846,78 @@ export class RaceSim {
         const b = this.racers[j];
         if (!b.alive) continue;
 
-        const dx = b.body.x - a.body.x;
-        const dz = b.body.z - a.body.z;
-        const rsum = (a.radius + b.radius) * (1 - CAR_RADIUS_PAD);
-        const d2 = dx * dx + dz * dz;
-        if (d2 > rsum * rsum || d2 < 1e-6) continue;
+        // Cheap circle test first: most pairs on the grid are nowhere near each
+        // other, and SAT on every pair every step is not worth paying for.
+        const dxc = b.body.x - a.body.x;
+        const dzc = b.body.z - a.body.z;
+        const reach = a.radius + b.radius;
+        if (dxc * dxc + dzc * dzc > reach * reach) continue;
 
-        const d = Math.sqrt(d2);
-        const nx = dx / d, nz = dz / d;
-        const overlap = rsum - d;
+        const hit = obbContact(a, b);
+        if (!hit) continue;
+        const { nx, nz, depth, px, pz } = hit;
 
-        const ma = a.body.p.mass, mb = b.body.p.mass;
+        const ab = a.body;
+        const bb = b.body;
+        const ma = ab.p.mass;
+        const mb = bb.p.mass;
         const total = ma + mb;
 
         // Separate in proportion to mass: the lighter car gives way.
-        a.body.x -= nx * overlap * (mb / total);
-        a.body.z -= nz * overlap * (mb / total);
-        b.body.x += nx * overlap * (ma / total);
-        b.body.z += nz * overlap * (ma / total);
+        ab.x -= nx * depth * (mb / total);
+        ab.z -= nz * depth * (mb / total);
+        bb.x += nx * depth * (ma / total);
+        bb.z += nz * depth * (ma / total);
 
-        const closing = (b.body.vx - a.body.vx) * nx + (b.body.vz - a.body.vz) * nz;
+        // Lever arms from each centre of mass to where the cars are touching.
+        const rax = px - ab.x;
+        const raz = pz - ab.z;
+        const rbx = px - bb.x;
+        const rbz = pz - bb.z;
+
+        const Ia = yawInertia(a);
+        const Ib = yawInertia(b);
+        const wa = ab.yawRate + ab.impactSpin;
+        const wb = bb.yawRate + bb.impactSpin;
+
+        // Velocity of the two cars *at the point they meet*, which is not their
+        // velocity: a rotating car's flank is moving even when its centre is not.
+        const vax = ab.vx - wa * raz;
+        const vaz = ab.vz + wa * rax;
+        const vbx = bb.vx - wb * rbz;
+        const vbz = bb.vz + wb * rbx;
+        const rvx = vbx - vax;
+        const rvz = vbz - vaz;
+
+        const closing = rvx * nx + rvz * nz;
         if (closing > 0) continue;   // already separating
 
-        const aSpeedBefore = Math.hypot(a.body.vx, a.body.vz);
-        const bSpeedBefore = Math.hypot(b.body.vx, b.body.vz);
-        const impulse = (-(1 + 0.28) * closing) / (1 / ma + 1 / mb);
-        a.body.vx -= (impulse * nx) / ma;
-        a.body.vz -= (impulse * nz) / ma;
-        b.body.vx += (impulse * nx) / mb;
-        b.body.vz += (impulse * nz) / mb;
+        const aSpeedBefore = Math.hypot(ab.vx, ab.vz);
+        const bSpeedBefore = Math.hypot(bb.vx, bb.vz);
+
+        // Rotation enters the denominator: a blow near the centre is resisted by
+        // the car's mass, one out at a corner also by its resistance to spin.
+        const ran = rax * nz - raz * nx;
+        const rbn = rbx * nz - rbz * nx;
+        const invMass = 1 / ma + 1 / mb + (ran * ran) / Ia + (rbn * rbn) / Ib;
+        const jn = (-(1 + CAR_RESTITUTION) * closing) / invMass;
+
+        ab.applyContactImpulse(-jn * nx, -jn * nz, rax, raz, Ia);
+        bb.applyContactImpulse(jn * nx, jn * nz, rbx, rbz, Ib);
+
+        // Friction across the contact. Without it a sideswipe is a clean bounce;
+        // with it the two cars drag along each other, which is what a sideswipe
+        // is and where the rotation in a door-to-door fight comes from.
+        const tx = -nz;
+        const tz = nx;
+        const vt = rvx * tx + rvz * tz;
+        const rat = rax * tz - raz * tx;
+        const rbt = rbx * tz - rbz * tx;
+        const invT = 1 / ma + 1 / mb + (rat * rat) / Ia + (rbt * rbt) / Ib;
+        const jt = clamp(-vt / invT, -jn * CAR_FRICTION, jn * CAR_FRICTION);
+        ab.applyContactImpulse(-jt * tx, -jt * tz, rax, raz, Ia);
+        bb.applyContactImpulse(jt * tx, jt * tz, rbx, rbz, Ib);
+
         this._applySpeedFloor(a, aSpeedBefore);
         this._applySpeedFloor(b, bSpeedBefore);
 

@@ -807,9 +807,16 @@ export class VehicleMesh {
     const wheelR = hw ? hw.radius * hs : lerp(0.44, 0.58, bulk);
     const wheelT = hw ? hw.width * hs : lerp(0.26, 0.42, bulk);
     const wheelbase = hw ? (hw.front - hw.rear) * hs * 0.5 : L * 0.33;
-    // Tuck the wheels under the body. Pushing the track wider than the
-    // bodywork makes them read as bolted on rather than fitted.
-    const trackW = W * 0.5 - wheelT * 0.30;
+    // Where the wheels sit across the car.
+    //
+    // Taken from the reference when there is one, because the car's own width
+    // cannot give it: a hull's width is measured over the mirrors and a wheel
+    // arch is nowhere near that far out. Deriving the track from `W` put every
+    // wheel outside the bodywork it belongs under — every car but the 205,
+    // which happened to be the one whose mirrors were excluded when it was cut.
+    const trackW = hull?.wheel?.track
+      ? (hull.wheel.track * 0.5) * (W / hull.width)
+      : W * 0.5 - wheelT * 0.30;
 
     // A single tight lip per wheel. Separate multi-segment arches read as black
     // clumps proud of the bodywork, and the loft already flares at the

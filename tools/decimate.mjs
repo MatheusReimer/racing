@@ -232,11 +232,14 @@ if (Wh.length) {
     if (Wh[i + 2] >= 0) { fS += Wh[i + 2]; fN++; } else { rS += Wh[i + 2]; rN++; }
     maxX = Math.max(maxX, Math.abs(Wh[i]));
   }
+  // Track is centre to centre, so it is the outer reach less half a tyre.
+  const halfTyre = maxX * 0.07;
   wheel = {
     radius: (wb.y1 - wb.y0) / 2,
-    width: maxX * 2 * 0.14,
+    width: halfTyre * 2,
     front: fN ? fS / fN : 1,
     rear: rN ? rS / rN : -1,
+    track: (maxX - halfTyre) * 2,
   };
 }
 const ov = (args.find((a) => a.startsWith('--wheel=')) ?? '').slice(8).split(',');
@@ -247,6 +250,7 @@ if (ov.length > 1) {
     width: pick(1, wheel?.width ?? 0.2),
     front: pick(2, wheel?.front ?? 1),
     rear: pick(3, wheel?.rear ?? -1),
+    track: pick(4, wheel?.track ?? 1.4),
   };
 }
 
@@ -261,7 +265,7 @@ const buf = new ArrayBuffer(HEADER + outPos.byteLength + outIndices.byteLength
   + Math.ceil(triOut / 4) * 4);
 const dv = new DataView(buf);
 dv.setUint32(0, 0x524c4852, true);         // 'RHLR'
-dv.setUint32(4, 1, true);                  // format version
+dv.setUint32(4, 2, true);                  // format version
 dv.setUint32(8, nv, true);
 dv.setUint32(12, triOut, true);
 const bodyBB = bounds(P);
@@ -273,6 +277,7 @@ dv.setFloat32(32, wheel?.radius ?? 0, true);
 dv.setFloat32(36, wheel?.width ?? 0, true);
 dv.setFloat32(40, wheel?.front ?? 0, true);
 dv.setFloat32(44, wheel?.rear ?? 0, true);
+dv.setFloat32(48, wheel?.track ?? 0, true);
 let off = HEADER;
 new Float32Array(buf, off, outPos.length).set(outPos); off += outPos.byteLength;
 new Uint32Array(buf, off, outIndices.length).set(outIndices); off += outIndices.byteLength;
@@ -287,6 +292,6 @@ console.log(`${basename(file)} -> public/bodies/${NAME}.bin`);
 console.log(`  ${triIn.toLocaleString()} tris in, ${triOut.toLocaleString()} out`
   + `${inside ? ` (${inside.toLocaleString()} interior dropped)` : ''}, error ${error.toExponential(1)}`);
 console.log(`  ${(bb.z1 - bb.z0).toFixed(2)} x ${(bodyBB.x1 - bodyBB.x0).toFixed(2)} x ${(bb.y1 - ground).toFixed(2)} m`
-  + (wheel ? `, wheels r=${wheel.radius.toFixed(3)}` : ', no wheels'));
+  + (wheel ? `, wheels r=${wheel.radius.toFixed(3)} on a ${wheel.track.toFixed(2)} m track` : ', no wheels'));
 console.log(`  paint ${n[0]}  glass ${n[1]}  dark ${n[2]}  chrome ${n[3]}  lamp ${n[4]}`
   + `  |  ${(buf.byteLength / 1048576).toFixed(2)} MB`);

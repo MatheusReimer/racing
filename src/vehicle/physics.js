@@ -28,6 +28,15 @@ const DRIFT_MIN_SPEED = 9;
 const DRIFT_GRIP_CUT = 0.22;
 
 const GRAVITY = 24;
+
+// How fast a collision's rotation bleeds away. Around a second and a half to
+// settle, which is long enough that being spun is a thing that happened to you
+// and short enough that it is not the end of the race.
+const IMPACT_SPIN_DECAY = 2.4;
+// The jolt spring, in radians per second. Fast: a car body settles after a hit
+// in a couple of tenths, not in a lazy wallow.
+const JOLT_FREQ = 22;
+
 // How far the wheels may sit from the surface and still count as touching it.
 // Wheels are ~0.5 m across, so a few centimetres of gap over a crest or a rut
 // is contact, not flight.
@@ -72,6 +81,28 @@ export class VehicleBody {
     this.vz = 0;
     this.vy = 0;
     this.yawRate = 0;
+    this.impactSpin = 0;
+    this.joltPitch = 0;
+    this.joltPitchVel = 0;
+    this.joltRoll = 0;
+    this.joltRollVel = 0;
+
+    // Rotation a collision put on the car, kept apart from `yawRate`.
+    //
+    // `yawRate` is damped toward what the steering asks for every single step,
+    // which is what makes the car obedient — and what would erase a spin the
+    // frame after it started. A car that has been hit on the corner is not
+    // steering, it is rotating, so that rotation is integrated alongside and
+    // bleeds off on its own.
+    this.impactSpin = 0;
+
+    // Where the body is thrown by a hit, as a spring that returns to rest.
+    // Purely what you see, but it is most of what makes contact read as
+    // contact rather than as a change of number.
+    this.joltPitch = 0;
+    this.joltPitchVel = 0;
+    this.joltRoll = 0;
+    this.joltRollVel = 0;
 
     // --- derived, read by everything else ---
     this.speed = 0;        // magnitude, m/s
@@ -329,7 +360,10 @@ export class VehicleBody {
     this.vx = fx * vFwd + rx * vLat;
     this.vz = fz * vFwd + rz * vLat;
 
-    this.yaw = wrapAngle(this.yaw + this.yawRate * dt);
+    // Steering and being hit both turn the car, and both have to be integrated.
+    this.yaw = wrapAngle(this.yaw + (this.yawRate + this.impactSpin) * dt);
+    this.impactSpin *= Math.exp(-IMPACT_SPIN_DECAY * dt);
+    if (Math.abs(this.impactSpin) < 1e-3) this.impactSpin = 0;
 
     this.x += this.vx * dt;
     this.z += this.vz * dt;
@@ -424,6 +458,17 @@ export class VehicleBody {
 
     // Kept as the sum for anything that just wants "which way is the car
     // tilted" — the camera and the HUD read it, and neither cares why.
+    // The jolt: a critically damped spring back to level. Underdamped it wobbles
+    // like a cartoon, overdamped it may as well not be there, so it is set at
+    // the point where the body returns in one motion.
+    const w = JOLT_FREQ;
+    this.joltPitchVel += (-w * w * this.joltPitch - 2 * w * this.joltPitchVel) * dt;
+    this.joltPitch += this.joltPitchVel * dt;
+    this.joltRollVel += (-w * w * this.joltRoll - 2 * w * this.joltRollVel) * dt;
+    this.joltRoll += this.joltRollVel * dt;
+    this.bodyPitch += this.joltPitch;
+    this.roll += this.joltRoll;
+
     this.pitch = this.terrainPitch + this.bodyPitch;
 
     return this;
@@ -434,6 +479,56 @@ export class VehicleBody {
     // Boosts refresh rather than stack, but a stronger one always wins.
     this.boostPower = Math.max(this.boostPower, power);
     this.boostTimer = Math.max(this.boostTimer, duration);
+  }
+
+  /**
+   * A hit that landed somewhere, rather than everywhere.
+   *
+   * `applyImpulse` pushes the car's centre, which is right for a blast wave and
+   * wrong for every collision: hitting a rival's rear quarter and hitting them
+   * square in the back are the same event to it, and neither turns anybody. A
+   * real contact acts at a point, and the further that point sits from the
+   * centre of mass the more of the blow becomes rotation instead of shove.
+   * That is the difference between being nudged and being put into a spin, and
+   * it is most of what "it does not feel like a crash" was about.
+   *
+   * @param ix,iz         impulse in world space, newton-seconds
+   * @param leverX,leverZ contact point relative to the centre of mass
+   * @param yawInertia    the car's resistance to being spun, kg·m²
+   */
+  applyContactImpulse(ix, iz, leverX, leverZ, yawInertia) {
+    const m = Math.max(1, this.p.mass);
+    this.vx += ix / m;
+    this.vz += iz / m;
+
+    // The 2D cross product of the lever and the impulse is the angular one.
+    const torque = leverX * iz - leverZ * ix;
+    this.impactSpin += torque / Math.max(1, yawInertia);
+
+    this.jolt(ix / m, iz / m);
+    return this;
+  }
+
+  /**
+   * Throw the body about, without moving the car.
+   *
+   * Separate from the impulse because plenty of things hit a car without
+   * changing where it is going very much — clipping a barrier, glancing off a
+   * barrel — and the shudder is most of what tells you it happened. The blow is
+   * resolved into the car's own frame, so being rear-ended pitches it and being
+   * hit in the flank rolls it, rather than every contact producing the same
+   * generic shake.
+   *
+   * @param dvx,dvz  the velocity the hit would have imparted, world space
+   */
+  jolt(dvx, dvz) {
+    const fx = this.forwardX;
+    const fz = this.forwardZ;
+    const along = dvx * fx + dvz * fz;
+    const across = dvx * -fz + dvz * fx;
+    this.joltPitchVel += clamp(along * 0.05, -1.6, 1.6);
+    this.joltRollVel += clamp(-across * 0.05, -1.6, 1.6);
+    return this;
   }
 
   /** Instantaneous velocity change, in world space. Used by collisions and blasts. */
