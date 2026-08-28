@@ -739,6 +739,29 @@ function building(rng, pal, ctx = {}) {
   }
 
   if (fine) {
+    const rich = (ctx.sides ?? 1) >= 3;
+    if (rich) {
+      // The full grid on the two faces a car can see. A building is the
+      // largest thing in the game and was among the plainest: a stack of
+      // slabs with a band of glass round it.
+      const floorsRich = Math.max(3, Math.floor((h * 0.55) / 3.2));
+      for (const [ax, aw] of [[-d / 2 - 0.08, w], [-w / 2 - 0.08, d]]) {
+        const from = parts.length;
+        windowWall(parts, rng, {
+          x: ax,
+          wall,
+          glass: 0x0c1118,
+          width: aw,
+          height: h * 0.5,
+          base: 3.0,
+          floors: floorsRich,
+          cols: 6,
+          depth: 0.26,
+          rich,
+        });
+        if (aw === d) for (let i = from; i < parts.length; i++) parts[i].rotateY(Math.PI / 2);
+      }
+    }
     // Window bands, only ever built for the near level.
     const floors = Math.floor(h * 0.55 / 3.2);
     for (let f = 1; f < floors; f++) {
@@ -936,6 +959,74 @@ function palm(rng, pal, ctx = {}) {
 const FACADE_W = 22;   // along the street
 const FACADE_D = 30;   // into the block
 
+/**
+ * A wall of windows, with the windows actually built.
+ *
+ * The buildings are the largest things in the game and were the least detailed:
+ * a slab, a parapet, a plinth, and a grid of single boxes for glass. Scaling
+ * segment counts does nothing for any of it, because none of it is a prism —
+ * so when every other kerbside prop went up nine times, a frontage went up
+ * about one and a half.
+ *
+ * What a building has instead of segments is *storeys*. A window is a reveal
+ * with a sill under it, a lintel over it and a jamb down each side; between
+ * floors there is a band; at the corners there are pilasters. All of it is
+ * boxes, all of it is flat, and all of it is what makes a wall read as a
+ * building rather than as a painted slab.
+ *
+ * Gated on the detail level rather than on `fine`, because this is the spend
+ * that only makes sense within a few metres: `rich` is true at the kerb and
+ * nowhere else.
+ *
+ * @param out    parts array to push into
+ * @param opts   face position and size, and the grid to fill it with
+ */
+function windowWall(out, rng, opts) {
+  const {
+    x, wall, glass, width, height, base, floors, cols, depth, rich,
+  } = opts;
+  const pitch = height / floors;
+  const colPitch = (width * 0.84) / cols;
+  const winW = colPitch * 0.56;
+  const winH = pitch * 0.46;
+  const frame = Math.max(0.12, winW * 0.16);
+
+  for (let f = 0; f < floors; f++) {
+    const y = base + pitch * (f + 0.55);
+    // A band at every floor line: the single strongest cue that a wall has
+    // storeys behind it, and twelve triangles.
+    if (rich) {
+      out.push(boxOf(depth + 0.14, 0.16, width * 0.98, shade(wall, 0.86),
+        { x, y: base + pitch * f, rng }));
+    }
+    for (let c = 0; c < cols; c++) {
+      if (rng.bool(0.10)) continue;
+      const z = -width * 0.42 + colPitch * (c + 0.5);
+      out.push(boxOf(depth, winH, winW, glass, { x, y, z, rng }));
+      if (!rich) continue;
+      // Sill, lintel, jambs. Four boxes around each pane, set slightly proud.
+      out.push(boxOf(depth + 0.10, frame, winW + frame * 2, shade(wall, 0.72),
+        { x, y: y - winH / 2 - frame / 2, z, rng }));
+      out.push(boxOf(depth + 0.10, frame, winW + frame * 2, shade(wall, 0.94),
+        { x, y: y + winH / 2 + frame / 2, z, rng }));
+      for (const s of [-1, 1]) {
+        out.push(boxOf(depth + 0.06, winH, frame, shade(wall, 0.80),
+          { x, y, z: z + s * (winW / 2 + frame / 2), rng }));
+      }
+    }
+  }
+
+  // Pilasters down the corners, and a cornice under the parapet.
+  if (rich) {
+    for (const s of [-1, 1]) {
+      out.push(boxOf(depth + 0.20, height, 0.55, shade(wall, 0.90),
+        { x, y: base + height / 2, z: s * width * 0.47, rng }));
+    }
+    out.push(boxOf(depth + 0.26, 0.34, width + 0.3, shade(wall, 0.78),
+      { x, y: base + height, rng }));
+  }
+}
+
 function facade(rng, pal, ctx = {}) {
   const fine = ctx.fine !== false;
   const parts = [];
@@ -963,19 +1054,20 @@ function facade(rng, pal, ctx = {}) {
 
   if (fine) {
     // Window grid on the street face only — the other three are never seen.
-    const floors = Math.floor((h - 5) / 3.4);
-    const cols = 5;
-    for (let f = 0; f < floors; f++) {
-      for (let c = 0; c < cols; c++) {
-        if (rng.bool(0.12)) continue;
-        parts.push(boxOf(0.25, 1.7, 1.5, 0x0d1219, {
-          x: -FACADE_D / 2 - 0.1,
-          y: 6.2 + f * 3.4,
-          z: -FACADE_W * 0.38 + c * (FACADE_W * 0.76 / (cols - 1)),
-          rng,
-        }));
-      }
-    }
+    const rich = (ctx.sides ?? 1) >= 3;
+    const floors = Math.max(2, Math.floor((h - 5) / 3.4));
+    windowWall(parts, rng, {
+      x: -FACADE_D / 2 - 0.1,
+      wall,
+      glass: 0x0d1219,
+      width: FACADE_W,
+      height: h - 5.2,
+      base: 4.6,
+      floors,
+      cols: rich ? 7 : 5,
+      depth: 0.25,
+      rich,
+    });
     // Shopfront glazing and a canopy over the pavement.
     parts.push(boxOf(0.3, 2.6, FACADE_W * 0.78, 0x11161f, {
       x: -FACADE_D / 2 - 0.15, y: 2.4, rng,
@@ -1045,6 +1137,22 @@ function mall(rng, pal, ctx = {}) {
   parts.push(boxOf(0.4, 5.6, 5.2, 0x0b1017, { x: front - 2.3, y: 3.0, rng }));
 
   if (fine) {
+    const rich = (ctx.sides ?? 1) >= 3;
+    if (rich) {
+      // The shopfront was one unbroken pane the width of the building. Split
+      // into mullioned bays, with a clerestory strip above the canopy: a mall
+      // is mostly glass, so that is where its triangles belong.
+      windowWall(parts, rng, {
+        x: front - 0.42, wall, glass: 0x0e131b,
+        width: FACADE_W * 0.92, height: 4.9, base: 0.5,
+        floors: 3, cols: 13, depth: 0.22, rich,
+      });
+      windowWall(parts, rng, {
+        x: front - 0.30, wall, glass: 0x101720,
+        width: FACADE_W * 0.90, height: h - 6.8, base: 6.5,
+        floors: Math.max(2, Math.floor((h - 6.8) / 2.4)), cols: 11, depth: 0.20, rich,
+      });
+    }
     // Columns holding the canopy, and trolley bays against the glass.
     for (let i = -2; i <= 2; i++) {
       parts.push(prism(S(8, ctx), 0.24, 0.24, 5.9, shade(wall, 0.6),
@@ -1107,6 +1215,29 @@ function townhouse(rng, pal, ctx = {}) {
       { x: rng.spread(3), y: h + 1.5, z: z + rng.spread(1.4), rng }));
 
     if (fine) {
+      const rich = (ctx.sides ?? 1) >= 3;
+      if (rich) {
+        // Sashes over two storeys, per unit. A terrace at the kerb was three
+        // boxes and a roof; this is what makes it a row of houses.
+        // `windowWall` builds around z = 0, and a terrace is a row of units,
+        // so the ones it just added are moved onto this unit. Bracketed by an
+        // index rather than by a slice from the end: the count depends on the
+        // grid and on which windows the draw skipped.
+        const from = parts.length;
+        windowWall(parts, rng, {
+          x: front - 0.10,
+          wall: c,
+          glass: 0x11161e,
+          width: uw - 0.4,
+          height: h - 2.6,
+          base: 2.4,
+          floors: 3,
+          cols: 3,
+          depth: 0.24,
+          rich,
+        });
+        for (let i = from; i < parts.length; i++) parts[i].translate(0, 0, z);
+      }
       // Door and a bay window either side of it, then two upstairs.
       parts.push(boxOf(0.30, 2.2, 0.95, shade(c, 0.35), { x: front - 0.12, y: 1.1, z, rng }));
       parts.push(boxOf(0.75, 1.9, 1.9, shade(c, 0.82),
@@ -1173,6 +1304,21 @@ function tenement(rng, pal, ctx = {}) {
   parts.push(boxOf(0.35, 2.1, FACADE_W * 0.55, 0x0f141c, { x: front - 0.28, y: 1.7, rng }));
 
   if (fine) {
+    const rich = (ctx.sides ?? 1) >= 3;
+    // Windows behind the balconies. A tenement had none at all — it was a slab
+    // with rails on it — and it is the commonest building on a city kerb.
+    windowWall(parts, rng, {
+      x: front - 0.16,
+      wall,
+      glass: 0x0e131b,
+      width: FACADE_W,
+      height: h - 3.2,
+      base: 2.9,
+      floors,
+      cols: rich ? 14 : 4,
+      depth: 0.22,
+      rich,
+    });
     // Balconies on every floor, running most of the width.
     for (let f = 1; f < floors; f++) {
       const y = 3.4 + (f - 1) * fh;
@@ -1408,7 +1554,7 @@ export const PROP_TYPES = {
     place: TRACKSIDE, radius: 1.4, footprint: 3.5, toughness: null, height: 2.7, faceRoad: -1,
   },
 
-  building: { build: building, place: SCENERY, radius: 0, footprint: 16.5, toughness: null, height: 40, horizon: true },
+  building: { build: building, place: SCENERY, radius: 0, footprint: 16.7, toughness: null, height: 40, horizon: true },
   ridge: { build: ridge, place: SCENERY, radius: 0, footprint: 46.7, toughness: null, height: 22, horizon: true },
 
   brazier: { build: brazier, place: TRACKSIDE, radius: 0.9, footprint: 1.3, toughness: 90, height: 2.2, emissive: 0xff5a1e },
