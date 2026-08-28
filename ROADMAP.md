@@ -5,37 +5,41 @@ and what it will touch, so picking one up does not start from scratch.
 
 ---
 
-## Physics: put the car on the road
+## Physics: crash impacts
 
-Three faults, reported from play. They are grouped because they are probably one
-problem seen from three angles — the contact between wheel and ground — and
-fixing them separately risks three patches that disagree.
+Impacts do not read as impacts — contact behaves like a scripted nudge rather
+than like the real thing. This is what is left of a group of three faults
+reported from play; the other two are done and are described below, because what
+was wrong with them says something about where to look for this one.
 
-**The car does not sit on the road.** In most situations it is either hovering
-slightly above the surface or sunk into it. This is the one to solve first,
-because the other two are read through it: a car whose contact point is wrong
-has wrong suspension travel, wrong load transfer and wrong collision depth, so
-tuning either of those against the current contact only bakes the error in. What
-"correct" means here is not a tolerance — it is that a wheel touches the road and
-neither floats nor intersects, in every situation, the way a real one does.
+**Wheels on the road — fixed.** The car used to hover above the surface or sink
+into it in most situations. The physics was innocent: it holds `y` exactly at the
+ground. Two pieces of geometry were at fault. Pitch and roll were applied to the
+whole car about the group's origin, which sits on the tarmac, so five degrees of
+pitch swung the front wheels ten centimetres; the body now turns on a child node
+at the axle line and the wheels are not its children, so no attitude can lift
+them. And the axle sat at the tyre's nominal radius while the tread blocks stand
+proud of it, burying twenty-seven millimetres of every tyre in the road on every
+car, permanently; the axle sits at the measured lowest point of the wheel now.
 
-**Accelerating lifts the car.** Throttle should transfer load rearward and
-squat the back, not raise the body. A nose that rises under power suggests the
-force is being applied above the centre of mass, or that the suspension response
-has the wrong sign.
+**Squat and dive — fixed.** Accelerating lifted the car. `pitch` summed two
+different motions into one angle: lying along the road's slope, which has to turn
+the tyres too, and squatting on the springs, which must not. Whichever the
+renderer assumed, the other was wrong. They are `terrainPitch` and `bodyPitch`
+now and go to different nodes. The travel was also unreal — ±0.12 rad of dive put
+the nose of a four-metre car twenty centimetres under the tarmac, and roll of
+±0.30 was a boat. Two degrees and three and a half, chosen against the cars: the
+bodies carry real ride heights, about a hundred millimetres of sill clearance.
 
-**Crash physics.** Impacts do not read as impacts. What is wanted is contact
-that behaves like the real thing rather than a scripted nudge.
+`tools/contact-probe.mjs` measures all of it and runs in `npm run probe`. Both
+faults were invisible in a still frame and neither was catchable by any probe
+that existed, because all three physics probes ask about forces and none of them
+asked where the tyre was.
 
-What it touches: `src/vehicle/physics.js` for the model itself, `src/race/sim.js`
-where it is stepped, and `src/vehicle/chassis.js` only for where the wheels are
-placed — the bodies now carry measured wheel radii and axle positions taken off
-the reference cars, so the visual contact point and the physical one can be made
-to agree instead of being tuned apart.
-
-Worth knowing before starting: `tools/physics-probe.mjs`, `tools/handling-probe.mjs`
-and `tools/control-probe.mjs` already exist and pass, which means they do not
-currently test any of this. Whatever is built here should come with the probe
+For crashes, the same suspicion is worth carrying in: the three probes that pass
+today do not test what impacts feel like either. `src/vehicle/physics.js` has
+`applyImpulse`, which changes velocity and nothing else — no rotation, no
+attitude, no energy going anywhere. Whatever is built should come with the probe
 that would have caught it.
 
 ---

@@ -606,8 +606,22 @@ export class VehicleMesh {
     // wearing its accessories.
     const hull = HULLS[profile.bodyType] ?? null;
 
-    const L = (lerp(4.5, 5.6, bulk) + speed * 0.55) * BT.length;
-    const W = lerp(1.95, 2.65, bulk) * BT.width;
+    // How big the car is.
+    //
+    // With a body taken off a real car, the real car settles it. The generated
+    // route had to invent a size from the build, and `BT.length` was a ratio
+    // against an invented reference; keeping that with a measured body threw the
+    // scale away again — the Quattro came out 5.52 m against the 4.40 m it is,
+    // and the roster spread from 3.36 m to 5.52 m with no car in it that size.
+    //
+    // The build still moves it, by about a tenth either way, so a heavy machine
+    // is visibly a heavier one. It no longer decides what car this is.
+    const L = hull
+      ? hull.length * (1 + (bulk - 0.35) * 0.16 + speed * 0.04)
+      : (lerp(4.5, 5.6, bulk) + speed * 0.55) * BT.length;
+    const W = hull
+      ? hull.width * (1 + (bulk - 0.35) * 0.10)
+      : lerp(1.95, 2.65, bulk) * BT.width;
     const rideH = (lerp(0.34, 0.46, bulk) - speed * 0.06) * BT.ride;
     const bodyH = lerp(0.62, 0.78, bulk) * BT.height;
     this.length = L;
@@ -1069,6 +1083,10 @@ export class VehicleMesh {
     }
 
     this.bodyGeo = mergeGeometries(opaque);
+    // Authored with y = 0 on the road, and now hanging off a node raised to the
+    // axle line — so everything inside it drops by exactly that, leaving the car
+    // where it was and the pivot where it belongs.
+    this.bodyGeo?.translate(0, -wheelR, 0);
     this.bodyMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
       // A car built out of boxes is watertight and can be culled from behind. A
@@ -1085,11 +1103,24 @@ export class VehicleMesh {
       roughness: lerp(0.42, 0.78, armor),
       metalness: lerp(0.30, 0.58, armor),
     });
+    // Everything that pitches and rolls hangs off `chassis`; the wheels do not.
+    //
+    // Pitch used to be applied to the whole car about the group's origin, which
+    // sits on the road surface — so five degrees of it swung the front wheels
+    // ten centimetres, and the car spent most of its time either hovering above
+    // the tarmac or buried in it. A real one pitches about its suspension while
+    // its tyres stay down. Rotating a child group whose origin is the axle line
+    // is that, and it costs one node in the graph.
+    this.chassis = new THREE.Group();
+    this.chassis.position.y = wheelR;
+    this.group.add(this.chassis);
+
     this.bodyMesh = new THREE.Mesh(this.bodyGeo, this.bodyMat);
     this.bodyMesh.castShadow = !!quality?.shadows;
-    this.group.add(this.bodyMesh);
+    this.chassis.add(this.bodyMesh);
 
     this.glassGeo = mergeGeometries(glass);
+    this.glassGeo?.translate(0, -wheelR, 0);
     this.glassMat = new THREE.MeshStandardMaterial({
       vertexColors: true, roughness: 0.10, metalness: 0.55, flatShading: true,
       transparent: true, opacity: 0.70,
@@ -1097,22 +1128,45 @@ export class VehicleMesh {
     // A traced hull carries no separate glass or lamp geometry yet, so this can
     // legitimately be empty — `mergeGeometries` answers null for an empty list.
     this.glassMesh = this.glassGeo ? new THREE.Mesh(this.glassGeo, this.glassMat) : null;
-    if (this.glassMesh) this.group.add(this.glassMesh);
+    if (this.glassMesh) this.chassis.add(this.glassMesh);
 
     // Emissive parts carry their hue in vertex colours — white headlights, red
     // tail lights, element-coloured trim — and the material tints all of them,
     // so heat can push the lot toward white-hot in a single draw call.
     this.trimGeo = mergeGeometries(emissive);
+    this.trimGeo?.translate(0, -wheelR, 0);
     this.trimMat = new THREE.MeshBasicMaterial({
       vertexColors: true, color: this.glow.color, toneMapped: false,
     });
     // A traced hull carries no separate glass or lamp geometry yet, so this can
     // legitimately be empty — `mergeGeometries` answers null for an empty list.
     this.trimMesh = this.trimGeo ? new THREE.Mesh(this.trimGeo, this.trimMat) : null;
-    if (this.trimMesh) this.group.add(this.trimMesh);
+    if (this.trimMesh) this.chassis.add(this.trimMesh);
 
     // --- wheels -------------------------------------------------------------
     this.wheels = [];
+    // How far the wheel actually reaches, measured off the geometry rather than
+    // assumed to be `wheelR`.
+    //
+    // The tread blocks stand proud of the tyre by design — that is what makes
+    // the contact patch read — so the outermost thing on a wheel is about
+    // twenty-seven millimetres beyond its nominal radius. Parking the axle at
+    // `wheelR` therefore drove that much of every tyre into the tarmac, on every
+    // car, at rest. On a real tyre the tread is the part that touches the road,
+    // so that is the radius the axle has to sit at. Measured, so it stays true
+    // if the tread ever changes.
+    // Specifically the lowest point, not the furthest. Taking the greatest
+    // radius at any angle picks the diagonal corner of a tread block, which is
+    // never the part underneath — set the axle to that and the car floats by
+    // the difference. What touches the road is whatever is at the bottom, so
+    // that is what is measured.
+    const wheelReach = (geo) => {
+      if (!geo) return 0;
+      const a = geo.attributes.position.array;
+      let lowest = 0;
+      for (let i = 1; i < a.length; i += 3) if (a[i] < lowest) lowest = a[i];
+      return -lowest;
+    };
     this.wheelGeo = new THREE.CylinderGeometry(wheelR, wheelR, wheelT, 48, 1);
     this.wheelGeo.rotateZ(Math.PI / 2);
     this.wheelMat = new THREE.MeshStandardMaterial({
@@ -1209,9 +1263,12 @@ export class VehicleMesh {
       vertexColors: true, roughness: 0.35, metalness: 0.75, flatShading: true,
     });
 
+    const contactR = Math.max(wheelR,
+      wheelReach(this.treadGeo), wheelReach(this.hubGeo), wheelReach(this.wheelGeo));
+
     for (const [ix, iz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
       const pivot = new THREE.Group();
-      pivot.position.set(ix * trackW, wheelR, iz * wheelbase);
+      pivot.position.set(ix * trackW, contactR, iz * wheelbase);
 
       const spin = new THREE.Group();
       const tyre = new THREE.Mesh(this.wheelGeo, this.wheelMat);
@@ -1250,10 +1307,14 @@ export class VehicleMesh {
     const g = this.group;
     g.position.set(body.x, body.y, body.z);
     g.rotation.set(0, body.yaw, 0);
-    // Pitch and roll come off the physics body, so squat under acceleration and
-    // lean in a corner are driven by real quantities.
-    g.rotateX(body.pitch);
-    g.rotateZ(body.roll);
+    // A slope turns the whole car, tyres and all: that is what standing on a
+    // hill is, and the wheels have to lie along it.
+    g.rotateX(body.terrainPitch ?? 0);
+    // Squat, dive and lean turn the body on its springs while the tyres stay
+    // put. Applied to `group` instead, they pivoted the car about a point on the
+    // tarmac and swung the wheels off it — ten centimetres at five degrees,
+    // which is why it was forever hovering or buried.
+    this.chassis.rotation.set(body.bodyPitch ?? 0, 0, body.roll);
 
     this._wheelSpin += (body.forwardSpeed / Math.max(0.1, this.wheels[0].radius)) * dt;
     // Negated because a positive rotation.y turns the wheel toward +X, which is

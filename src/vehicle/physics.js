@@ -62,7 +62,9 @@ export class VehicleBody {
     this.z = 0;
     this.y = 0;          // height above the track surface
     this.yaw = 0;        // heading, radians; +Z is yaw 0
-    this.pitch = 0;      // visual only, driven by acceleration
+    this.pitch = 0;         // terrainPitch + bodyPitch, for anything wanting the sum
+    this.terrainPitch = 0;  // the car lying along the road's slope — turns the wheels too
+    this.bodyPitch = 0;     // squat and dive on the springs — turns the body only
     this.roll = 0;       // visual only, driven by lateral load
 
     // --- motion ---
@@ -396,10 +398,33 @@ export class VehicleBody {
     // terrain term the car stays level while the road tilts underneath it,
     // which is most of the reason the track's elevation was invisible: a hill
     // you do not lean into is not a hill, it is a change of horizon.
-    const terrainPitch = -Math.atan(clamp(this.groundSlope, -0.45, 0.45));
-    this.pitch = damp(this.pitch,
-      clamp(-accelG * 0.010, -0.12, 0.12) + terrainPitch, 8, dt);
-    this.roll = damp(this.roll, clamp(vLat * 0.016 + this.yawRate * 0.20, -0.30, 0.30), 9, dt);
+    //
+    // Reported separately, because they are not the same motion and the renderer
+    // has to do different things with them. Lying along a slope turns the whole
+    // car, tyres included — that is what being on a hill is. Squatting under
+    // power turns the body over its suspension while the tyres stay where they
+    // are. Summed into one angle and applied to one node, whichever of the two
+    // the renderer assumed was wrong: the car climbed a hill with its wheels
+    // level, or it dived under braking by driving them into the road.
+    this.terrainPitch = damp(this.terrainPitch,
+      -Math.atan(clamp(this.groundSlope, -0.45, 0.45)), 8, dt);
+
+    // Two degrees, not seven. Suspension travel is a few centimetres and the
+    // wheelbase is metres, so the angle a real car reaches under its hardest
+    // braking is small — the old ±0.12 rad put the nose of a four-metre car
+    // twenty centimetres into the tarmac, which is most of why it kept ending up
+    // there.
+    this.bodyPitch = damp(this.bodyPitch, clamp(-accelG * 0.0035, -0.035, 0.035), 8, dt);
+    // Body roll, likewise. Three and a half degrees, chosen against the cars
+    // rather than by taste: the bodies carry their real ride heights now, about
+    // a hundred millimetres of sill clearance, and a half-width of eight hundred
+    // — so five degrees of lean puts the sill through the road and three and a
+    // half does not. Seventeen, which is what this was, is a boat.
+    this.roll = damp(this.roll, clamp(vLat * 0.004 + this.yawRate * 0.045, -0.06, 0.06), 9, dt);
+
+    // Kept as the sum for anything that just wants "which way is the car
+    // tilted" — the camera and the HUD read it, and neither cares why.
+    this.pitch = this.terrainPitch + this.bodyPitch;
 
     return this;
   }

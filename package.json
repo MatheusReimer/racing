@@ -11,7 +11,7 @@
     "balance": "node tools/balance.mjs",
     "drive": "node tools/drive.mjs",
     "garage": "node tools/garage.mjs",
-    "probe": "node tools/physics-probe.mjs && node tools/handling-probe.mjs && node tools/mesh-probe.mjs && node tools/props-probe.mjs && node tools/barrier-probe.mjs && node tools/track-probe.mjs 200 && node tools/combat-probe.mjs && node tools/traffic-probe.mjs && node tools/parts-probe.mjs && node tools/control-probe.mjs 8 && node tools/progress-probe.mjs 40 && node tools/balance.mjs 60 --laps=2 && node tools/run-probe.mjs 12 && node tools/handoff-probe.mjs 2 && node tools/uiflow.mjs",
+    "probe": "node tools/physics-probe.mjs && node tools/handling-probe.mjs && node tools/mesh-probe.mjs && node tools/contact-probe.mjs && node tools/props-probe.mjs && node tools/barrier-probe.mjs && node tools/track-probe.mjs 200 && node tools/combat-probe.mjs && node tools/traffic-probe.mjs && node tools/parts-probe.mjs && node tools/control-probe.mjs 8 && node tools/progress-probe.mjs 40 && node tools/balance.mjs 60 --laps=2 && node tools/run-probe.mjs 12 && node tools/handoff-probe.mjs 2 && node tools/uiflow.mjs",
     "realtime": "node tools/realtime-probe.mjs"
   },
   "dependencies": {
