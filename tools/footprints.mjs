@@ -28,7 +28,7 @@ import { BIOMES } from '../src/data/biomes.js';
 // that make it a street. What has to clear the road is whatever a car could
 // meet, so the measurement stops at roof height and a lamp is measured as the
 // post it is at ground level.
-const CAR_HEIGHT = 2.5;
+const CAR_HEIGHT = Number(process.env.H ?? 2.5);
 const take = (g, acc) => {
   const pos = g?.attributes?.position;
   if (!pos) return acc;
@@ -63,6 +63,33 @@ for (const biome of BIOMES) {
 // for horizon pieces, so the number that has to be cleared is the largest one
 // that will ever be built.
 const SCALE_HEADROOM = 1.35;
+
+// Frontages need a different number. They are placed by an offset from the
+// kerb, and the offset was taken from a declared `depth` that does not match
+// the geometry: a townhouse declares 17 and is built 38 across, centred on its
+// own origin, so half of it stood in the street. What placement actually needs
+// is how far the thing reaches from that origin, whichever way it is turned.
+console.log('\n// Frontage half-extents, measured. `reach` is what placement offsets by.');
+for (const [type, def] of Object.entries(PROP_TYPES)) {
+  if (!def.frontage) continue;
+  let reach = 0;
+  for (const biome of BIOMES) {
+    const lib = buildPropLibrary(biome, 1);
+    const entry = lib[type];
+    if (entry) {
+      for (const group of [entry.variants, ...(entry.levels ?? [])]) {
+        for (const g of group ?? []) {
+          const pos = g?.attributes?.position;
+          if (!pos) continue;
+          for (let i = 0; i < pos.count; i++) reach = Math.max(reach, Math.abs(pos.getX(i)));
+        }
+      }
+    }
+    disposePropLibrary(lib);
+  }
+  console.log(`  ${(type + ':').padEnd(16)} reach ${reach.toFixed(1)}`
+    + `   (declared depth ${def.frontage.depth})`);
+}
 
 console.log('// Measured with tools/footprints.mjs. Half-extent in metres of the');
 console.log('// widest instance any biome builds, scale headroom included.');

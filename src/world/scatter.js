@@ -188,11 +188,15 @@ export function generateProps(rng, track, biome, opts = {}) {
       // can be "onto the next straight". Checking along its depth costs a few
       // samples and catches the one that was standing in a downtown street.
       if (def.frontage) {
-        const depth = def.frontage.depth * scale;
+        // Both directions from the origin, because the mesh is centred on it.
+        // Sweeping only into the block left the half facing the traffic
+        // unexamined through three rounds of this being reported.
+        const reach = (def.frontage.reach ?? def.frontage.depth / 2) * scale;
         const ux = Math.cos(yaw);
         const uz = -Math.sin(yaw);
-        for (let u = 0.25; u <= 1.0; u += 0.25) {
-          if (landsOnRoad(p.x + ux * depth * u, p.z + uz * depth * u, 1.0)) return;
+        for (let u = -1; u <= 1.0001; u += 0.25) {
+          if (Math.abs(u) < 0.2) continue;
+          if (landsOnRoad(p.x + ux * reach * u, p.z + uz * reach * u, 0.6)) return;
         }
       }
     }
@@ -289,17 +293,45 @@ export function generateProps(rng, track, biome, opts = {}) {
           // Placed by its front face, not its centre: whatever the type's depth
           // is, its shopfront meets the pavement on the same line as its
           // neighbours' and the wall stays flush.
-          const depth = PROP_TYPES[kind].frontage.depth;
+          // Offset by what the thing measures, not by what it declares.
+          //
+          // `depth` describes the block a frontage is meant to fill; the mesh
+          // is modelled centred on its own origin and reaches `reach` in both
+          // directions. Offsetting by half the declared depth put the near half
+          // of every building in the street — eight metres of it for a
+          // townhouse, which declares seventeen and is built thirty-eight
+          // across. Offsetting by the measured reach puts its face on the
+          // setback line whichever way it ends up turned.
+          const fr = PROP_TYPES[kind].frontage;
+          const reach = fr.reach ?? fr.depth / 2;
           const fs = wrap(s + rng.spread(1.2), L);
-          const lat = side * (hw + BARRIER_RAIL_OFFSET + setback + depth / 2);
+          const lat = side * (hw + BARRIER_RAIL_OFFSET + setback + reach);
           const at = track.path.offsetPoint(fs, lat, { x: 0, y: 0, z: 0 });
           if (blocksAlley(at.x, at.z)) continue;
           // A frontage is deep, so its *back* can reach the next street even
           // when its centre does not. Check both ends of it.
           const yaw = track.path.yawAt(fs);
-          const bx = at.x - Math.sin(yaw + Math.PI / 2) * side * depth * 0.45;
-          const bz = at.z - Math.cos(yaw + Math.PI / 2) * side * depth * 0.45;
-          if (landsOnRoad(bx, bz, 0.5)) continue;
+          // Both ends of it, at its measured reach: the back can land on the
+          // next street even when the centre does not, and the front is the
+          // half that used to end up in this one.
+          // Its corners, not just its axis. A frontage is twenty-two metres
+          // along the street, and on a bend it is a corner that reaches into
+          // the road while the centreline of the thing still clears.
+          const ax = -Math.sin(yaw + Math.PI / 2) * side;
+          const az = -Math.cos(yaw + Math.PI / 2) * side;
+          const wx = Math.cos(yaw + Math.PI / 2) * side;
+          const wz = -Math.sin(yaw + Math.PI / 2) * side;
+          const halfW = fr.width * 0.5;
+          let blocked = false;
+          for (const u of [-1, -0.5, 0.5, 1]) {
+            for (const v of [-1, 0, 1]) {
+              const px = at.x + ax * reach * u + wx * halfW * v;
+              const pz = at.z + az * reach * u + wz * halfW * v;
+              if (landsOnRoad(px, pz, 0.5)) { blocked = true; break; }
+            }
+            if (blocked) break;
+          }
+          if (blocked) continue;
           place(kind, fs, lat, { alignToTrack: true, scale: 1, lod: 0 });
         }
       }

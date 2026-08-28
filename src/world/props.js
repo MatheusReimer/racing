@@ -923,6 +923,16 @@ function palm(rng, pal, ctx = {}) {
  * office and a shallow terrace both meet the pavement on the same line and
  * differ behind it, which is exactly how a real street works.
  */
+// `reach` on a frontage is how far its geometry actually extends from its own
+// origin, measured by tools/footprints.mjs and pasted in — not the same thing
+// as `depth`, which describes the block it is meant to fill.
+//
+// Placement offset by half the declared depth on the assumption that a frontage
+// grows backwards from its front face. It does not: it is modelled centred, so
+// a townhouse declaring seventeen metres is built thirty-eight across and half
+// of it stood in the street. That is the building in the middle of the road
+// that kept being reported, and the sweep that was supposed to catch it only
+// looked into the block, never at the half facing the traffic.
 const FACADE_W = 22;   // along the street
 const FACADE_D = 30;   // into the block
 
@@ -1367,25 +1377,25 @@ export const PROP_TYPES = {
   facade: {
     build: facade, glow: facade.glow,
     place: SCENERY, radius: 0, toughness: null, height: 42,
-    frontage: { width: FACADE_W, depth: FACADE_D },
+    frontage: { reach: 16.6, width: FACADE_W, depth: FACADE_D },
     faceRoad: -1,
   },
   mall: {
     build: mall, glow: mall.glow,
     place: SCENERY, radius: 0, toughness: null, height: 14,
-    frontage: { width: FACADE_W, depth: MALL_D },
+    frontage: { reach: 20.4, width: FACADE_W, depth: MALL_D },
     faceRoad: -1,
   },
   townhouse: {
     build: townhouse, glow: townhouse.glow,
     place: SCENERY, radius: 0, toughness: null, height: 11,
-    frontage: { width: FACADE_W, depth: TERRACE_D },
+    frontage: { reach: 18.9, width: FACADE_W, depth: TERRACE_D },
     faceRoad: -1,
   },
   tenement: {
     build: tenement, glow: tenement.glow,
     place: SCENERY, radius: 0, toughness: null, height: 19,
-    frontage: { width: FACADE_W, depth: TENEMENT_D },
+    frontage: { reach: 12.4, width: FACADE_W, depth: TENEMENT_D },
     faceRoad: -1,
   },
 

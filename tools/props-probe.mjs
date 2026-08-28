@@ -167,14 +167,20 @@ for (const [name, def] of Object.entries(PROP_TYPES)) {
       if (def?.spanning) continue;
       let into = -Infinity;
       if (def?.frontage) {
-        // A frontage stands at the kerb on purpose, so what matters is the
-        // thirty metres of block behind it — which on a folded circuit can be
-        // the next straight over.
+        // The whole slab, both ways from its origin.
+        //
+        // A frontage is modelled centred, so `depth` is not where it ends: a
+        // townhouse declares seventeen metres and is built thirty-eight across.
+        // Sweeping only into the block — which is what this did — never looked
+        // at the half facing the traffic, which is the half that was standing
+        // in the street through three rounds of this being reported and
+        // measuring clean.
+        const reach = (def.frontage.reach ?? def.frontage.depth / 2) * (p.scale ?? 1);
         const c = Math.cos(p.yaw);
         const sn = Math.sin(p.yaw);
-        for (let u = 0.1; u <= 1.0; u += 0.15) {
-          for (let v = -0.5; v <= 0.5; v += 0.25) {
-            const lx = u * def.frontage.depth * (p.scale ?? 1);
+        for (let u = -1; u <= 1.0001; u += 0.2) {
+          for (let v = -0.5; v <= 0.5; v += 0.125) {
+            const lx = u * reach;
             const lz = v * def.frontage.width * (p.scale ?? 1);
             into = Math.max(into, intoRoad(p.x + c * lx + sn * lz, p.z - sn * lx + c * lz, 0));
           }
