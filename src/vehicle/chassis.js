@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { HULLS } from '../data/bodies/index.js';
 import { clamp, clamp01, lerp } from '../core/math.js';
 
 // Procedural vehicle geometry.
@@ -189,6 +190,66 @@ function loft(sections, color, opts = {}) {
   return paint(geo, color);
 }
 
+/**
+ * Build a car from a hull traced off a real one by tools/lowpoly.mjs.
+ *
+ * Same stitch-and-cap as `loft`, and deliberately so: what changes is only
+ * where a ring's points come from. `loft` evaluates a squircle, which is how
+ * you draw a car nobody has ever seen; this reads the radii measured off one
+ * that exists. The topology either way is a quad strip between consecutive
+ * rings, so everything downstream — flat shading, merging, the shadow pass —
+ * cannot tell the difference.
+ *
+ * The hull arrives in metres with the road at `ground` and the nose at +Z. It
+ * is scaled onto the L and W the build asked for, with height following length
+ * so a wide build widens the car instead of flattening it.
+ */
+function loftTraced(hull, L, W, color) {
+  const M = hull.radial;
+  const sz = L / hull.length;
+  const sx = W / hull.width;
+  const sy = sz;
+  const verts = [];
+  const push = (a, b, c) => { for (const p of [a, b, c]) verts.push(p[0], p[1], p[2]); };
+
+  const rings = hull.rings.map((row) => {
+    const z = row[0] * sz;
+    const cy = (row[1] - hull.ground) * sy;
+    const pts = [];
+    for (let k = 0; k < M; k++) {
+      const a = (k / M) * Math.PI * 2;
+      pts.push([Math.cos(a) * row[2 + k] * sx, cy + Math.sin(a) * row[2 + k] * sy, z]);
+    }
+    return pts;
+  });
+
+  for (let i = 0; i < rings.length - 1; i++) {
+    const A = rings[i]; const B = rings[i + 1];
+    for (let k = 0; k < M; k++) {
+      const k2 = (k + 1) % M;
+      push(A[k], B[k], A[k2]);
+      push(A[k2], B[k], B[k2]);
+    }
+  }
+  // Nose and tail closed off, wound so neither is culled away from outside.
+  const cap = (ring, front) => {
+    let cx = 0; let cy = 0;
+    for (const q of ring) { cx += q[0]; cy += q[1]; }
+    const c = [cx / ring.length, cy / ring.length, ring[0][2]];
+    for (let k = 0; k < ring.length; k++) {
+      const k2 = (k + 1) % ring.length;
+      if (front) push(c, ring[k], ring[k2]); else push(c, ring[k2], ring[k]);
+    }
+  };
+  cap(rings[0], true);
+  cap(rings[rings.length - 1], false);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3));
+  geo.computeVertexNormals();
+  return paint(geo, color);
+}
+
 function mergeGeometries(list) {
   const live = list.filter(Boolean);
   if (live.length === 0) return null;
@@ -299,6 +360,7 @@ const BODY_TYPES = {
   // lowest thing the tool can find down there is a contact patch.
   hatch: {
     length: 0.73, width: 0.72, ride: 1.10, height: 0.97,
+    wheel: 0.59, tyre: 0.59,
     axle: 0.32,
     cabin: {
       roof: true, rise: 1.0, width: 1.0, tall: 1.0, shift: 0, units: 'body',
@@ -467,6 +529,7 @@ const BODY_TYPES = {
   // afterwards is that fraction rather than a measurement.
   rally: {
     length: 0.86, width: 0.79, ride: 1.16, height: 0.67,
+    wheel: 0.62, tyre: 0.65,
     cabin: {
       roof: true, rise: 1.0, width: 1.0, tall: 1.0, shift: 0, units: 'body',
       sections: [
@@ -525,6 +588,13 @@ export class VehicleMesh {
     // body type sets the proportions and the profile, and the stats then push
     // that shape around rather than defining it.
     const BT = BODY_TYPES[profile.bodyType] ?? BODY_TYPES.coupe;
+
+    // A traced hull, when this body type has a real car behind it. Everything
+    // the generator would otherwise draw — the lofted body, the greenhouse and
+    // every bolt-on between them — is replaced by it at assembly, so the shape
+    // on screen is the shape that was measured rather than an approximation
+    // wearing its accessories.
+    const hull = HULLS[profile.bodyType] ?? null;
 
     const L = (lerp(4.5, 5.6, bulk) + speed * 0.55) * BT.length;
     const W = lerp(1.95, 2.65, bulk) * BT.width;
@@ -704,9 +774,15 @@ export class VehicleMesh {
     }
 
     // --- wheel arches -------------------------------------------------------
-    const wheelR = lerp(0.44, 0.58, bulk);
-    const wheelT = lerp(0.26, 0.42, bulk);
-    const wheelbase = L * 0.33;
+    // Wheels are rebuilt, never traced: one radius per angle cannot describe an
+    // arch that curls under itself, so `lowpoly.mjs` measures them instead and
+    // the numbers land here. Scaled with the car, so a build that stretches the
+    // body does not leave its wheels behind.
+    const hw = hull?.wheel ?? null;
+    const hs = hull ? L / hull.length : 1;
+    const wheelR = hw ? hw.radius * hs : lerp(0.44, 0.58, bulk);
+    const wheelT = hw ? hw.width * hs : lerp(0.26, 0.42, bulk);
+    const wheelbase = hw ? (hw.front - hw.rear) * hs * 0.5 : L * 0.33;
     // Tuck the wheels under the body. Pushing the track wider than the
     // bodywork makes them read as bolted on rather than fitted.
     const trackW = W * 0.5 - wheelT * 0.30;
@@ -968,6 +1044,20 @@ export class VehicleMesh {
     }
 
     // --- assemble -----------------------------------------------------------
+    //
+    // With a hull, everything above is discarded rather than skipped. Skipping
+    // it would mean threading a condition through four hundred lines that all
+    // declare things each other depend on; discarding costs a few thousand
+    // triangles that are built and dropped once per car, at mesh build, and
+    // keeps the two paths from tangling. The generated route is still the one
+    // any body type without a reference takes.
+    if (hull) {
+      opaque.length = 0;
+      glass.length = 0;
+      emissive.length = 0;
+      opaque.push(loftTraced(hull, L, W, body));
+    }
+
     this.bodyGeo = mergeGeometries(opaque);
     this.bodyMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
@@ -987,8 +1077,10 @@ export class VehicleMesh {
       vertexColors: true, roughness: 0.10, metalness: 0.55, flatShading: true,
       transparent: true, opacity: 0.70,
     });
-    this.glassMesh = new THREE.Mesh(this.glassGeo, this.glassMat);
-    this.group.add(this.glassMesh);
+    // A traced hull carries no separate glass or lamp geometry yet, so this can
+    // legitimately be empty — `mergeGeometries` answers null for an empty list.
+    this.glassMesh = this.glassGeo ? new THREE.Mesh(this.glassGeo, this.glassMat) : null;
+    if (this.glassMesh) this.group.add(this.glassMesh);
 
     // Emissive parts carry their hue in vertex colours — white headlights, red
     // tail lights, element-coloured trim — and the material tints all of them,
@@ -997,8 +1089,10 @@ export class VehicleMesh {
     this.trimMat = new THREE.MeshBasicMaterial({
       vertexColors: true, color: this.glow.color, toneMapped: false,
     });
-    this.trimMesh = new THREE.Mesh(this.trimGeo, this.trimMat);
-    this.group.add(this.trimMesh);
+    // A traced hull carries no separate glass or lamp geometry yet, so this can
+    // legitimately be empty — `mergeGeometries` answers null for an empty list.
+    this.trimMesh = this.trimGeo ? new THREE.Mesh(this.trimGeo, this.trimMat) : null;
+    if (this.trimMesh) this.group.add(this.trimMesh);
 
     // --- wheels -------------------------------------------------------------
     this.wheels = [];
