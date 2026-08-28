@@ -4,6 +4,7 @@ import { RARITY, SLOTS } from '../data/parts.js';
 import { VEHICLES, VEHICLE_BY_ID } from '../data/vehicles.js';
 import { SKILL_BY_ID } from '../data/skills.js';
 import { Build } from '../build/build.js';
+import { previewTrack } from '../track/preview.js';
 import { clamp01 } from '../core/math.js';
 
 // Every screen that is not the in-race HUD.
@@ -60,6 +61,70 @@ function deltaRow(offer, build) {
       `${attr.name.split(' ')[0]} ${d > 0 ? '+' : ''}${Math.round(d)}`));
   }
   return row;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+const svgEl = (tag, attrs) => {
+  const n = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  return n;
+};
+
+const pathOf = (pts, close) =>
+  pts.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ')
+  + (close ? ' Z' : '');
+
+/**
+ * The circuit, from above, the way a broadcast draws one.
+ *
+ * Two strokes on the same path: a wide one that is the road and a dashed hair
+ * down the middle of it. That reads as tarmac at any size, where a single line
+ * reads as a diagram. Branches are drawn under it — a shortcut leaves the road
+ * and rejoins it, so it should look like a road that goes somewhere else, not
+ * like an annotation.
+ */
+function circuitMap(preview) {
+  const svg = svgEl('svg', {
+    class: 'circuit',
+    viewBox: '-8 -8 116 116',
+    preserveAspectRatio: 'xMidYMid meet',
+  });
+
+  for (const branch of preview.branches) {
+    svg.appendChild(svgEl('path', {
+      d: pathOf(branch, false), class: 'circuit-branch-road',
+    }));
+    svg.appendChild(svgEl('path', {
+      d: pathOf(branch, false), class: 'circuit-branch',
+    }));
+  }
+
+  svg.appendChild(svgEl('path', { d: pathOf(preview.outline, true), class: 'circuit-road' }));
+  svg.appendChild(svgEl('path', { d: pathOf(preview.outline, true), class: 'circuit-line' }));
+
+  // The start line, drawn across the road rather than along it.
+  const a = preview.startAngle + Math.PI / 2;
+  const r = 3.4;
+  const { x, y } = preview.start;
+  svg.appendChild(svgEl('line', {
+    x1: (x - Math.cos(a) * r).toFixed(2), y1: (y - Math.sin(a) * r).toFixed(2),
+    x2: (x + Math.cos(a) * r).toFixed(2), y2: (y + Math.sin(a) * r).toFixed(2),
+    class: 'circuit-start',
+  }));
+  return svg;
+}
+
+/** A label-and-value list. Aligned, so a column of facts reads as a column. */
+function factRows(pairs) {
+  const box = el('div', 'facts');
+  for (const [k, v] of pairs) {
+    const row = el('div', 'fact');
+    row.appendChild(el('span', 'k', esc(k)));
+    row.appendChild(el('span', 'v', esc(v)));
+    box.appendChild(row);
+  }
+  return box;
 }
 
 function offerCard(offer, build, onPick) {
@@ -401,6 +466,32 @@ export class Screens {
 
     wrap.appendChild(grid);
     body.appendChild(wrap);
+
+    // What the icons mean, for the types this region actually contains.
+    //
+    // The map was seven glyphs and a tooltip: the route is the run's central
+    // decision and the screen expected you to hover each node to find out what
+    // you were choosing between. Only the types on this map are listed, so the
+    // key describes the choice in front of you rather than the game in general.
+    const present = [];
+    for (const nd of run.map.nodes) if (!present.includes(nd.type)) present.push(nd.type);
+    if (present.length) {
+      body.appendChild(el('div', 'section-label', 'What these are'));
+      const key = el('div', 'map-key');
+      for (const type of present) {
+        const d = NODE_TYPES[type];
+        if (!d) continue;
+        const item = el('div', 'map-key-item');
+        item.appendChild(el('span', 'ic', d.icon));
+        const text = el('div', 'tx');
+        text.appendChild(el('div', 'nm', esc(d.name)));
+        text.appendChild(el('div', 'ds', esc(d.desc)));
+        item.appendChild(text);
+        key.appendChild(item);
+      }
+      body.appendChild(key);
+    }
+
     const node = this._show(root);
 
     // Measure after layout, then draw.
@@ -552,44 +643,91 @@ export class Screens {
   briefing(run, cfg, { onGo }) {
     const node = run.pending;
     const def = NODE_TYPES[node.type];
+    const biome = cfg.biome ?? run.biome;
     const { root, body, foot, hint } = frame(
       cfg.boss ? cfg.boss.name : def.name,
-      cfg.boss ? cfg.boss.title : run.biome.name,
-      run, { withPanel: true },
+      cfg.boss ? cfg.boss.title : biome.name,
+      run,
     );
+    root.classList.add('screen--briefing');
+
+    const wrap = el('div', 'briefing');
+
+    // The circuit, generated from the race's own seed. Not an illustration of
+    // one: it is the loop that is about to be driven, and its shape says more
+    // about the next two minutes than any of the numbers beside it.
+    const left = el('div', 'briefing-map');
+    let preview = null;
+    try {
+      preview = previewTrack(cfg.seed, biome, {
+        difficulty: cfg.difficulty, lengthScale: cfg.lengthScale,
+      });
+    } catch {
+      // A briefing that cannot draw the circuit is still a briefing. Better a
+      // screen with no map than no screen.
+      preview = null;
+    }
+    if (preview) {
+      left.appendChild(circuitMap(preview));
+      const legend = el('div', 'circuit-legend');
+      legend.innerHTML =
+        '<span class="k start">Start / finish</span>'
+        + (preview.branches.length ? '<span class="k branch">Shortcut</span>' : '');
+      left.appendChild(legend);
+    }
+    wrap.appendChild(left);
+
+    const info = el('div', 'briefing-info');
 
     if (cfg.boss) {
-      body.appendChild(el('div', 'story',
-        `${esc(cfg.boss.text)}<br><br><b>Objective:</b> ${esc(cfg.boss.objective)}`));
-    }
-    if (cfg.challenge) {
-      body.appendChild(el('div', 'story',
-        `<b>Challenge — ${esc(cfg.challenge.name)}:</b> ${esc(cfg.challenge.text)}<br>`
-        + `Meeting it pays a bonus reward and 70 scrap.`));
-    }
-    if (cfg.modifiers?.length) {
-      const row = el('div', 'modline');
-      for (const m of cfg.modifiers) {
-        row.appendChild(el('span', null, `${m.icon} <b>${esc(m.name)}</b> — ${esc(m.text)}`));
-      }
-      const box = el('div', 'story');
-      box.appendChild(el('b', null, 'Race modifiers'));
-      box.appendChild(row);
-      body.appendChild(box);
+      info.appendChild(el('div', 'section-label', 'Who you are up against'));
+      info.appendChild(el('div', 'machine-identity', esc(cfg.boss.text)));
+      info.appendChild(el('div', 'rule', `Objective: ${esc(cfg.boss.objective)}`));
     }
 
-    body.appendChild(el('div', 'section-label', 'The race'));
-    const tally = el('div', 'tally');
+    info.appendChild(el('div', 'section-label', 'The circuit'));
+    info.appendChild(el('div', 'machine-identity', esc(biome.tagline)));
+    if (preview) {
+      const c = preview.stats;
+      const total = (c.length * cfg.laps) / 1000;
+      info.appendChild(factRows([
+        ['Lap', `${c.length} m`],
+        ['Race', `${total.toFixed(1)} km over ${cfg.laps} lap${cfg.laps === 1 ? '' : 's'}`],
+        ['Corners', `${c.corners}, tightest ${c.tightest} m`],
+        ['Shortcuts', c.shortcuts ? `${c.shortcuts} branches off the racing line` : 'none'],
+        ['Road', `${c.width} m wide, ${c.climb} m of climb`],
+      ]));
+    }
+
+    info.appendChild(el('div', 'section-label', 'The race'));
+    const tally = el('div', 'tally tally--tight');
     tally.innerHTML =
-      `<div class="item"><div class="v">${cfg.laps}</div><div class="k">Laps</div></div>` +
-      `<div class="item"><div class="v">${cfg.rivals}</div><div class="k">Rivals</div></div>` +
-      `<div class="item"><div class="v">${(1 + cfg.difficulty).toFixed(1)}</div><div class="k">Difficulty</div></div>` +
-      `<div class="item"><div class="v">${Math.round(run.durability)}</div><div class="k">Durability</div></div>`;
-    body.appendChild(tally);
+      `<div class="item"><div class="v">${cfg.laps}</div><div class="k">Laps</div></div>`
+      + `<div class="item"><div class="v">${cfg.rivals}</div><div class="k">Rivals</div></div>`
+      + `<div class="item"><div class="v">${(1 + cfg.difficulty).toFixed(1)}</div><div class="k">Difficulty</div></div>`
+      + `<div class="item"><div class="v">${Math.round(run.durability)}</div><div class="k">Durability</div></div>`;
+    info.appendChild(tally);
 
-    // The controls legend, which used to sit under the roster — three screens
-    // and several minutes before anybody could use it. This is the last screen
-    // before you are driving.
+    if (cfg.challenge) {
+      info.appendChild(el('div', 'section-label', 'Challenge'));
+      info.appendChild(el('div', 'rule',
+        `${esc(cfg.challenge.name)} — ${esc(cfg.challenge.text)} `
+        + 'Meeting it pays a bonus reward and 70 scrap.'));
+    }
+
+    if (cfg.modifiers?.length) {
+      info.appendChild(el('div', 'section-label', 'Conditions'));
+      for (const m of cfg.modifiers) {
+        const line = el('div', 'machine-skill');
+        line.appendChild(el('div', 'lbl', `${m.icon || ''} ${esc(m.name)}`));
+        line.appendChild(el('div', 'det', esc(m.text)));
+        info.appendChild(line);
+      }
+    }
+
+    wrap.appendChild(info);
+    body.appendChild(wrap);
+
     hint.textContent =
       'W/S throttle & brake · A/D steer · SHIFT drift · 1-4 skills · F1 perf overlay';
 

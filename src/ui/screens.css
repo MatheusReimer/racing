@@ -751,8 +751,16 @@
   font-weight: 500;
 }
 
-.tally--tight { gap: var(--s2); margin-bottom: var(--s3); }
-.tally--tight .item { min-width: 88px; padding: var(--s2) var(--s3); }
+/* A fixed grid, not a wrapping row. Four figures in a side column wrapped
+   three-and-one, which reads as a mistake rather than as a layout. */
+.tally--tight {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+
+.tally--tight .item { min-width: 0; padding: var(--s2) var(--s3); }
 .tally--tight .v { font-size: 20px; }
 
 .machine-skill {
@@ -784,3 +792,153 @@
   .machine { grid-template-columns: minmax(0, 1fr); }
   .machine-stage { min-height: 34vh; }
 }
+
+/* ------------------------------------------------------------ briefing --- */
+
+/* The body is the full height here and does not scroll; the facts column
+   scrolls inside it, so the circuit stays put while you read past it. */
+.screen--briefing .screen-body { padding-bottom: var(--s3); }
+
+.briefing {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+  gap: var(--s5);
+}
+
+.briefing-map {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.briefing-info {
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: var(--s2);
+  font-size: 12px;
+}
+
+.briefing-info > .section-label:first-child { margin-top: 0; }
+
+/* The circuit map. Two strokes on one path: the wide one is the road, the
+   dashed hair is the line down the middle of it. */
+.circuit {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow: visible;
+}
+
+.circuit-road {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.13);
+  stroke-width: 4.4;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.circuit-line {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.42);
+  stroke-width: 0.5;
+  stroke-dasharray: 2 3.2;
+  stroke-linecap: round;
+}
+
+/* Branches sit under the main loop and read as road, not as annotation. */
+.circuit-branch-road {
+  fill: none;
+  stroke: rgba(79, 195, 247, 0.20);
+  stroke-width: 3.2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.circuit-branch {
+  fill: none;
+  stroke: rgba(79, 195, 247, 0.85);
+  stroke-width: 0.6;
+  stroke-dasharray: 1.6 2.4;
+  stroke-linecap: round;
+}
+
+.circuit-start {
+  stroke: var(--gold);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.circuit-legend {
+  display: flex;
+  gap: var(--s4);
+  justify-content: center;
+  padding-top: var(--s2);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.circuit-legend .k { display: flex; align-items: center; gap: var(--s1); }
+
+.circuit-legend .k::before {
+  content: '';
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.circuit-legend .start::before { background: var(--gold); }
+.circuit-legend .branch::before { background: var(--speed); }
+
+/* Label-and-value rows: the facts about a circuit, in a column. */
+.facts { display: grid; gap: var(--s1); margin-bottom: var(--s3); }
+
+.fact {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: var(--s2);
+  align-items: baseline;
+}
+
+.fact .k {
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fact .v { color: var(--text); }
+
+@media (max-width: 900px) {
+  .briefing { grid-template-columns: minmax(0, 1fr); }
+  .circuit { min-height: 34vh; }
+}
+
+/* The map key: what the glyphs on the route mean, for the types this region
+   actually has. */
+.map-key {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+  gap: var(--s2);
+  margin-bottom: var(--s4);
+}
+
+.map-key-item {
+  display: flex;
+  gap: var(--s2);
+  align-items: flex-start;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.map-key-item .ic { font-size: 17px; line-height: 1.2; flex: 0 0 auto; }
+.map-key-item .tx { min-width: 0; }
+.map-key-item .nm { font-size: 12px; font-weight: 600; }
+.map-key-item .ds { font-size: 11px; color: var(--text-dim); margin-top: 1px; }

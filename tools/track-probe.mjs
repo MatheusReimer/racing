@@ -4,6 +4,10 @@
 // shows up in 1 seed in 200 is a run-ending bug in play.
 
 import { generateTrack } from '../src/track/track.js';
+import { previewTrack } from '../src/track/preview.js';
+import { RaceSim } from '../src/race/sim.js';
+import { Build } from '../src/build/build.js';
+import { EventBus } from '../src/core/events.js';
 import { BIOMES } from '../src/data/biomes.js';
 import { RNG } from '../src/core/rng.js';
 import { StatBlock } from '../src/stats/statblock.js';
@@ -147,5 +151,69 @@ console.log(`  length (m)      ${fmt(stats.len)}`);
 console.log(`  min radius (m)  ${fmt(stats.minR, 1)}   [baseline car needs ~${minRadiusDrivable.toFixed(0)}m at ${(cornerSpeed * 3.6).toFixed(0)} km/h]`);
 console.log(`  sharp corners   ${fmt(stats.sharp)}   (radius < 22 m samples)`);
 console.log(`  branches        ${fmt(stats.branches)}`);
+
+// --- the circuit on the briefing is the circuit that gets raced -------------
+//
+// `previewTrack` draws the pre-race map by generating the track itself, from
+// the race's seed, forking its RNG the way `RaceSim` does. If those two ever
+// stop agreeing — a different fork label, an option the sim passes and the
+// preview does not — nothing errors: the briefing simply shows a circuit that
+// is not the one you are about to drive, which is worse than showing none.
+{
+  console.log('\nThe briefing map matches the circuit the sim builds:\n');
+  let bad = 0;
+  let worst = '';
+  for (let i = 0; i < 12; i++) {
+    const seed = `preview-${i}`;
+    const biome = BIOMES[i % BIOMES.length];
+    const opts = { difficulty: (i % 4) * 0.5, lengthScale: 1 + (i % 3) * 0.15 };
+
+    const sim = new RaceSim({
+      seed, biome, playerBuild: new Build('hatch'), events: new EventBus(),
+      config: { laps: 1, rivals: 0, ...opts },
+    });
+    const shown = previewTrack(seed, biome, opts);
+
+    // Length is the cheap fingerprint. Shape is the real one: two circuits can
+    // share a length and be nothing alike, so the sim's centreline is put
+    // through the same normalisation the preview uses — written out here
+    // rather than imported, because a probe that reuses the code it is
+    // checking only proves that code agrees with itself — and compared point
+    // for point.
+    const dLen = Math.abs(sim.track.length - shown.stats.length);
+    const drift = shapeDrift(sim.track, shown.outline);
+    if (dLen > 1 || drift > 0.25) {
+      bad++;
+      if (!worst) worst = `${biome.id}: length off by ${dLen.toFixed(1)} m, shape by ${drift.toFixed(2)}`;
+    }
+  }
+  if (bad) fails++;
+  console.log(`  12 circuits, ${bad} where the map is not the track`.padEnd(52)
+    + (bad ? `FAIL ${worst}` : 'ok'));
+}
+
+/** Worst distance, in preview units, between the drawn outline and the track. */
+function shapeDrift(track, outline) {
+  const pts = track.path.points;
+  const branches = (track.branches ?? []).map((b) => b.path.points);
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const set of [pts, ...branches]) {
+    for (const p of set) {
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+    }
+  }
+  const span = Math.max(maxX - minX, maxZ - minZ) || 1;
+  const offX = (span - (maxX - minX)) / 2;
+  const offZ = (span - (maxZ - minZ)) / 2;
+  if (pts.length !== outline.length) return 99;
+  let worstD = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const x = ((pts[i].x - minX + offX) / span) * 100;
+    const y = 100 - ((pts[i].z - minZ + offZ) / span) * 100;
+    worstD = Math.max(worstD, Math.hypot(x - outline[i].x, y - outline[i].y));
+  }
+  return worstD;
+}
 
 process.exit(fails > 0 ? 1 : 0);
