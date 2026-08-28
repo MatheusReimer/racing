@@ -33,20 +33,21 @@ Checked against the commits before the bodies, the scale change and the
 collision rewrite — it predates all of them. Worth a look before the roster is
 tuned around anything else.
 
-**`tools/realtime-probe.mjs` still fails at every tier**, though the thing it
-was blamed for turned out to be something else: the cars appearing to teleport
-was the renderer ignoring the interpolation fraction the loop had been handing
-it since the day it was written, and that is fixed. What is left is a real
-p99 of four to five seconds against a healthy 3–7 ms p50 — something stalls
-hard rather than rendering slowly, and it wants a profile rather than a guess.
+**`tools/realtime-probe.mjs` still fails at every tier**, though it is a third
+of the way better than it was and the two things it was blamed for turned out to
+be something else each time. The cars appearing to teleport was the renderer
+ignoring the interpolation fraction the loop had always handed it. The p99 of
+four to five seconds was largely the HDR target being disposed and reallocated
+every time the quality governor moved a tier; the composite runs on every tier
+now and p99 is around 1.7 s.
 
-One measured contributor: `VehicleMesh` builds the entire generated car, ten
-thousand triangles of boxes and lofts, and then throws it away when the body
-type has a hull. Ten milliseconds a car, seventy across a grid of seven, spent
-on geometry nobody ever sees. That was a deliberate trade when the alternative
-was threading a condition through four hundred lines, and it has come due. It
-is not the whole story — at three thousand triangles per car and at fifty
-thousand the ratio was 0.24x and 0.25x — but it is the part that is certain.
+What is left is still a stall rather than slow rendering — 6–8 ms p50 against a
+1.7 s p99 — and it wants a profile rather than another guess. One measured
+contributor is certain: `VehicleMesh` builds the entire generated car, ten
+thousand triangles of boxes and lofts, and throws it away when the body type has
+a hull. Ten milliseconds a car, seventy across a grid of seven, on geometry
+nobody sees. That was a deliberate trade when the alternative was threading a
+condition through four hundred lines, and it has come due.
 
 ---
 

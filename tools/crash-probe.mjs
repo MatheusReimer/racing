@@ -161,6 +161,37 @@ const momentum = (a, b) => [
     `${Math.round(yawInertia(long))} vs ${Math.round(yawInertia(short))} kg m2`);
 }
 
+// --- and hitting a structure does not launch you backwards ------------------
+//
+// The prop bounce removed 1.35 times the closing speed, which does not absorb a
+// collision — it reverses it. Straight into something solid at sixty and you
+// left at twenty going the other way, which is what "I touch a structure and
+// the car goes into reverse" was. A car that meets concrete stops.
+{
+  const sim = Object.create(RaceSim.prototype);
+  const r = car(0, 0, 0, 0, 30);
+  r.damage = () => 0;
+  r.build = { physics: { mass: 1200, impactForce: 1 }, fire() {}, stats: { mod: () => 0 } };
+  r.radius = 2.0;
+  sim.racers = [r];
+  sim.collidable = [{
+    alive: true, x: 0, z: 3.0, radius: 1.2, toughness: 1e9, type: 'boulder',
+  }];
+  sim._applySpeedFloor = () => {};
+  sim.events = null;
+  const before = r.body.vz;
+  // Driven into it, rather than teleported next to it: the response is applied
+  // per step and the car has to be moving into the thing for it to count.
+  for (let i = 0; i < 8; i++) {
+    sim._resolveProps(1 / 60);
+    r.body.z += r.body.vz / 60;
+  }
+  const after = r.body.vz;
+  check('head-on into something solid: stopped, not launched back',
+    after > -1.0 && after < before * 0.2,
+    `${before.toFixed(0)} -> ${after.toFixed(1)} m/s`);
+}
+
 console.log('');
 if (problems) {
   console.log(`${problems} check(s) failed.`);

@@ -23,8 +23,16 @@ export const QUALITY_TIERS = [
     name: 'Low',
     pixelRatio: 0.70,
     maxPixelRatio: 1.0,
-    bloom: false,
-    bloomPasses: 0,
+    // One pass, not none.
+    //
+    // Turning bloom off outright makes a tier change visible as the lighting
+    // changing rather than as detail thinning — the glow on every lamp, trim
+    // strip and explosion simply leaves, and the governor picks its moment by
+    // load, which is the instant a race starts. One quarter-res blur is close
+    // to free next to that, and it means dropping to Low looks like Low rather
+    // than like a different game.
+    bloom: true,
+    bloomPasses: 1,
     shadows: false,
     shadowMapSize: 0,
     particleBudget: 260,

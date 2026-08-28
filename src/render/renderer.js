@@ -238,11 +238,12 @@ export class Renderer {
   _allocTargets() {
     const dispose = (rt) => rt && rt.dispose();
 
+    // The blur chain is what a low tier gives up. The scene target is not:
+    // every tier composites through it, so that dropping a tier costs detail
+    // rather than changing what the game looks like.
     if (!this.useBloom) {
-      dispose(this.sceneRT); this.sceneRT = null;
       dispose(this.bloomA); this.bloomA = null;
       dispose(this.bloomB); this.bloomB = null;
-      return;
     }
 
     const opts = {
@@ -328,16 +329,15 @@ export class Renderer {
   render(scene, camera, fx = {}) {
     const gl = this.gl;
 
-    if (!this.useBloom) {
-      // Straight to the canvas. Three does the tonemapping in this path since
-      // our composite shader never runs.
-      gl.toneMapping = THREE.ACESFilmicToneMapping;
-      gl.toneMappingExposure = fx.exposure ?? this.exposure;
-      gl.setRenderTarget(null);
-      gl.render(scene, camera);
-      return;
-    }
-
+    // Every tier goes through the composite.
+    //
+    // The low tiers used to skip it and render straight to the canvas, letting
+    // Three tonemap instead — which drops the vignette, the chroma and the
+    // speed blur along with the bloom. So the governor changing tier did not
+    // read as less detail, it read as the lighting changing: the countdown ran
+    // at one tier, the race put the load up and dropped it, and the whole image
+    // shifted the instant the lights went out. What a low tier gives up now is
+    // the blur chain, which is the expensive part; one fullscreen pass is not.
     gl.toneMapping = THREE.NoToneMapping;
 
     // 1. Scene into the HDR target.
@@ -345,29 +345,32 @@ export class Renderer {
     gl.clear();
     gl.render(scene, camera);
 
-    // 2. Bright pass at quarter res.
-    this.brightMat.uniforms.tDiffuse.value = this.sceneRT.texture;
-    this.brightMat.uniforms.uThreshold.value = this.bloomThreshold;
-    this._blit(this.brightMat, this.bloomA);
+    if (this.useBloom) {
+      // 2. Bright pass at quarter res.
+      this.brightMat.uniforms.tDiffuse.value = this.sceneRT.texture;
+      this.brightMat.uniforms.uThreshold.value = this.bloomThreshold;
+      this._blit(this.brightMat, this.bloomA);
 
-    // 3. Separable blur, ping-ponging. Each pass widens the kernel.
-    const bw = this.bloomA.width, bh = this.bloomA.height;
-    for (let i = 0; i < this.blurPasses; i++) {
-      const spread = 1 + i * 1.6;
-      this.blurMat.uniforms.tDiffuse.value = this.bloomA.texture;
-      this.blurMat.uniforms.uDirection.value.set(spread / bw, 0);
-      this._blit(this.blurMat, this.bloomB);
+      // 3. Separable blur, ping-ponging. Each pass widens the kernel.
+      const bw = this.bloomA.width;
+      const bh = this.bloomA.height;
+      for (let i = 0; i < this.blurPasses; i++) {
+        const spread = 1 + i * 1.6;
+        this.blurMat.uniforms.tDiffuse.value = this.bloomA.texture;
+        this.blurMat.uniforms.uDirection.value.set(spread / bw, 0);
+        this._blit(this.blurMat, this.bloomB);
 
-      this.blurMat.uniforms.tDiffuse.value = this.bloomB.texture;
-      this.blurMat.uniforms.uDirection.value.set(0, spread / bh);
-      this._blit(this.blurMat, this.bloomA);
+        this.blurMat.uniforms.tDiffuse.value = this.bloomB.texture;
+        this.blurMat.uniforms.uDirection.value.set(0, spread / bh);
+        this._blit(this.blurMat, this.bloomA);
+      }
     }
 
     // 4. Composite to the canvas.
     const u = this.compositeMat.uniforms;
     u.tDiffuse.value = this.sceneRT.texture;
-    u.tBloom.value = this.bloomA.texture;
-    u.uBloomStrength.value = this.bloomStrength;
+    u.tBloom.value = this.bloomA ? this.bloomA.texture : this.blackTex;
+    u.uBloomStrength.value = this.useBloom ? this.bloomStrength : 0;
     u.uExposure.value = fx.exposure ?? this.exposure;
     u.uVignette.value = this.vignette;
     u.uChroma.value = fx.chroma ?? this.chroma;

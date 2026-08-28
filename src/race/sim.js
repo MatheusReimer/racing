@@ -57,6 +57,16 @@ const OFF_TRACK_RESCUE_TIME = 9;
 // Bounce and scrub between two cars. Sheet metal is not springy: most of a
 // crash goes into deforming it, which is why 0.28 rather than anything near 1.
 const CAR_RESTITUTION = 0.28;
+// How much of the speed carried into an obstacle comes back out, as the
+// multiplier on the component removed: 1.0 stops the car dead, above 1.0 sends
+// it back the way it came.
+//
+// Speed-dependent, because a car is not a ball. A bumper nudging a barrel at
+// walking pace does spring back a little; the same car meeting the same barrel
+// at a hundred crumples, and everything that would have been rebound goes into
+// the bodywork instead. Flat 1.35 — which is not absorption at all, it is
+// reversal with interest — was launching cars backwards out of head-on hits.
+const propAbsorb = (closing) => 1 + 0.22 * Math.exp(-closing / 7);
 // How much of the normal impulse friction across the contact can spend. This is
 // what turns a sideswipe from a clean bounce into two cars dragging along each
 // other, and it is where the rotation in a door-to-door fight comes from.
@@ -695,19 +705,39 @@ export class RaceSim {
             speed: closing, damage: prop.toughness * 0.045,
           });
         } else {
-          // Bounce. Push out of penetration, reflect, and pay for it.
+          // Bounce. Push out of penetration, take the speed, and pay for it.
+          //
+          // This removed 1.35 times the closing component, which does not
+          // absorb a collision — it reverses it. Nose-first into a barrier at
+          // sixty and you left at twenty going backwards, which is what "I
+          // touch a structure and the car goes into reverse" was. A car meeting
+          // something solid crumples and stops; it does not rebound off it. So
+          // a tenth comes back and the rest is gone, and what is left of your
+          // speed along the obstacle is scrubbed rather than carried, because
+          // sliding past something you just hit head-on is its own kind of
+          // wrong.
           const over = rsum - d;
           b.x -= nx * over;
           b.z -= nz * over;
-          b.vx -= nx * closing * 1.35;
-          b.vz -= nz * closing * 1.35;
+          const absorb = propAbsorb(closing);
+          b.vx -= nx * closing * absorb;
+          b.vz -= nz * closing * absorb;
+          const ptx = -nz;
+          const ptz = nx;
+          const pvt = b.vx * ptx + b.vz * ptz;
+          b.vx -= ptx * pvt * 0.30;
+          b.vz -= ptz * pvt * 0.30;
           b.gripPenalty = Math.min(b.gripPenalty, 0.6);
           b.gripPenaltyTimer = Math.max(b.gripPenaltyTimer, 0.35);
           b.jolt(-nx * closing, -nz * closing);
           // Nudge the car sideways off the obstacle so repeatedly driving into
-          // something unsmashable does not become a permanent stop.
-          b.x += -nz * 0.12 * (Math.random() < 0.5 ? 1 : -1);
-          b.z += nx * 0.12 * (Math.random() < 0.5 ? 1 : -1);
+          // something unsmashable does not become a permanent stop. Which way
+          // comes from the prop rather than from `Math.random`: a race has to
+          // replay identically from its seed, and the playtest and balance
+          // tools depend on it.
+          const away = (prop.x + prop.z) % 2 < 1 ? 1 : -1;
+          b.x += -nz * 0.12 * away;
+          b.z += nx * 0.12 * away;
           const applied = r.damage(closing * 0.30, { type: 'prop', prop: prop.type }, this);
           this.onPropHit?.(prop, r, closing);
           this.events?.emit('audio:impact', { strength: closing, isPlayer: r.isPlayer });
