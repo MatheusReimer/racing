@@ -63,11 +63,24 @@ export class ChaseCamera {
    * @param opts   { lookBack, boosting, heatPct }
    */
   update(dt, body, opts = {}) {
+    // The car it follows is drawn between two simulated poses, so the rig has
+    // to aim at the same place. Chasing the newest pose while the car is drawn
+    // at an older one puts the stutter back in — as the car shivering against a
+    // steady world, which is harder to place than the car simply jumping.
+    const a = opts.alpha == null ? 1 : (opts.alpha < 0 ? 0 : (opts.alpha > 1 ? 1 : opts.alpha));
+    const lerpTo = (prev, now) => (prev == null ? now : prev + (now - prev) * a);
+    const bodyX = lerpTo(body.px, body.x);
+    const bodyY = lerpTo(body.py, body.y);
+    const bodyZ = lerpTo(body.pz, body.z);
+    let dyaw = body.yaw - (body.pyaw ?? body.yaw);
+    while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+    while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+    const bodyYaw = (body.pyaw ?? body.yaw) + dyaw * a;
     const speedFrac = clamp01(body.speed / Math.max(1, body.p.maxSpeed));
 
     // --- where the rig wants to be -----------------------------------------
     this._lookBackBlend = damp(this._lookBackBlend, opts.lookBack ? 1 : 0, 12, dt);
-    const facing = body.yaw + Math.PI * this._lookBackBlend;
+    const facing = bodyYaw + Math.PI * this._lookBackBlend;
 
     // Trail the heading, but let a drift pull the camera partway toward the
     // direction of travel — enough to keep the road visible mid-slide without
@@ -88,9 +101,9 @@ export class ChaseCamera {
     const hgt = this.height * lerp(1.0, 0.82, speedFrac);
 
     const bx = Math.sin(this.yaw), bz = Math.cos(this.yaw);
-    const wantX = body.x - bx * dist;
-    const wantZ = body.z - bz * dist;
-    const wantY = body.y + hgt;
+    const wantX = bodyX - bx * dist;
+    const wantZ = bodyZ - bz * dist;
+    const wantY = bodyY + hgt;
 
     if (!this._initialised) {
       this.pos.set(wantX, wantY, wantZ);
@@ -127,9 +140,9 @@ export class ChaseCamera {
     // Aim ahead of the car along its heading, further at speed.
     const ahead = this.lookAhead * lerp(0.8, 1.6, speedFrac);
     const lfx = Math.sin(facing), lfz = Math.cos(facing);
-    const lookX = body.x + lfx * ahead;
-    const lookZ = body.z + lfz * ahead;
-    const lookY = body.y + 1.5;
+    const lookX = bodyX + lfx * ahead;
+    const lookZ = bodyZ + lfz * ahead;
+    const lookY = bodyY + 1.5;
 
     this.look.x = damp(this.look.x, lookX, 12, dt);
     this.look.y = damp(this.look.y, lookY, 9, dt);

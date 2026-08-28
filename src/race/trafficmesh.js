@@ -125,13 +125,27 @@ export class TrafficMesh {
     this._up = new THREE.Vector3(0, 1, 0);
   }
 
-  /** Follow the simulation. Called every frame; traffic never stops moving. */
-  sync() {
+  /**
+   * Follow the simulation. Called every frame; traffic never stops moving.
+   *
+   * Between two simulated poses, like the racers: civilian cars run at 60 to
+   * 100 km/h and are the thing you are threading between at speed, so they
+   * stutter just as visibly as the car you are driving.
+   */
+  sync(alpha = 1) {
+    const a = alpha < 0 ? 0 : (alpha > 1 ? 1 : alpha);
     for (const car of this.cars) {
       const slot = this.slots.get(car);
       if (!slot) continue;
-      this._p.set(car.x, car.y, car.z);
-      this._q.setFromAxisAngle(this._up, car.yaw);
+      const px = car.px ?? car.x;
+      const py = car.py ?? car.y;
+      const pz = car.pz ?? car.z;
+      const pyaw = car.pyaw ?? car.yaw;
+      let dy = car.yaw - pyaw;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      this._p.set(px + (car.x - px) * a, py + (car.y - py) * a, pz + (car.z - pz) * a);
+      this._q.setFromAxisAngle(this._up, pyaw + dy * a);
       this._m.compose(this._p, this._q, this._s);
       this.bodies[slot.kind]?.setMatrixAt(slot.index, this._m);
       this.lights[slot.kind]?.setMatrixAt(slot.index, this._m);

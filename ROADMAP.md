@@ -26,31 +26,27 @@ should be a probe.
 
 ---
 
-## A five-second frame, and a car that wins 87% of the time
-
-Two faults found by probes while working on something else, neither caused by
-it, both left alone rather than fixed badly in passing.
-
-**`tools/realtime-probe.mjs` fails at every tier**, and it is now known to be
-what is behind the cars appearing to teleport at speed. p50 frame time is a
-healthy 3–7 ms but p99 is four to five *seconds*, and the loop is taking seven
-to eight sim steps per drawn frame — a hundred and thirty milliseconds of game
-between pictures, which at fifty metres a second is nearly seven metres of road
-per frame. Nothing is jumping; there is simply nothing drawn in between.
-
-One measured contributor, worth taking first because it is certain: `VehicleMesh`
-builds the entire generated car — ten thousand triangles of boxes and lofts —
-and then throws it away when the body type has a hull. Ten milliseconds a car,
-seventy across a grid of seven, spent on geometry nobody ever sees. That was a
-deliberate trade when the alternative was threading a condition through four
-hundred lines, and it has come due. It is not the whole story: measured at three
-thousand triangles per car and at fifty thousand, the ratio was 0.24x and 0.25x,
-so the body budget is not the problem either.
+## A car that wins 85% of the time, and a five-second frame
 
 **`tools/balance.mjs` reports the Kanzen 1.6 winning around 85% of races.**
-Checked against the commits before the bodies, the scale change and the collision
-rewrite — it predates all of them. Worth a look before the roster is tuned around
-anything else.
+Checked against the commits before the bodies, the scale change and the
+collision rewrite — it predates all of them. Worth a look before the roster is
+tuned around anything else.
+
+**`tools/realtime-probe.mjs` still fails at every tier**, though the thing it
+was blamed for turned out to be something else: the cars appearing to teleport
+was the renderer ignoring the interpolation fraction the loop had been handing
+it since the day it was written, and that is fixed. What is left is a real
+p99 of four to five seconds against a healthy 3–7 ms p50 — something stalls
+hard rather than rendering slowly, and it wants a profile rather than a guess.
+
+One measured contributor: `VehicleMesh` builds the entire generated car, ten
+thousand triangles of boxes and lofts, and then throws it away when the body
+type has a hull. Ten milliseconds a car, seventy across a grid of seven, spent
+on geometry nobody ever sees. That was a deliberate trade when the alternative
+was threading a condition through four hundred lines, and it has come due. It
+is not the whole story — at three thousand triangles per car and at fifty
+thousand the ratio was 0.24x and 0.25x — but it is the part that is certain.
 
 ---
 

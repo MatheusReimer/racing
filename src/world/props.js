@@ -1270,10 +1270,10 @@ busStop.glow = (rng, pal, ctx = {}) => {
  * and Impact come to decide navigation, as the design brief asks.
  */
 export const PROP_TYPES = {
-  tyre_stack: { build: tyreStack, place: TRACKSIDE, radius: 0.75, toughness: 60, height: 1.4 },
-  barrel: { build: barrel, place: TRACKSIDE, radius: 0.5, toughness: 40, height: 1.1 },
-  crate: { build: crate, place: TRACKSIDE, radius: 0.6, toughness: 55, height: 0.9 },
-  marker: { build: markerBoard, place: TRACKSIDE, radius: 0.35, toughness: 25, height: 2.2 },
+  tyre_stack: { build: tyreStack, place: TRACKSIDE, radius: 0.75, footprint: 0.9, toughness: 60, height: 1.4 },
+  barrel: { build: barrel, place: TRACKSIDE, radius: 0.5, footprint: 0.6, toughness: 40, height: 1.1 },
+  crate: { build: crate, place: TRACKSIDE, radius: 0.6, footprint: 0.8, toughness: 55, height: 0.9 },
+  marker: { build: markerBoard, place: TRACKSIDE, radius: 0.35, footprint: 0.7, toughness: 25, height: 2.2 },
 
   gantry: { build: gantry, place: SCENERY, radius: 0, toughness: null, height: 6.5, spanning: true },
   // `footprint` is how much room a prop needs, which is not `radius`.
@@ -1285,58 +1285,58 @@ export const PROP_TYPES = {
   // building put sixty metres off one straight lands on another part of the
   // lap, and thirteen metres of it ends up in the road. These are half-extents
   // at the largest each generator builds.
-  grandstand: { build: grandstand, place: SCENERY, radius: 0, footprint: 13, toughness: null, height: 6 },
+  grandstand: { build: grandstand, place: SCENERY, radius: 0, footprint: 14.8, toughness: null, height: 6 },
 
-  wreck: { build: wreck, place: TRACKSIDE, radius: 1.6, toughness: 190, height: 1.2 },
-  shack: { build: shack, place: SCENERY, radius: 2.4, toughness: null, height: 3 },
+  wreck: { build: wreck, place: TRACKSIDE, radius: 1.6, footprint: 3.5, toughness: 190, height: 1.2 },
+  shack: { build: shack, place: SCENERY, radius: 2.4, footprint: 3.5, toughness: null, height: 3 },
   pole: {
     build: (r, p, c) => pole(r, p, r.bool(0.4), c),
-    place: SCENERY, radius: 0.3, toughness: null, height: 8,
+    place: SCENERY, radius: 0.3, footprint: 0.2, toughness: null, height: 8,
   },
-  dead_tree: { build: deadTree, place: SCENERY, radius: 0.4, toughness: 140, height: 5 },
+  dead_tree: { build: deadTree, place: SCENERY, radius: 0.4, footprint: 0.7, toughness: 140, height: 5 },
   rock: {
     build: (r, p, c) => rock(1.1 + r.range(0, 1.8), mix(p.prop, 0x6a6258, r.next()), r,
       { detail: Dt(1, c) }),
-    place: TRACKSIDE, radius: 1.3, toughness: null, height: 1.6,
+    place: TRACKSIDE, radius: 1.3, footprint: 4.4, toughness: null, height: 1.6,
   },
   boulder: {
     build: (r, p, c) => rock(2.6 + r.range(0, 2.2), mix(p.prop, 0x585048, r.next()), r,
       { detail: Dt(2, c) }),
-    place: SCENERY, radius: 3.0, toughness: null, height: 3.4,
+    place: SCENERY, radius: 3.0, footprint: 8.1, toughness: null, height: 3.4,
   },
 
-  pine: { build: pine, place: SCENERY, radius: 0.6, toughness: 150, height: 9 },
-  ice_block: { build: iceBlock, place: TRACKSIDE, radius: 1.2, toughness: 80, height: 1.8 },
-  snow_bank: { build: snowBank, place: SCENERY, radius: 2.2, toughness: null, height: 1.2 },
+  pine: { build: pine, place: SCENERY, radius: 0.6, footprint: 3.7, toughness: 150, height: 9 },
+  ice_block: { build: iceBlock, place: TRACKSIDE, radius: 1.2, footprint: 5.0, toughness: 80, height: 1.8 },
+  snow_bank: { build: snowBank, place: SCENERY, radius: 2.2, footprint: 6.8, toughness: null, height: 1.2 },
 
-  cactus: { build: cactus, place: TRACKSIDE, radius: 0.45, toughness: 35, height: 4 },
-  bones: { build: bones, place: SCENERY, radius: 1.8, toughness: null, height: 1.4 },
+  cactus: { build: cactus, place: TRACKSIDE, radius: 0.45, footprint: 1.3, toughness: 35, height: 4 },
+  bones: { build: bones, place: SCENERY, radius: 1.8, footprint: 5.7, toughness: null, height: 1.4 },
 
-  container: { build: container, place: TRACKSIDE, radius: 3.1, toughness: 320, height: 2.6 },
-  crane: { build: crane, place: SCENERY, radius: 1.6, toughness: null, height: 20 },
-  pipes: { build: pipes, place: SCENERY, radius: 1.0, toughness: null, height: 2.5 },
+  container: { build: container, place: TRACKSIDE, radius: 3.1, footprint: 4.3, toughness: 320, height: 2.6 },
+  crane: { build: crane, place: SCENERY, radius: 1.6, footprint: 1.3, toughness: null, height: 20 },
+  pipes: { build: pipes, place: SCENERY, radius: 1.0, footprint: 24.1, toughness: null, height: 2.5 },
 
-  spire: { build: spire, place: SCENERY, radius: 1.6, toughness: null, height: 14 },
+  spire: { build: spire, place: SCENERY, radius: 1.6, footprint: 2.6, toughness: null, height: 14 },
   streetlight: {
     build: streetlight, glow: streetlight.glow,
-    place: TRACKSIDE, radius: 0.3, toughness: null, height: 9,
+    place: TRACKSIDE, radius: 0.3, footprint: 0.4, toughness: null, height: 9,
     // The boom reaches out along local +X; it belongs over the road.
     faceRoad: 1,
   },
   traffic_light: {
     build: trafficLight, glow: trafficLight.glow,
-    place: TRACKSIDE, radius: 0.25, toughness: null, height: 5.4,
+    place: TRACKSIDE, radius: 0.25, footprint: 0.2, toughness: null, height: 5.4,
     faceRoad: 1,
   },
   neon_sign: {
     build: neonSign, glow: neonSign.glow,
-    place: TRACKSIDE, radius: 0.3, toughness: null, height: 5,
+    place: TRACKSIDE, radius: 0.3, footprint: 1.6, toughness: null, height: 5,
   },
   jersey_barrier: {
-    build: jerseyBarrier, place: TRACKSIDE, radius: 1.6, toughness: 260, height: 1,
+    build: jerseyBarrier, place: TRACKSIDE, radius: 1.6, footprint: 2.0, toughness: 260, height: 1,
   },
-  dumpster: { build: dumpster, place: TRACKSIDE, radius: 1.2, toughness: 90, height: 1.4 },
-  palm: { build: palm, place: SCENERY, radius: 0.4, toughness: 120, height: 9 },
+  dumpster: { build: dumpster, place: TRACKSIDE, radius: 1.2, footprint: 1.5, toughness: 90, height: 1.4 },
+  palm: { build: palm, place: SCENERY, radius: 0.4, footprint: 0.5, toughness: 120, height: 9 },
 
   // --- frontages ---
   //
@@ -1372,17 +1372,17 @@ export const PROP_TYPES = {
 
   billboard: {
     build: billboard, glow: billboard.glow,
-    place: SCENERY, radius: 0.5, toughness: null, height: 11, faceRoad: -1,
+    place: SCENERY, radius: 0.5, footprint: 4.0, toughness: null, height: 11, faceRoad: -1,
   },
   bus_stop: {
     build: busStop, glow: busStop.glow,
-    place: TRACKSIDE, radius: 1.4, toughness: null, height: 2.7, faceRoad: -1,
+    place: TRACKSIDE, radius: 1.4, footprint: 3.5, toughness: null, height: 2.7, faceRoad: -1,
   },
 
-  building: { build: building, place: SCENERY, radius: 0, footprint: 17, toughness: null, height: 40, horizon: true },
-  ridge: { build: ridge, place: SCENERY, radius: 0, footprint: 25, toughness: null, height: 22, horizon: true },
+  building: { build: building, place: SCENERY, radius: 0, footprint: 16.8, toughness: null, height: 40, horizon: true },
+  ridge: { build: ridge, place: SCENERY, radius: 0, footprint: 144.7, toughness: null, height: 22, horizon: true },
 
-  brazier: { build: brazier, place: TRACKSIDE, radius: 0.9, toughness: 90, height: 2.2, emissive: 0xff5a1e },
+  brazier: { build: brazier, place: TRACKSIDE, radius: 0.9, footprint: 1.3, toughness: 90, height: 2.2, emissive: 0xff5a1e },
 };
 
 /**

@@ -126,7 +126,7 @@ export class Race extends RaceSim {
         steer: racer.input.steer,
         // The brake lights need to know, and nothing else was telling them.
         brake: racer.input.brake,
-      });
+      }, alpha);
     }
 
     this.camera.update(dt, this.player.body, {
@@ -135,9 +135,10 @@ export class Race extends RaceSim {
       // One projection per frame, so the rig can be kept above the terrain
       // under itself rather than under the car.
       groundAt: this._groundAt,
+      alpha,
     });
     this.propsMesh.syncDestroyed();
-    this.trafficMesh?.sync();
+    this.trafficMesh?.sync(alpha);
     this.lighting?.update(this.racers, this.traffic, this._groundAt);
     this.fx.update(dt, this.racers, this.combat, this.camera.camera.position);
     this.sky.update(dt, this.camera.camera.position);

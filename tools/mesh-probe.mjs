@@ -205,6 +205,37 @@ for (const c of cases) {
   }
 }
 
+// --- and each is drawn between two simulation steps ------------------------
+//
+// The loop has computed the fraction of a step it is ahead by since the day it
+// was written, and passed it to a renderer that ignored it — so a car was drawn
+// at the last simulated pose and nowhere in between. At two hundred an hour a
+// step is ninety centimetres, and the display never lines up with 60 Hz, so one
+// frame repeated a position and the next covered the lot. That is what
+// "teleporting when I go fast" was, and nothing about frame rate would have
+// fixed it.
+{
+  console.log('');
+  const c = cases[0];
+  const m = new VehicleMesh(visualProfile(c.build.stats.all(), c.build.tags, c.def),
+    { shadows: false });
+  const body = {
+    px: 0, py: 0, pz: 0, pyaw: 0, ppitch: 0, pbodyPitch: 0, pterrainPitch: 0, proll: 0,
+    x: 0, y: 0, z: 10, yaw: 0, pitch: 0, bodyPitch: 0, terrainPitch: 0, roll: 0,
+    forwardSpeed: 55, slipAngle: 0, drifting: false, driftQuality: 0, boostTimer: 0,
+  };
+  const at = (a) => { m.update(0.016, body, {}, a); return m.group.position.z; };
+  const z0 = at(0);
+  const zh = at(0.5);
+  const z1 = at(1);
+  const bad = Math.abs(z0 - 0) > 1e-6 || Math.abs(zh - 5) > 1e-6 || Math.abs(z1 - 10) > 1e-6;
+  if (bad) problems++;
+  console.log(`  ${'drawn between steps'.padEnd(28)} `
+    + `alpha 0/0.5/1 -> z ${z0.toFixed(2)} ${zh.toFixed(2)} ${z1.toFixed(2)} of 10   `
+    + (bad ? 'FAIL — the frame is pinned to one step' : 'ok'));
+  m.dispose();
+}
+
 console.log('');
 if (problems) {
   console.log(`${problems} mesh piece(s) are not closed and consistently wound —`);

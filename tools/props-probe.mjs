@@ -68,6 +68,55 @@ for (const [name, def] of Object.entries(PROP_TYPES)) {
 
 // --- scatter: density, and nothing on the grid ----------------------------
 
+// --- the declared footprints still match the geometry ----------------------
+//
+// `footprint` is how much room a prop needs, measured off what actually gets
+// built by tools/footprints.mjs and pasted in. Pasted numbers rot: the reason
+// ridges were going through the track is that this was a hand guess of 25 m
+// against a thing that is a hundred and forty-five across. So the geometry is
+// re-measured here and the declaration has to still cover it.
+{
+  console.log('\nDeclared footprints still cover the geometry:\n');
+  const CAR_HEIGHT = 2.5;
+  const SCALE_HEADROOM = 1.35;
+  const widest = new Map();
+  for (const biome of BIOMES) {
+    const lib = buildPropLibrary(biome, 1);
+    for (const [type, entry] of Object.entries(lib)) {
+      let w = widest.get(type) ?? 0;
+      for (const group of [entry.variants, ...(entry.levels ?? [])]) {
+        for (const g of group ?? []) {
+          const pos = g?.attributes?.position;
+          if (!pos) continue;
+          for (let i = 0; i < pos.count; i++) {
+            if (pos.getY(i) > CAR_HEIGHT) continue;
+            w = Math.max(w, Math.abs(pos.getX(i)), Math.abs(pos.getZ(i)));
+          }
+        }
+      }
+      widest.set(type, w);
+    }
+    disposePropLibrary(lib);
+  }
+  let drifted = 0;
+  let worst = '';
+  let by = 0;
+  for (const [type, w] of widest) {
+    const def = PROP_TYPES[type];
+    if (!def || def.spanning || def.frontage) continue;
+    const need = w * SCALE_HEADROOM;
+    const have = def.footprint ?? def.radius ?? 0;
+    if (need > have + 0.25) {
+      drifted++;
+      if (need - have > by) { by = need - have; worst = type; }
+    }
+  }
+  if (drifted) problems++;
+  console.log(`  ${String(widest.size).padStart(3)} types measured, ${drifted} under-declared`
+    + `${drifted ? `, worst ${worst} short by ${by.toFixed(1)} m` : ''}`.padEnd(52)
+    + (drifted ? 'FAIL — rerun tools/footprints.mjs' : 'ok'));
+}
+
 // --- and none of them standing in the road ---------------------------------
 //
 // Placement tested a prop's origin against a flat two-metre margin, which is

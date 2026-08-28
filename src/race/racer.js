@@ -319,12 +319,15 @@ export class Racer {
       return { id: 'air', label: 'AIRBORNE', why: 'no traction until you land', severity: 0.6 };
     }
 
-    // Nose-first into something at walking pace: all the thrust goes into the
-    // obstacle and comes straight back, and steering authority has scaled away
-    // with the speed. It is a genuine deadlock going forwards and trivial to
-    // escape backwards — so say which.
-    if (b.speed < 4.5 && this.sample.halfWidth != null
-        && Math.abs(this.sample.side) > this.sample.halfWidth + 0.6) {
+    // Nose-first into something with the throttle open and going nowhere.
+    //
+    // This used to read "slow and off the racing surface", which is a
+    // description of driving on the verge — so it fired constantly, at
+    // fifteen km/h on gravel with nothing holding the car at all, and told the
+    // player to reverse out of a situation they were already driving through. A
+    // warning that goes off while nothing is wrong is worse than no warning.
+    // Now it waits for the car to actually refuse to move.
+    if (b.stuckFor > 0.7) {
       return { id: 'wedged', label: 'WEDGED', why: 'hold S to reverse out', severity: 1 };
     }
 

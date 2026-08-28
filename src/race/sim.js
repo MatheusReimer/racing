@@ -332,6 +332,17 @@ export class RaceSim {
   update(dt, playerInput) {
     if (this.state === 'finished') return;
 
+    // Where everything was, before this step moves it.
+    //
+    // The renderer draws between two simulated instants rather than at the
+    // last one, which is what stops a car covering ninety centimetres between
+    // one frame and the next at speed. Taken here, at the top, so the pair
+    // spans the whole step including whatever the collisions do to it.
+    for (const r of this.racers) r.body.savePose();
+    for (const c of this.traffic ?? []) {
+      c.px = c.x; c.py = c.y; c.pz = c.z; c.pyaw = c.yaw;
+    }
+
     if (this.state === 'countdown') {
       this.countdown -= dt;
       if (this.countdown <= 0) {
@@ -798,16 +809,27 @@ export class RaceSim {
       b.vx += tx * (kept - vt);
       b.vz += tz * (kept - vt);
 
-      // Slide along the wall rather than spinning off it.
+      // Slide along the wall rather than spinning off it — but only while you
+      // are actually sliding along it.
       //
-      // Without this a glancing hit leaves the car rotating, and the rotation
-      // is what turns a scrape into a spin into a stop. Damping the yaw rate
-      // while in contact is what makes a wall a cost in time rather than a
-      // race-ending event, which is how Underground treats it.
-      b.yawRate *= Math.exp(-6 * dt);
-      const wallYaw = Math.atan2(tx * Math.sign(vt || 1), tz * Math.sign(vt || 1));
-      const toWall = angleDelta(wallYaw, b.yaw);
-      b.yaw = wrapAngle(b.yaw + toWall * (1 - Math.exp(-4 * dt)));
+      // Damping the yaw and pulling the heading parallel is what makes a
+      // glancing scrape a cost in time instead of a spin, and that is worth
+      // keeping. Applied at any speed it does something else entirely: a car
+      // nose-first into a barrier at walking pace had its heading taken away
+      // and turned to face down the wall, every frame, whatever the driver did.
+      // Between that and steering authority vanishing with speed, being stuck
+      // was a state you waited out rather than drove out of.
+      //
+      // So it fades out below a scraping speed. Rubbing along a wall at pace is
+      // still smoothed; sitting against one is left entirely to the driver.
+      const SCRAPE = 9;
+      const along = Math.min(1, Math.abs(vt) / SCRAPE);
+      if (along > 0.01) {
+        b.yawRate *= Math.exp(-6 * along * dt);
+        const wallYaw = Math.atan2(tx * Math.sign(vt || 1), tz * Math.sign(vt || 1));
+        const toWall = angleDelta(wallYaw, b.yaw);
+        b.yaw = wrapAngle(b.yaw + toWall * (1 - Math.exp(-4 * along * dt)));
+      }
 
       this._applySpeedFloor(r, speedBefore);
 

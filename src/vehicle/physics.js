@@ -109,6 +109,19 @@ export class VehicleBody {
     // bleeds off on its own.
     this.impactSpin = 0;
 
+    /** Seconds of asking the car to move while it does not. */
+    this.stuckFor = 0;
+
+    // Last frame's pose, for drawing between two simulation steps.
+    this.px = 0;
+    this.py = 0;
+    this.pz = 0;
+    this.pyaw = 0;
+    this.ppitch = 0;
+    this.pbodyPitch = 0;
+    this.pterrainPitch = 0;
+    this.proll = 0;
+
     // Where the body is thrown by a hit, as a spring that returns to rest.
     // Purely what you see, but it is most of what makes contact read as
     // contact rather than as a change of number.
@@ -353,7 +366,20 @@ export class VehicleBody {
     // ramping authority in over 8 m/s left a car nose-first against a barrier
     // with no way to point itself away from it. 3.5 m/s still forbids spinning
     // on the spot while making extrication possible.
-    const rampIn = clamp01(speed / 3.5);
+    // Steering authority at a crawl.
+    //
+    // This was purely `speed / 3.5`, so a car at walking pace could not turn at
+    // all — and nose-first into a barrier is exactly a car at walking pace.
+    // Between that and the wall taking the heading, being stuck against
+    // something was a state you sat in rather than drove out of, which is not
+    // how it goes in the games this one is trying to feel like: there you scrape
+    // a wall, straighten up and carry on.
+    //
+    // A driven wheel that is turned pivots a car even when the car is barely
+    // moving, so the floor is conditional on the driver actually asking for
+    // something. Lifting off still leaves you with nothing, which is right.
+    const drive = Math.max(throttle, brake);
+    const rampIn = clamp01(Math.max(speed / 3.5, drive * 0.38));
     // Reversing inverts the steering, as it does in a real car.
     const dirSign = vFwd < -0.5 ? -1 : 1;
 
@@ -380,6 +406,17 @@ export class VehicleBody {
 
     this.x += this.vx * dt;
     this.z += this.vz * dt;
+
+    // Genuinely stuck: asking the car to go and it is not going.
+    //
+    // Not "slow and off the racing line", which is what the readout used to
+    // mean and which is mostly just driving on the verge. Wanting full throttle
+    // and getting nowhere is a different thing, it is the only version of it a
+    // player can act on, and it is rare — which is the point, because a warning
+    // that fires while nothing is wrong teaches you to ignore the one that
+    // matters.
+    if (drive > 0.5 && speed < 2 && !this.airborne) this.stuckFor += dt;
+    else this.stuckFor = 0;
 
     // Vertical ---------------------------------------------------------------
     // The wheels stay on the road unless there is a real gap.
@@ -484,6 +521,34 @@ export class VehicleBody {
 
     this.pitch = this.terrainPitch + this.bodyPitch;
 
+    return this;
+  }
+
+  /**
+   * Remember where the car was, so the frame can be drawn between two steps.
+   *
+   * The simulation runs at a fixed 60 Hz and the screen does not, and the two
+   * cannot be made to line up — requestAnimationFrame jitters, panels run at
+   * 144, and the accumulator drifts across the step boundary either way. Drawn
+   * at the last simulated pose regardless, a car at two hundred an hour repeats
+   * one frame's position and then covers ninety centimetres in the next, which
+   * is exactly what "the car teleports when I go fast" is. It is not a frame
+   * rate problem: the loop has computed the fraction of a step it is ahead by
+   * since the day it was written, and passed it to a renderer that threw it
+   * away.
+   *
+   * Taken before the step rather than after, and before collisions rather than
+   * after them, so the pair spans exactly one simulated instant.
+   */
+  savePose() {
+    this.px = this.x;
+    this.py = this.y;
+    this.pz = this.z;
+    this.pyaw = this.yaw;
+    this.ppitch = this.pitch;
+    this.pbodyPitch = this.bodyPitch;
+    this.pterrainPitch = this.terrainPitch;
+    this.proll = this.roll;
     return this;
   }
 

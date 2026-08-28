@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { HULLS } from '../data/bodies/index.js';
-import { clamp, clamp01, lerp } from '../core/math.js';
+import { clamp, clamp01, lerp, wrapAngle, angleDelta } from '../core/math.js';
 
 // Procedural vehicle geometry.
 //
@@ -1401,10 +1401,35 @@ export class VehicleMesh {
     }
 
     // --- underglow ----------------------------------------------------------
-    const glowGeo = new THREE.PlaneGeometry(W * 1.25, L * 0.95);
+    //
+    // A pool, not a panel.
+    //
+    // This was one flat quad in a single colour, which additively blended over
+    // tarmac is a glowing rectangle with four corners on it — and that is what
+    // it read as: a square drawn around the car. Light under a car does not
+    // have an edge. Subdividing it and fading the vertex colour out to black
+    // gives the falloff, and costs nothing extra to draw: under additive
+    // blending black *is* transparent, so the same one pass ends softly instead
+    // of stopping.
+    const glowGeo = new THREE.PlaneGeometry(W * 2.0, L * 1.6, 12, 18);
     glowGeo.rotateX(-Math.PI / 2);
+    {
+      const pos = glowGeo.attributes.position;
+      const col = new Float32Array(pos.count * 3);
+      const hw = W * 1.0;
+      const hl = L * 0.8;
+      for (let i = 0; i < pos.count; i++) {
+        const u = pos.getX(i) / hw;
+        const v = pos.getZ(i) / hl;
+        // Squared falloff on an ellipse: bright under the car, gone by the edge.
+        const r = Math.min(1, Math.hypot(u, v));
+        const f = (1 - r * r) ** 2;
+        col[i * 3] = f; col[i * 3 + 1] = f; col[i * 3 + 2] = f;
+      }
+      glowGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    }
     this.underglowMat = new THREE.MeshBasicMaterial({
-      color: this.glow.color, transparent: true, opacity: 0,
+      color: this.glow.color, vertexColors: true, transparent: true, opacity: 0,
       depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
     });
     this.underglow = new THREE.Mesh(glowGeo, this.underglowMat);
@@ -1421,18 +1446,36 @@ export class VehicleMesh {
    * @param body   VehicleBody
    * @param state  { heatPct, energyFrac, boosting, steer }
    */
-  update(dt, body, state = {}) {
+  update(dt, body, state = {}, alpha = 1) {
     const g = this.group;
-    g.position.set(body.x, body.y, body.z);
-    g.rotation.set(0, body.yaw, 0);
+
+    // Drawn between the last two simulated poses, not at the newest one.
+    //
+    // The simulation is a fixed 60 Hz and the display is not, and no amount of
+    // frame rate makes them line up — so at the last pose alone, a car at two
+    // hundred an hour repeats one frame and then jumps ninety centimetres. The
+    // loop has always handed the renderer the fraction of a step it is ahead
+    // by; this is the first thing to use it.
+    const a = clamp01(alpha);
+    const px = body.px ?? body.x;
+    const py = body.py ?? body.y;
+    const pz = body.pz ?? body.z;
+    g.position.set(lerp(px, body.x, a), lerp(py, body.y, a), lerp(pz, body.z, a));
+    // Heading takes the short way round, or a car crossing north spins on the
+    // spot for one frame.
+    const pyaw = body.pyaw ?? body.yaw;
+    g.rotation.set(0, wrapAngle(pyaw + angleDelta(body.yaw, pyaw) * a), 0);
     // A slope turns the whole car, tyres and all: that is what standing on a
     // hill is, and the wheels have to lie along it.
-    g.rotateX(body.terrainPitch ?? 0);
+    g.rotateX(lerp(body.pterrainPitch ?? 0, body.terrainPitch ?? 0, a));
     // Squat, dive and lean turn the body on its springs while the tyres stay
     // put. Applied to `group` instead, they pivoted the car about a point on the
     // tarmac and swung the wheels off it — ten centimetres at five degrees,
     // which is why it was forever hovering or buried.
-    this.chassis.rotation.set(body.bodyPitch ?? 0, 0, body.roll);
+    this.chassis.rotation.set(
+      lerp(body.pbodyPitch ?? 0, body.bodyPitch ?? 0, a), 0,
+      lerp(body.proll ?? 0, body.roll, a),
+    );
 
     this._wheelSpin += (body.forwardSpeed / Math.max(0.1, this.wheels[0].radius)) * dt;
     // Negated because a positive rotation.y turns the wheel toward +X, which is
