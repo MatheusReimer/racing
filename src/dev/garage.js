@@ -15,10 +15,14 @@ import { instantiateSkill } from '../data/skills.js';
 
 const CASES = {
   // One car, alone, for inspecting a specific artifact.
-  single: () => {
-    const v = VEHICLES[0];
+  //
+  // `VEHICLE` picks which, and `BODY` overrides just the silhouette — so a body
+  // type can be shaped and looked at before anything is committed to the roster.
+  single: (opts = {}) => {
+    const v = VEHICLES.find((x) => x.id === opts.vehicle) || VEHICLES[0];
     const build = new Build(v.id);
-    return [{ label: v.name, build, def: v }];
+    const def = opts.bodyType ? { ...v, bodyType: opts.bodyType } : v;
+    return [{ label: def.name, build, def }];
   },
 
   vehicles: () => VEHICLES.map((v) => {
@@ -74,7 +78,7 @@ export function showGarage(game, mode = 'vehicles', aspect = 1400 / 620, opts = 
   floor.rotation.x = -Math.PI / 2;
   scene.add(floor);
 
-  const specs = (CASES[mode] || CASES.vehicles)();
+  const specs = (CASES[mode] || CASES.vehicles)(opts);
   const meshes = [];
   const rows = [];
   const spacing = 8.6;

@@ -71,6 +71,13 @@ if (process.env.SCREEN !== 'title') {
   }, { autopilot: process.env.AUTOPILOT !== '0', biome: process.env.BIOME || null });
 }
 
+// Under SwiftShader the governor sees a machine that cannot hold the rate and
+// falls to tier 0, where bloom is off — so a capture meant to show the lighting
+// shows the one path that has none. QUALITY pins a tier and stops the steering.
+if (process.env.QUALITY != null) {
+  await page.evaluate((tier) => window.__game.quality.lockTo(tier), Number(process.env.QUALITY));
+}
+
 await page.waitForFunction(() => window.__game.loop.frame > 3, { timeout: 20000 })
   .catch(() => errors.push('[capture] game never rendered a frame'));
 

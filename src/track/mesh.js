@@ -18,6 +18,17 @@ const RING_SPACING = 3.0;   // metres between cross-sections
 const ROAD_COLS = 9;        // vertices across the road
 const BARRIER_HEIGHT = 1.35;
 
+/**
+ * How far the road surface floats above the path it is built from.
+ *
+ * Exported because anything laid *on* the road — light pools, decals — has to
+ * clear this, and `Track.groundAt` reports the path height rather than the
+ * surface height. A decal placed against `groundAt` alone is a centimetre under
+ * the tarmac and disappears wherever the depth buffer is precise enough to say
+ * so, which is exactly where the player is looking.
+ */
+export const ROAD_LIFT = 0.06;
+
 /** Where lane paint sits, as a fraction of half-width from the centre. */
 function laneColorAt(u, s, isBranch) {
   // u is -1 (left edge) .. +1 (right edge)
@@ -32,7 +43,7 @@ function laneColorAt(u, s, isBranch) {
 }
 
 function buildRibbon(path, lengthOf, halfWidthAt, opts = {}) {
-  const { isBranch = false, closed = true, lift = 0.06 } = opts;
+  const { isBranch = false, closed = true, lift = ROAD_LIFT } = opts;
   const L = lengthOf;
   const rings = Math.max(4, Math.floor(L / RING_SPACING));
   const cols = ROAD_COLS;
@@ -284,12 +295,27 @@ function buildVerge(track, biome, quality = {}) {
       const z = p.z + nz * lateral;
 
       // Hug the road at the verge, then fall away and get lumpy with distance.
+      //
+      // The height comes from the road nearest *this vertex*, not from the ring
+      // that produced it. The profile reaches hundreds of metres out from every
+      // cross-section, so on any circuit that folds back near itself — a city
+      // grid always does — a ring's sheet is laid straight across a different
+      // street, carrying the elevation of the street it came from. Half a metre
+      // of that is enough to bury the road it lands on: the whole city circuit
+      // was being driven on the pavement mesh, with the asphalt, the lane
+      // markings and the kerbs hidden underneath it, and any decal on the road
+      // hidden with them.
+      //
+      // Asking the track how high it is here instead makes the verge a function
+      // of position, so overlapping sheets agree with each other and every one
+      // of them sits below the road it covers.
+      const base = track.groundAt(x, z);
       const blend = clamp01(off / 70);
       const roll = terrainRoll(x, z);
       // City ground is a plane the blocks sit on, not rolling country.
       const relief = biome.city ? 0.06 : 0.42;
       const drop = biome.city ? 0.8 : 4.0;
-      const y = lerp(p.y - 0.30, p.y - drop + roll * elev * relief, blend);
+      const y = lerp(base - 0.30, base - drop + roll * elev * relief, blend);
 
       const k = i * cols + j;
       pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = z;

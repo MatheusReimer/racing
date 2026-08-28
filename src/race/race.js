@@ -7,6 +7,7 @@ import { VehicleMesh, visualProfile } from '../vehicle/chassis.js';
 import { FX } from '../fx/fx.js';
 import { PropsMesh } from '../world/propsmesh.js';
 import { TrafficMesh } from './trafficmesh.js';
+import { StreetLighting } from '../fx/lights.js';
 
 export { makeDefaultRivalBuild } from './sim.js';
 
@@ -37,6 +38,18 @@ export class Race extends RaceSim {
     this.fx = new FX(this.scene, events, quality.settings);
     this._groundAt = (x, z) => this.track.groundAt(x, z);
     this.fx.setFog(biome.palette.fogDensity ?? 0.004);
+
+    // Lamplight on the tarmac, for the districts that have lamps. In daylight
+    // it is invisible at best and a pale smear at worst, so it is not built.
+    this.lighting = biome.palette.night
+      ? new StreetLighting(this.scene, {
+        props: this.props,
+        library: this.propsMesh.library,
+        groundAt: this._groundAt,
+        quality: quality.settings,
+        fogDensity: biome.palette.fogDensity,
+      })
+      : null;
 
     // The base constructor already created the racers; give them bodies.
     this.meshes = new Map();
@@ -123,6 +136,7 @@ export class Race extends RaceSim {
     });
     this.propsMesh.syncDestroyed();
     this.trafficMesh?.sync();
+    this.lighting?.update(this.racers, this.traffic, this._groundAt);
     this.fx.update(dt, this.racers, this.combat, this.camera.camera.position);
     this.sky.update(dt, this.camera.camera.position);
     return this.camera.camera;
@@ -142,6 +156,7 @@ export class Race extends RaceSim {
   }
 
   dispose() {
+    this.lighting?.dispose();
     this.fx.dispose();
     this.propsMesh.dispose();
     this.trafficMesh?.dispose();

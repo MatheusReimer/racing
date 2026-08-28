@@ -895,6 +895,15 @@ function palm(rng, pal, ctx = {}) {
  * predictable: depth and width are near-constant and the variety is in height,
  * colour and what is stuck on the front.
  */
+/**
+ * Frontage types all share their width along the street, and only their width.
+ *
+ * The scatter lays them end to end on a fixed pitch, so a shared `FACADE_W` is
+ * what makes the wall continuous no matter which types come up next to each
+ * other. Depth is free, because they are placed by their *front* face: a deep
+ * office and a shallow terrace both meet the pavement on the same line and
+ * differ behind it, which is exactly how a real street works.
+ */
 const FACADE_W = 22;   // along the street
 const FACADE_D = 30;   // into the block
 
@@ -976,6 +985,278 @@ facade.glow = (rng, pal, ctx = {}) => {
   return mergeFaceted(parts);
 };
 
+// A shopping centre.
+//
+// Low, wide and set behind its own forecourt — the one thing on the street that
+// is not a wall of windows. It reads by silhouette: everything either side of
+// it goes up, and this goes sideways.
+const MALL_D = 34;
+
+function mall(rng, pal, ctx = {}) {
+  const fine = ctx.fine !== false;
+  const parts = [];
+  const h = 9 + rng.range(0, 4);
+  const wall = mix(pal.prop ?? 0x2a3038, 0x4a5260, 0.35 + rng.next() * 0.4);
+  const front = -MALL_D / 2;
+
+  parts.push(boxOf(MALL_D, h, FACADE_W, wall, { y: h / 2, rng, variation: 0.04 }));
+  // A deep parapet with plant on the roof: the profile of a big box.
+  parts.push(boxOf(MALL_D + 0.5, 1.1, FACADE_W + 0.5, shade(wall, 0.78), { y: h + 0.55, rng }));
+  for (let i = 0; i < (fine ? 3 : 1); i++) {
+    parts.push(boxOf(3.4, 1.5, 3.0, shade(wall, 0.66), {
+      x: -2 + i * 5.5, y: h + 1.7, z: rng.spread(5), rng, variation: 0.1,
+    }));
+  }
+
+  // Glazed front, set back under a projecting canopy that runs the full width.
+  parts.push(boxOf(0.5, 5.4, FACADE_W * 0.92, 0x0e131b, { x: front - 0.2, y: 2.9, rng }));
+  parts.push(boxOf(3.4, 0.5, FACADE_W * 0.98, shade(wall, 0.55), { x: front - 1.7, y: 6.0, rng }));
+  // Entrance: a taller glazed box breaking the canopy line.
+  parts.push(boxOf(2.6, 7.4, 6.4, shade(wall, 0.5), { x: front - 1.0, y: 3.7, rng }));
+  parts.push(boxOf(0.4, 5.6, 5.2, 0x0b1017, { x: front - 2.3, y: 3.0, rng }));
+
+  if (fine) {
+    // Columns holding the canopy, and trolley bays against the glass.
+    for (let i = -2; i <= 2; i++) {
+      parts.push(prism(S(8, ctx), 0.24, 0.24, 5.9, shade(wall, 0.6),
+        { x: front - 3.2, z: i * 4.2, rng }));
+    }
+    for (const iz of [-1, 1]) {
+      parts.push(boxOf(1.5, 1.1, 2.2, shade(wall, 0.72),
+        { x: front - 2.6, y: 0.55, z: iz * 8.2, rng, variation: 0.1 }));
+    }
+  }
+  return mergeFaceted(parts);
+}
+
+/** The sign band, the entrance, and the forecourt lighting. */
+mall.glow = (rng, pal, ctx = {}) => {
+  const h = 9 + rng.range(0, 4);
+  const front = -MALL_D / 2;
+  // One saturated band, the width of the building. A mall's sign is the
+  // brightest thing on its street and it is meant to be legible from a car.
+  const hue = [0xff4d6d, 0x38e0ff, 0xffc23a, 0x8b5cff][rng.int(0, 3)];
+  return mergeFaceted([
+    boxOf(0.18, 1.7, FACADE_W * 0.70, hue, { x: front - 1.95, y: 7.5 }),
+    // Spill from the glazing itself, which is what lights the forecourt.
+    boxOf(0.10, 4.6, FACADE_W * 0.86, 0xfff0d2, { x: front - 0.48, y: 2.9 }),
+    boxOf(0.10, 5.0, 4.8, 0xffffff, { x: front - 2.55, y: 3.0 }),
+  ]);
+};
+
+// A terrace of houses, the comfortable kind.
+//
+// Three narrow ones across the same width an office block gets, so the change
+// of grain is the point: a street of these has three times as many roof lines,
+// doors and windows per hundred metres as the commercial blocks do.
+const TERRACE_D = 17;
+
+function townhouse(rng, pal, ctx = {}) {
+  const fine = ctx.fine !== false;
+  const parts = [];
+  const units = 3;
+  const uw = FACADE_W / units;
+  const front = -TERRACE_D / 2;
+  // Brick, render, stone — picked per terrace, varied per unit.
+  const base = [0x6b4a3c, 0x7d7062, 0x8a8478, 0x5c4c46][rng.int(0, 3)];
+
+  for (let u = 0; u < units; u++) {
+    const z = -FACADE_W / 2 + uw * (u + 0.5);
+    const h = 6.4 + rng.range(0, 2.6);
+    const c = mix(base, 0xa79a8c, rng.range(0, 0.35));
+
+    parts.push(boxOf(TERRACE_D, h, uw - 0.12, c, { y: h / 2, z, rng, variation: 0.05 }));
+    // A pitched roof, as a squashed four-sided cone: the silhouette is the
+    // whole reason these read as houses rather than as short offices.
+    const roof = cone(4, uw * 0.82, 2.2 + rng.range(0, 0.8), shade(c, 0.52),
+      { y: h, z, rng, variation: 0.06 });
+    roof.rotateY(Math.PI / 4);
+    roof.scale(TERRACE_D / (uw * 1.16), 1, 1);
+    parts.push(roof);
+    // Chimney.
+    parts.push(boxOf(0.9, 1.8, 0.8, shade(c, 0.6),
+      { x: rng.spread(3), y: h + 1.5, z: z + rng.spread(1.4), rng }));
+
+    if (fine) {
+      // Door and a bay window either side of it, then two upstairs.
+      parts.push(boxOf(0.30, 2.2, 0.95, shade(c, 0.35), { x: front - 0.12, y: 1.1, z, rng }));
+      parts.push(boxOf(0.75, 1.9, 1.9, shade(c, 0.82),
+        { x: front - 0.38, y: 1.15, z: z - uw * 0.26, rng }));
+      for (const iz of [-1, 1]) {
+        parts.push(boxOf(0.22, 1.25, 1.0, 0x11161e,
+          { x: front - 0.10, y: h - 1.9, z: z + iz * uw * 0.24, rng }));
+      }
+      // A low garden wall with a gate gap, right on the pavement.
+      parts.push(boxOf(0.35, 0.85, uw - 0.9, shade(c, 0.62),
+        { x: front - 2.6, y: 0.42, z, rng, variation: 0.1 }));
+    }
+  }
+  return mergeFaceted(parts);
+}
+
+townhouse.glow = (rng, pal, ctx = {}) => {
+  const units = 3;
+  const uw = FACADE_W / units;
+  const front = -TERRACE_D / 2;
+  const parts = [];
+  for (let u = 0; u < units; u++) {
+    const z = -FACADE_W / 2 + uw * (u + 0.5);
+    const h = 6.4 + rng.range(0, 2.6);
+    // Houses are lit from inside and warmly. Some are dark, because some
+    // people are out.
+    if (rng.bool(0.62)) {
+      parts.push(boxOf(0.12, 1.6, 1.7, 0xffd9a0, { x: front - 0.5, y: 1.15, z: z - uw * 0.26 }));
+    }
+    if (rng.bool(0.45)) {
+      parts.push(boxOf(0.10, 1.1, 0.9, 0xffcf90, { x: front - 0.17, y: h - 1.9, z: z + uw * 0.24 }));
+    }
+    // A porch light over the door. Always on the middle house, so this builder
+    // can never return nothing: an empty glow variant is dropped from the pool,
+    // and the pool is indexed by the *body's* variant — one missing entry and
+    // every house after it wears another house's windows.
+    if (u === 1 || rng.bool(0.5)) {
+      parts.push(boxOf(0.16, 0.22, 0.30, 0xfff0cc, { x: front - 0.30, y: 2.5, z }));
+    }
+  }
+  return mergeFaceted(parts);
+};
+
+// The cheap end of the same street.
+//
+// Taller than the terraces and flatter than the offices, with everything that
+// gets added to a building nobody is maintaining: balconies, external stairs,
+// satellite dishes, washing. Same footprint, entirely different texture.
+const TENEMENT_D = 21;
+
+function tenement(rng, pal, ctx = {}) {
+  const fine = ctx.fine !== false;
+  const parts = [];
+  const floors = 4 + rng.int(0, 2);
+  const fh = 2.9;
+  const h = floors * fh + 1.2;
+  const front = -TENEMENT_D / 2;
+  const wall = mix(pal.prop ?? 0x2a3038, [0x6d5a48, 0x5f5b52, 0x715f5a][rng.int(0, 2)], 0.55);
+
+  parts.push(boxOf(TENEMENT_D, h, FACADE_W, wall, { y: h / 2, rng, variation: 0.07 }));
+  parts.push(boxOf(TENEMENT_D + 0.4, 0.5, FACADE_W + 0.4, shade(wall, 0.72), { y: h + 0.25, rng }));
+  // A shop unit at street level, wider than the doorways above it.
+  parts.push(boxOf(TENEMENT_D + 0.5, 3.2, FACADE_W + 0.5, shade(wall, 0.55), { y: 1.6, rng }));
+  parts.push(boxOf(0.35, 2.1, FACADE_W * 0.55, 0x0f141c, { x: front - 0.28, y: 1.7, rng }));
+
+  if (fine) {
+    // Balconies on every floor, running most of the width.
+    for (let f = 1; f < floors; f++) {
+      const y = 3.4 + (f - 1) * fh;
+      parts.push(boxOf(1.5, 0.16, FACADE_W * 0.78, shade(wall, 0.62), { x: front - 0.75, y, rng }));
+      parts.push(boxOf(0.10, 0.95, FACADE_W * 0.78, shade(wall, 0.48), { x: front - 1.45, y: y + 0.5, rng }));
+      // Washing, as flat slats on the rail. Colour is the only bright thing
+      // on the building and it belongs to the people in it.
+      if (rng.bool(0.7)) {
+        const cloth = [0xc9d6e2, 0xd8b8a0, 0x9fb8a0, 0xd9d2b0][rng.int(0, 3)];
+        for (let i = 0; i < 3; i++) {
+          parts.push(boxOf(0.05, 0.75, 0.55, cloth,
+            { x: front - 1.5, y: y + 0.35, z: rng.spread(7), rng, variation: 0.12 }));
+        }
+      }
+    }
+    // External stair up the near end, and dishes on the parapet.
+    for (let f = 0; f < floors; f++) {
+      parts.push(boxOf(1.9, 0.14, 1.5, shade(wall, 0.5),
+        { x: front - 0.9, y: 3.3 + f * fh, z: FACADE_W * 0.44, rng }));
+    }
+    for (let i = 0; i < 2; i++) {
+      parts.push(prism(S(8, ctx), 0.42, 0.42, 0.12, 0xb8b4ac,
+        { x: front + 0.6, y: h + 0.8, z: rng.spread(8), rng }));
+    }
+  }
+  return mergeFaceted(parts);
+}
+
+tenement.glow = (rng, pal, ctx = {}) => {
+  const floors = 4 + rng.int(0, 2);
+  const fh = 2.9;
+  const front = -TENEMENT_D / 2;
+  const parts = [];
+  const cols = 4;
+  for (let f = 0; f < floors; f++) {
+    for (let c = 0; c < cols; c++) {
+      if (!rng.bool(0.34)) continue;
+      // Colder and dimmer than the terraces: strip lighting, not lamps.
+      const hue = rng.bool(0.35) ? 0xcfe0ff : 0xffdba8;
+      parts.push(boxOf(0.10, 1.2, 1.0, hue, {
+        x: front - 0.12,
+        y: 4.2 + f * fh,
+        z: -FACADE_W * 0.36 + c * (FACADE_W * 0.72 / (cols - 1)),
+      }));
+    }
+  }
+  // The corner shop, open late, and the only saturated sign on the block.
+  const neon = [0xff6a3a, 0x3affc4, 0xffe23a][rng.int(0, 2)];
+  parts.push(boxOf(0.14, 0.55, FACADE_W * 0.34, neon, { x: front - 0.45, y: 3.05 }));
+  parts.push(boxOf(0.10, 1.9, FACADE_W * 0.50, 0xffeccd, { x: front - 0.40, y: 1.7 }));
+  return mergeFaceted(parts);
+};
+
+// ---------------------------------------------------------------------------
+// Street furniture
+// ---------------------------------------------------------------------------
+
+function billboard(rng, pal, ctx = {}) {
+  const h = 6.5 + rng.range(0, 3);
+  const w = 7.5 + rng.range(0, 2.5);
+  const parts = [];
+  for (const iz of [-1, 1]) {
+    parts.push(prism(S(10, ctx), 0.24, 0.20, h, 0x3a4048,
+      { z: iz * w * 0.28, rng, variation: 0.05 }));
+  }
+  // The panel faces the road, so it is thin along X like every other sign here.
+  parts.push(boxOf(0.28, 3.4, w, 0x1b2026, { x: -0.1, y: h + 1.7, rng }));
+  parts.push(boxOf(0.42, 0.22, w + 0.5, 0x2c3238, { x: -0.15, y: h + 3.5, rng }));
+  if (ctx.fine !== false) {
+    // Lamp bar on a bracket above, angled down at the face.
+    for (let i = -1; i <= 1; i++) {
+      parts.push(boxOf(0.5, 0.16, 0.5, 0x333940, { x: -0.7, y: h + 3.6, z: i * w * 0.3, rng }));
+    }
+  }
+  return mergeFaceted(parts);
+}
+
+billboard.glow = (rng, pal, ctx = {}) => {
+  const h = 6.5 + rng.range(0, 3);
+  const w = 7.5 + rng.range(0, 2.5);
+  const hue = [0xff3d6e, 0x3ad2ff, 0xffd23a, 0x9b6bff, 0x4dff9b][rng.int(0, 4)];
+  return mergeFaceted([
+    boxOf(0.10, 3.0, w * 0.94, hue, { x: -0.26, y: h + 1.7 }),
+    boxOf(0.16, 0.10, w * 0.7, 0xfff4dd, { x: -0.72, y: h + 3.52 }),
+  ]);
+};
+
+function busStop(rng, pal, ctx = {}) {
+  const parts = [];
+  const w = 4.6;
+  const d = 1.5;
+  // Roof and its four legs.
+  parts.push(boxOf(d + 0.3, 0.14, w, 0x2f353c, { x: 0.1, y: 2.55, rng }));
+  for (const ix of [-1, 1]) for (const iz of [-1, 1]) {
+    parts.push(prism(S(8, ctx), 0.09, 0.09, 2.5,
+      0x3a4048, { x: ix * d * 0.45, z: iz * w * 0.44, rng }));
+  }
+  // Glazed back wall, away from the road, and a bench inside it.
+  parts.push(boxOf(0.10, 2.0, w * 0.94, 0x161c24, { x: d * 0.5, y: 1.35, rng }));
+  parts.push(boxOf(0.55, 0.10, w * 0.7, 0x4a4038, { x: d * 0.28, y: 0.85, rng }));
+  // The lit advertising panel at one end — the reason this earns its light.
+  parts.push(boxOf(0.34, 2.0, 1.35, 0x22282f, { x: 0, y: 1.3, z: -w * 0.42, rng }));
+  return mergeFaceted(parts);
+}
+
+busStop.glow = (rng, pal, ctx = {}) => {
+  const w = 4.6;
+  return mergeFaceted([
+    boxOf(0.12, 1.7, 1.1, 0xf2f6ff, { x: -0.20, y: 1.3, z: -w * 0.42 }),
+    boxOf(0.9, 0.07, w * 0.86, 0xdfe9ff, { x: 0.1, y: 2.44 }),
+  ]);
+};
+
 // ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
@@ -1030,10 +1311,13 @@ export const PROP_TYPES = {
   streetlight: {
     build: streetlight, glow: streetlight.glow,
     place: TRACKSIDE, radius: 0.3, toughness: null, height: 9,
+    // The boom reaches out along local +X; it belongs over the road.
+    faceRoad: 1,
   },
   traffic_light: {
     build: trafficLight, glow: trafficLight.glow,
     place: TRACKSIDE, radius: 0.25, toughness: null, height: 5.4,
+    faceRoad: 1,
   },
   neon_sign: {
     build: neonSign, glow: neonSign.glow,
@@ -1045,16 +1329,69 @@ export const PROP_TYPES = {
   dumpster: { build: dumpster, place: TRACKSIDE, radius: 1.2, toughness: 90, height: 1.4 },
   palm: { build: palm, place: SCENERY, radius: 0.4, toughness: 120, height: 9 },
 
+  // --- frontages ---
+  //
+  // Everything that makes one of these a front — glazing, canopy, sign, door,
+  // lit windows — is on the -X face, which is the one that has to see the
+  // street. They share `frontage.width` so a row of mixed types still tiles
+  // into a continuous wall; `depth` is per type and only decides how far back
+  // the building goes, because the scatter places them by their front face.
   facade: {
     build: facade, glow: facade.glow,
     place: SCENERY, radius: 0, toughness: null, height: 42,
     frontage: { width: FACADE_W, depth: FACADE_D },
+    faceRoad: -1,
+  },
+  mall: {
+    build: mall, glow: mall.glow,
+    place: SCENERY, radius: 0, toughness: null, height: 14,
+    frontage: { width: FACADE_W, depth: MALL_D },
+    faceRoad: -1,
+  },
+  townhouse: {
+    build: townhouse, glow: townhouse.glow,
+    place: SCENERY, radius: 0, toughness: null, height: 11,
+    frontage: { width: FACADE_W, depth: TERRACE_D },
+    faceRoad: -1,
+  },
+  tenement: {
+    build: tenement, glow: tenement.glow,
+    place: SCENERY, radius: 0, toughness: null, height: 19,
+    frontage: { width: FACADE_W, depth: TENEMENT_D },
+    faceRoad: -1,
+  },
+
+  billboard: {
+    build: billboard, glow: billboard.glow,
+    place: SCENERY, radius: 0.5, toughness: null, height: 11, faceRoad: -1,
+  },
+  bus_stop: {
+    build: busStop, glow: busStop.glow,
+    place: TRACKSIDE, radius: 1.4, toughness: null, height: 2.7, faceRoad: -1,
   },
 
   building: { build: building, place: SCENERY, radius: 0, toughness: null, height: 40, horizon: true },
   ridge: { build: ridge, place: SCENERY, radius: 0, toughness: null, height: 22, horizon: true },
 
   brazier: { build: brazier, place: TRACKSIDE, radius: 0.9, toughness: 90, height: 2.2, emissive: 0xff5a1e },
+};
+
+/**
+ * What a city street is made of, and how long it stays made of it.
+ *
+ * `weight` is how often a type comes up; `run` is how many frontages in a row
+ * it keeps producing once it does. The run is the part that matters. Drawing a
+ * type per slot gives an office, a terrace, a mall, a tenement, an office — a
+ * street nobody built, where every hundred metres looks like every other. Real
+ * blocks come in stretches, so the district you are driving through changes as
+ * you go round the lap, and coming back to a stretch you recognise is what
+ * turns a circuit into a place.
+ */
+export const CITY_FRONTAGES = {
+  facade: { weight: 3.0, run: [2, 4] },      // commercial: the default street
+  tenement: { weight: 2.2, run: [2, 5] },    // the cheap end of it
+  townhouse: { weight: 2.0, run: [3, 6] },   // residential, and the longest runs
+  mall: { weight: 0.9, run: [1, 2] },        // rare, and it interrupts
 };
 
 /** Which types each biome uses, and how heavily. */
@@ -1081,10 +1418,10 @@ export const BIOME_PROPS = {
   },
   downtown: {
     trackside: {
-      streetlight: 4, neon_sign: 3, traffic_light: 2,
-      jersey_barrier: 3, dumpster: 2, marker: 1,
+      streetlight: 4, neon_sign: 3, traffic_light: 3,
+      jersey_barrier: 3, dumpster: 2, bus_stop: 2, marker: 1,
     },
-    scenery: { building: 4, palm: 2, pole: 1, shack: 1 },
+    scenery: { building: 3, billboard: 2.5, palm: 2, pole: 1, shack: 1 },
     horizon: { building: 5, crane: 1 },
   },
 
@@ -1111,7 +1448,7 @@ export function buildPropLibrary(biome, seed = 1) {
   ]);
   // Frontages are placed by a dedicated pass rather than drawn from a weighted
   // table, so they have to be asked for explicitly.
-  if (biome.city) used.add('facade');
+  if (biome.city) for (const name of Object.keys(CITY_FRONTAGES)) used.add(name);
 
   const library = {};
   let totalTris = 0;

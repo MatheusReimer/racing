@@ -6,3 +6,6 @@ shots/
 
 # scratch diagnostics, not part of the harness
 tools/_*.mjs
+
+# reference models: rulers for tools/silhouette.mjs, never shipped
+refs/

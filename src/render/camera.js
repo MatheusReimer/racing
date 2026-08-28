@@ -141,12 +141,7 @@ export class ChaseCamera {
     if (this.trauma > 0) {
       this.trauma = Math.max(0, this.trauma - dt * 2.6);
     }
-    const k = 90;      // spring constant
-    const c = 13;      // damping
-    this.shakeVel.x += (-this.shakeOffset.x * k - this.shakeVel.x * c) * dt;
-    this.shakeVel.y += (-this.shakeOffset.y * k - this.shakeVel.y * c) * dt;
-    this.shakeVel.z += (-this.shakeOffset.z * k - this.shakeVel.z * c) * dt;
-    this.shakeOffset.addScaledVector(this.shakeVel, dt);
+    this._stepShake(dt);
 
     // --- commit -------------------------------------------------------------
     const cam = this.camera;
@@ -173,6 +168,49 @@ export class ChaseCamera {
     }
 
     return cam;
+  }
+
+  /**
+   * Integrate the impact spring, at its own fixed step.
+   *
+   * This is the one piece of state here that is not exponential smoothing, and
+   * an explicitly integrated spring is only stable while the step is small
+   * enough: at these constants it diverges somewhere past 150 ms. The step it
+   * gets is the wall-clock frame time, which the loop caps at 250 ms — so a
+   * single hitch (a GC pause, a quality-tier change reallocating render
+   * targets, the browser stalling) is enough to turn a settling shove into one
+   * that grows without bound. The offset then carries the camera thousands of
+   * metres off, everything is culled, and the frame goes black while the car is
+   * still being driven perfectly well. It recovers, slowly, and looks for all
+   * the world like the game crashing and un-crashing.
+   *
+   * So the spring is stepped the way the simulation is: fixed, small, and as
+   * many times as the frame needs.
+   */
+  _stepShake(dt) {
+    const k = 90;      // spring constant
+    const c = 13;      // damping
+    const STEP = 1 / 240;
+    let remaining = Math.min(Math.max(dt, 0), 0.25);
+    while (remaining > 1e-6) {
+      const h = Math.min(STEP, remaining);
+      remaining -= h;
+      this.shakeVel.x += (-this.shakeOffset.x * k - this.shakeVel.x * c) * h;
+      this.shakeVel.y += (-this.shakeOffset.y * k - this.shakeVel.y * c) * h;
+      this.shakeVel.z += (-this.shakeOffset.z * k - this.shakeVel.z * c) * h;
+      this.shakeOffset.addScaledVector(this.shakeVel, h);
+    }
+    // A shove, never a teleport. The integrator above is stable on its own, so
+    // this is not what keeps the camera in the world — it is the guarantee that
+    // nothing added here later can ever take the world off screen again.
+    const MAX_OFFSET = 2.5;   // metres
+    const MAX_VEL = 30;       // metres per second
+    if (this.shakeOffset.lengthSq() > MAX_OFFSET * MAX_OFFSET) {
+      this.shakeOffset.setLength(MAX_OFFSET);
+    }
+    if (this.shakeVel.lengthSq() > MAX_VEL * MAX_VEL) {
+      this.shakeVel.setLength(MAX_VEL);
+    }
   }
 
   /**

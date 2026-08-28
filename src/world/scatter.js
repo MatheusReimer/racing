@@ -1,4 +1,4 @@
-import { PROP_TYPES, BIOME_PROPS } from './props.js';
+import { PROP_TYPES, BIOME_PROPS, CITY_FRONTAGES } from './props.js';
 import { BARRIER_RAIL_OFFSET } from '../track/track.js';
 import { clamp, clamp01, lerp, wrap, TAU } from '../core/math.js';
 
@@ -112,16 +112,31 @@ export function generateProps(rng, track, biome, opts = {}) {
     }
     const off = Math.abs(lateral) - track.halfWidthAt(s);
     const scale = extra.scale ?? (1 + rng.spread(0.22));
+
+    // Which way an aligned prop faces.
+    //
+    // `alignToTrack` gives a prop the road's yaw, and that rotation always maps
+    // its local +X onto the *positive lateral* direction — which is toward the
+    // road on one side of it and away on the other. Anything with a front, a
+    // boom or a lit face therefore came out backwards on half the circuit: half
+    // the street lamps hung their heads over the block behind them, and forty
+    // per cent of the frontages put their shopfront, their canopy and their lit
+    // windows in the alley. A type declares which local X sign is its front and
+    // gets turned to face the road when it lands on the wrong side.
+    let yaw = extra.alignToTrack
+      ? track.path.yawAt(s) + rng.spread(0.25)
+      : rng.range(0, TAU);
+    if (extra.alignToTrack && def.faceRoad && def.faceRoad * Math.sign(lateral) > 0) {
+      yaw += Math.PI;
+    }
+
     props.push({
       type,
       variant: rng.int(0, 2),
       x: p.x,
       y: p.y,
       z: p.z,
-      // Trackside things face roughly along the road; scenery is free to spin.
-      yaw: extra.alignToTrack
-        ? track.path.yawAt(s) + rng.spread(0.25)
-        : rng.range(0, TAU),
+      yaw,
       scale,
       s,
       lateral,
@@ -153,6 +168,30 @@ export function generateProps(rng, track, biome, opts = {}) {
   if (biome.city) {
     const front = PROP_TYPES.facade?.frontage;
     if (front) {
+      // A stretch of one kind of building at a time — offices, then terraces,
+      // then a mall — rather than a fresh draw per plot. See `CITY_FRONTAGES`
+      // for why the run length is the part that does the work.
+      const kinds = Object.entries(CITY_FRONTAGES)
+        .filter(([name]) => PROP_TYPES[name]?.frontage);
+      const totalWeight = kinds.reduce((t, [, k]) => t + k.weight, 0);
+      const drawKind = () => {
+        let r = rng.range(0, totalWeight);
+        for (const [name, k] of kinds) {
+          r -= k.weight;
+          if (r <= 0) return { name, left: rng.int(k.run[0], k.run[1]) };
+        }
+        return { name: kinds[0][0], left: 1 };
+      };
+      // Each side of the street runs its own stretch, so the two never change
+      // character on the same plot and the street is never symmetrical.
+      const runs = { '-1': drawKind(), 1: drawKind() };
+      const nextKind = (side) => {
+        const run = runs[side];
+        if (run.left <= 0) runs[side] = drawKind();
+        runs[side].left--;
+        return runs[side].name;
+      };
+
       // The alleys have to stay open. Shortcuts cut diagonally across a corner,
       // straight through the block a frontage row would otherwise wall off —
       // and a shortcut with a building in it is worse than no shortcut, because
@@ -178,17 +217,22 @@ export function generateProps(rng, track, biome, opts = {}) {
         for (const side of [-1, 1]) {
           // A gap on one side does not force a gap on the other.
           if (rng.bool(0.14)) continue;
+          const kind = nextKind(side);
+          // Placed by its front face, not its centre: whatever the type's depth
+          // is, its shopfront meets the pavement on the same line as its
+          // neighbours' and the wall stays flush.
+          const depth = PROP_TYPES[kind].frontage.depth;
           const fs = wrap(s + rng.spread(1.2), L);
-          const lat = side * (hw + BARRIER_RAIL_OFFSET + setback + front.depth / 2);
+          const lat = side * (hw + BARRIER_RAIL_OFFSET + setback + depth / 2);
           const at = track.path.offsetPoint(fs, lat, { x: 0, y: 0, z: 0 });
           if (blocksAlley(at.x, at.z)) continue;
           // A frontage is deep, so its *back* can reach the next street even
           // when its centre does not. Check both ends of it.
           const yaw = track.path.yawAt(fs);
-          const bx = at.x - Math.sin(yaw + Math.PI / 2) * side * front.depth * 0.45;
-          const bz = at.z - Math.cos(yaw + Math.PI / 2) * side * front.depth * 0.45;
+          const bx = at.x - Math.sin(yaw + Math.PI / 2) * side * depth * 0.45;
+          const bz = at.z - Math.cos(yaw + Math.PI / 2) * side * depth * 0.45;
           if (landsOnRoad(bx, bz, 0.5)) continue;
-          place('facade', fs, lat, { alignToTrack: true, scale: 1, lod: 0 });
+          place(kind, fs, lat, { alignToTrack: true, scale: 1, lod: 0 });
         }
       }
 

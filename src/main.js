@@ -11,6 +11,7 @@ import { Build } from './build/build.js';
 import { BIOMES } from './data/biomes.js';
 import { randomSeedString } from './core/rng.js';
 import { Audio } from './audio/audio.js';
+import { Showroom } from './vehicle/showroom.js';
 
 // Bootstrap and the top-level state machine.
 //
@@ -44,6 +45,7 @@ class Game {
 
     this.run = null;
     this.scene = null;
+    this.showroom = null;
     this.lastSummary = null;
 
     this.loop = new Loop({
@@ -84,6 +86,26 @@ class Game {
     this.scene = null;
   }
 
+  /**
+   * The showroom only draws while a screen is offering it a stage, so leaving
+   * the title screen stops it without anything having to say so. The scene
+   * itself is kept: rebuilding a chassis costs more than the memory does, and
+   * the player comes back here after every run.
+   */
+  _renderShowroom(dt) {
+    const rect = this.screens.showroomRect();
+    if (!rect || !this.showroom) {
+      // The canvas is only ever painted inside the stage, so the last car drawn
+      // would sit there under the next menu until something else wrote over it.
+      if (this._showroomDrawn) { this.renderer.clear(); this._showroomDrawn = false; }
+      return;
+    }
+    this._showroomDrawn = true;
+    this.showroom.update(dt);
+    const camera = this.showroom.render(rect.width / Math.max(1, rect.height));
+    this.renderer.renderInset(this.showroom.scene, camera, rect);
+  }
+
   // --- routing -------------------------------------------------------------
 
   showTitle() {
@@ -91,9 +113,11 @@ class Game {
     this.hud.hide();
     this.loop.setMode('menu');
     this.input.enabled = false;
+    this.showroom = this.showroom || new Showroom();
     this.screens.title({
       lastSummary: this.lastSummary,
       onStart: (vehicleId) => this.startRun(vehicleId),
+      onPreview: (vehicleId) => this.showroom?.setVehicle(vehicleId),
     });
   }
 
@@ -282,6 +306,7 @@ class Game {
   render(dt, alpha) {
     if (!this.scene) {
       this.audio.silenceEngine();
+      this._renderShowroom(dt);
       return;
     }
     const camera = this.scene.render(dt, alpha);

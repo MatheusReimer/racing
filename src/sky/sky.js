@@ -4,14 +4,23 @@ import { clamp01 } from '../core/math.js';
 // Sky dome and the lighting rig that goes with it.
 //
 // The dome is a single inverted sphere with a three-stop gradient, a sun disc,
-// and a band of drifting haze. It is drawn first with depth writes off, so it
-// costs one full-screen worth of fill and nothing else — no cubemap, no
-// atmospheric scattering integral, no PMREM bake.
+// and a band of drifting haze — no cubemap, no atmospheric scattering integral,
+// no PMREM bake.
 //
-// That is a deliberate trade. These biomes are heavily fogged by design, so
-// the horizon colour matters enormously and the zenith barely shows. Matching
-// `fog.color` to the horizon stop is what makes distant geometry dissolve
-// instead of ending at a visible line.
+// It is drawn *last* among the opaque objects rather than first. The vertex
+// shader forces the dome onto the far plane and it writes no depth, so where it
+// is drawn makes no difference to the picture and every difference to the cost:
+// first, it shades every pixel of the frame and is then painted over by the
+// road, the buildings and the cars; last, the depth buffer already holds all of
+// them and the early-z test throws the dome away everywhere except the sky the
+// player can actually see. On a street circuit walled by frontages that is most
+// of the screen, and it is fill rate that decides whether a weak GPU holds the
+// frame rate.
+//
+// A gradient dome instead of real sky is a deliberate trade. These biomes are
+// heavily fogged by design, so the horizon colour matters enormously and the
+// zenith barely shows. Matching `fog.color` to the horizon stop is what makes
+// distant geometry dissolve instead of ending at a visible line.
 
 const SKY_VERT = /* glsl */`
 varying vec3 vDir;
@@ -96,7 +105,10 @@ export class Sky {
 
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = -1000;
+    // After every opaque object, and still before the transparent pass — the
+    // two lists are sorted and drawn separately, so a large renderOrder here
+    // cannot push the dome past the particles or the light pools.
+    this.mesh.renderOrder = 1000;
     scene.add(this.mesh);
 
     // Lighting rig. Three lights total: a key that casts, a cool fill from the

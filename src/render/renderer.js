@@ -273,6 +273,53 @@ export class Renderer {
     this.gl.render(this.quadScene, this.quadCamera);
   }
 
+  /** Wipe the canvas. */
+  clear() {
+    this.gl.setRenderTarget(null);
+    this.gl.setScissorTest(false);
+    this.gl.setViewport(0, 0, this.canvas.width, this.canvas.height);
+    this.gl.clear();
+  }
+
+  /**
+   * Render a scene into one rectangle of the canvas, in CSS pixels, and leave
+   * the rest of the frame untouched.
+   *
+   * For the menu showroom, which is a lit object on a plain background sitting
+   * in a hole the screen's layout leaves for it. It goes straight to the canvas
+   * and skips the whole bloom composite deliberately: that chain exists to give
+   * a biome its grade, and a showroom wants none of it. Scissoring rather than
+   * clearing means whatever the menu drew behind survives around the edges.
+   *
+   * @param rect  { x, y, width, height } in CSS pixels, y measured from the top
+   */
+  renderInset(scene, camera, rect) {
+    const gl = this.gl;
+    const canvas = this.canvas;
+    // Measured off the canvas rather than taken from `pixelRatio`: that field
+    // sizes the offscreen HDR target, and the drawing buffer this is writing to
+    // is a different size again.
+    const sx = canvas.width / Math.max(1, canvas.clientWidth);
+    const sy = canvas.height / Math.max(1, canvas.clientHeight);
+
+    const w = Math.max(1, Math.round(rect.width * sx));
+    const h = Math.max(1, Math.round(rect.height * sy));
+    const x = Math.round(rect.x * sx);
+    // GL counts rows from the bottom of the buffer, the DOM from the top.
+    const y = Math.max(0, canvas.height - Math.round(rect.y * sy) - h);
+
+    gl.setRenderTarget(null);
+    gl.toneMapping = THREE.ACESFilmicToneMapping;
+    gl.toneMappingExposure = 1.1;
+    gl.setViewport(x, y, w, h);
+    gl.setScissor(x, y, w, h);
+    gl.setScissorTest(true);
+    // `render` clears for us, and inside the scissor.
+    gl.render(scene, camera);
+    gl.setScissorTest(false);
+    gl.setViewport(0, 0, canvas.width, canvas.height);
+  }
+
   /**
    * @param scene   the world
    * @param camera  the active camera

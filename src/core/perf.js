@@ -31,6 +31,10 @@ export const QUALITY_TIERS = [
     tireMarkSegments: 220,
     drawDistance: 420,
     propDensity: 0.5,
+    // How many lamps, signs and lit frontages get a pool of light on the road
+    // under them. Pure fill rate: the quads are large and overlap, so this is
+    // the night district's equivalent of the terrain's vertex count.
+    lightPools: 110,
     // How finely the ground away from the road is tessellated. The terrain
     // covers the whole screen, so its vertex count moves the frame time more
     // than anything else the tier controls.
@@ -49,6 +53,7 @@ export const QUALITY_TIERS = [
     tireMarkSegments: 420,
     drawDistance: 600,
     propDensity: 0.75,
+    lightPools: 180,
     // How finely the ground away from the road is tessellated. The terrain
     // covers the whole screen, so its vertex count moves the frame time more
     // than anything else the tier controls.
@@ -67,6 +72,7 @@ export const QUALITY_TIERS = [
     tireMarkSegments: 700,
     drawDistance: 800,
     propDensity: 1.0,
+    lightPools: 280,
     // How finely the ground away from the road is tessellated. The terrain
     // covers the whole screen, so its vertex count moves the frame time more
     // than anything else the tier controls.
@@ -85,6 +91,7 @@ export const QUALITY_TIERS = [
     tireMarkSegments: 1100,
     drawDistance: 1000,
     propDensity: 1.0,
+    lightPools: 380,
     // How finely the ground away from the road is tessellated. The terrain
     // covers the whole screen, so its vertex count moves the frame time more
     // than anything else the tier controls.

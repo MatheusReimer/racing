@@ -45,6 +45,8 @@ const info = await page.evaluate(async ({ mode, aspect, opts }) => {
     hideUnderglow: process.env.HIDE_UNDERGLOW === '1',
     eye: Number(process.env.EYE || 0.55),
     yaw: process.env.YAW ? Number(process.env.YAW) : undefined,
+    vehicle: process.env.VEHICLE || undefined,
+    bodyType: process.env.BODY || undefined,
   },
 });
 

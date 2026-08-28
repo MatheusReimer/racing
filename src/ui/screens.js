@@ -190,6 +190,19 @@ export class Screens {
   clear() {
     if (this.el) this.el.remove();
     this.el = null;
+    // The showroom asks for this every frame to know where to draw; a stale one
+    // would keep reporting the rectangle of a screen that is gone.
+    this.showroomStage = null;
+  }
+
+  /**
+   * Where the showroom should draw, in CSS pixels, or null if no screen is
+   * offering it a stage. Measured live so a resize needs no bookkeeping.
+   */
+  showroomRect() {
+    if (!this.showroomStage) return null;
+    const b = this.showroomStage.getBoundingClientRect();
+    return b.width > 8 && b.height > 8 ? b : null;
   }
 
   _show(node) {
@@ -207,8 +220,18 @@ export class Screens {
 
   // --- title / vehicle select ----------------------------------------------
 
-  title({ onStart, lastSummary }) {
-    const { root, body, foot } = frame('ROGUE RACER', 'Build a machine. Find out how far it goes.', null);
+  title({ onStart, onPreview, lastSummary }) {
+    const { root, body, foot, head } = frame('ROGUE RACER', 'Build a machine. Find out how far it goes.', null);
+    // The showroom renders behind this screen, into the rectangle `.showroom`
+    // reserves. The modifier lightens the screen's own backdrop over the top of
+    // it and drops the blur, which would otherwise frost the car.
+    root.classList.add('has-showroom');
+
+    // Between the header and the body rather than inside it. The body scrolls
+    // when the card list does not fit, and a turntable that slides up under the
+    // title as you reach for the last card is worse than no turntable.
+    const stage = el('div', 'showroom');
+    head.after(stage);
 
     if (lastSummary) {
       body.appendChild(el('div', 'story',
@@ -241,13 +264,29 @@ export class Screens {
         `${v.partSlots} part slots · ${v.skillSlots} skill slots`
         + (v.startingSkill ? ` · starts with ${esc(v.startingSkill.replace(/_/g, ' '))}` : '')));
       card.onclick = () => onStart(v.id);
+      // Pointing at a machine is asking to see it. Focus counts too, so the
+      // showroom follows a keyboard just as it follows a mouse.
+      const show = () => { onPreview?.(v.id); highlight(card); };
+      card.onpointerenter = show;
+      card.onfocus = show;
       cards.appendChild(card);
     }
+    const highlight = (active) => {
+      for (const c of cards.children) c.classList.toggle('showing', c === active);
+    };
     body.appendChild(cards);
+
+    // Something has to be on the turntable before anything is hovered.
+    onPreview?.(VEHICLES[0].id);
+    highlight(cards.children[0]);
 
     foot.appendChild(el('div', 'screen-sub',
       'W/S throttle & brake · A/D steer · SHIFT drift · 1-4 skills · F1 perf overlay'));
-    return this._show(root);
+    const node = this._show(root);
+    // After `_show`, which clears the previous screen — and with it whatever
+    // stage that screen had registered.
+    this.showroomStage = stage;
+    return node;
   }
 
   // --- node map ------------------------------------------------------------

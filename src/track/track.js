@@ -165,19 +165,23 @@ export class Track {
     return rel <= span + 14 || rel >= this.length - 14;
   }
 
+  /**
+   * The racing surface is racing surface, everywhere, always.
+   *
+   * There used to be hazard patches strewn across it — oil at 0.12 grip, ice at
+   * 0.20 — placed by the generator and drawn by nothing. An invisible patch
+   * that takes the car away from you in the middle of clean asphalt is not a
+   * hazard, it is the road lying about itself: nothing on screen said it was
+   * there, so there was no line to take and no mistake to have made. Grip is
+   * now something you only lose by leaving the road, by being hit, or by asking
+   * too much of the tyres — all three of which you can see coming.
+   */
   _surfaceAt(s, side, onTrack, absSide, halfWidth) {
-    if (!onTrack) {
-      // Well past the edge is the biome's rough; just past it is a verge that
-      // still has some bite, so clipping a kerb is not instantly fatal.
-      const over = absSide - halfWidth;
-      return over < 2.5 ? SURFACES.gravel : this.offTrackSurface;
-    }
-    for (const z of this.surfaceZones) {
-      if (!this._withinArc(s, z.s0, z.s1)) continue;
-      if (side < z.sideMin || side > z.sideMax) continue;
-      return z.surface;
-    }
-    return SURFACES.road;
+    if (onTrack) return SURFACES.road;
+    // Well past the edge is the biome's rough; just past it is a verge that
+    // still has some bite, so clipping a kerb is not instantly fatal.
+    const over = absSide - halfWidth;
+    return over < 2.5 ? SURFACES.gravel : this.offTrackSurface;
   }
 
   /**
@@ -491,28 +495,6 @@ function finishTrack(rng, biome, opts, controls, extra = {}) {
     });
   }
 
-  // --- Surface zones -------------------------------------------------------
-  const surfaceZones = [];
-  const zoneCount = rng.int(biome.surfacePatches?.[0] ?? 2, biome.surfacePatches?.[1] ?? 6);
-  for (let i = 0; i < zoneCount; i++) {
-    const surfId = rng.pick(biome.hazardSurfaces || ['gravel']);
-    const s0 = rng.range(0, path.length);
-    const len = rng.range(28, 90);
-    const hw = baseWidth / 2;
-    // Patches that only cover part of the width create a line choice; ones
-    // that span it create a commitment.
-    const full = rng.bool(0.35);
-    const sideMin = full ? -hw : rng.range(-hw, 0);
-    const sideMax = full ? hw : sideMin + rng.range(hw * 0.5, hw * 1.2);
-    surfaceZones.push({
-      s0: wrap(s0, path.length),
-      s1: wrap(s0 + len, path.length),
-      sideMin,
-      sideMax,
-      surface: SURFACES[surfId] || SURFACES.gravel,
-    });
-  }
-
   // --- Start line ----------------------------------------------------------
   // Start on the straightest stretch available, so the grid is not stacked
   // into a corner.
@@ -529,7 +511,6 @@ function finishTrack(rng, biome, opts, controls, extra = {}) {
     widthProfile,
     baseWidth,
     branches,
-    surfaceZones,
     startS,
     biome,
     offTrackSurface: SURFACES[biome.offTrack || 'offroad'] || SURFACES.offroad,

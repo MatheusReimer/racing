@@ -101,6 +101,37 @@
 .btn.primary:hover { background: #6fd2ff; }
 .btn.danger { border-color: var(--danger); color: #ff9b9b; }
 
+/* -------------------------------------------------------------- showroom --- */
+
+/* The title screen leaves a hole for the turntable.
+   `.showroom` draws nothing itself: it is a measured rectangle, and the WebGL
+   canvas behind the UI renders the car into exactly it. So the screen's own
+   backdrop has to stop being opaque over that band, and the blur has to go —
+   `backdrop-filter` would frost the very thing this exists to show. */
+.screen.has-showroom {
+  background: linear-gradient(180deg,
+    rgba(8, 10, 13, 0.30) 0%,
+    rgba(8, 10, 13, 0.22) 30%,
+    rgba(10, 13, 18, 0.80) 52%,
+    rgba(8, 10, 13, 0.97) 78%);
+  backdrop-filter: none;
+}
+
+.showroom {
+  /* Its own band, outside the scrolling body: full bleed, and it never moves. */
+  flex: 0 0 auto;
+  height: clamp(150px, 26vh, 300px);
+  margin-bottom: 10px;
+  pointer-events: none;
+}
+
+/* Which machine is on the turntable. A left edge rather than a glow, so it
+   reads at a glance without competing with the rarity colour on the top edge. */
+.card.showing {
+  border-color: var(--speed);
+  background: rgba(28, 34, 42, 0.94);
+}
+
 /* ---------------------------------------------------------------- cards --- */
 
 .cards {

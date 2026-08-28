@@ -2,10 +2,15 @@
 //
 // A biome is not a palette swap. Each one changes what the track generator
 // produces (`trackChaos` shapes the corners, `trackWidth` the pressure,
-// `hazardSurfaces` what you can lose the car on) and therefore which builds
-// read as strong there. Frozen Highway is where a Drift build stops being a
-// gimmick; Industrial City is where Turning beats Top Speed; the Wasteland is
+// `offTrack` what leaving it costs) and therefore which builds read as strong
+// there. Industrial City is where Turning beats Top Speed; the Wasteland is
 // wide and forgiving because it is where a run begins.
+//
+// What a district may *not* do is put grip hazards on the racing line. That
+// existed and was removed: the patches were invisible, so losing the car on
+// clean asphalt read as the physics glitching rather than as a corner of the
+// track you had failed to respect. A district makes itself felt through the
+// shape of the road, what is beside it, and what it costs to leave it.
 //
 // `palette` feeds the procedural materials and sky. Nothing here is loaded
 // from disk — the colours are the art.
@@ -23,8 +28,6 @@ export const BIOMES = [
     trackWidth: 24,       // wide — this is where a run learns to drive
     elevation: 9,
     offTrack: 'offroad',
-    hazardSurfaces: ['gravel', 'offroad'],
-    surfacePatches: [2, 5],
 
     palette: {
       sky: ['#c98d5a', '#e8b878', '#f2d6a8'],
@@ -57,8 +60,6 @@ export const BIOMES = [
     trackWidth: 18,       // tight — Turning and Braking outrank Top Speed
     elevation: 5,
     offTrack: 'gravel',
-    hazardSurfaces: ['oil', 'gravel'],
-    surfacePatches: [4, 8],
 
     palette: {
       sky: ['#2b3138', '#454f5c', '#6a7684'],
@@ -91,8 +92,6 @@ export const BIOMES = [
     trackWidth: 26,
     elevation: 16,        // dunes and drops — real air off the crests
     offTrack: 'sand',
-    hazardSurfaces: ['sand'],
-    surfacePatches: [3, 7],
 
     palette: {
       sky: ['#e9b271', '#f5d9a3', '#fdf1d6'],
@@ -125,10 +124,6 @@ export const BIOMES = [
     trackWidth: 21,
     elevation: 20,
     offTrack: 'ice',
-    // Ice on the racing line itself. This is the region that inverts the
-    // usual ranking: Grip stops being reliable and Drift becomes the answer.
-    hazardSurfaces: ['ice', 'ice', 'gravel'],
-    surfacePatches: [5, 10],
 
     palette: {
       sky: ['#5b7a99', '#9fc0d8', '#dfeef7'],
@@ -161,8 +156,6 @@ export const BIOMES = [
     trackWidth: 19,
     elevation: 24,
     offTrack: 'lava',     // leaving the road costs Durability, continuously
-    hazardSurfaces: ['lava', 'oil'],
-    surfacePatches: [4, 9],
 
     palette: {
       sky: ['#2a0a0a', '#7a1c10', '#d1441a'],
@@ -201,8 +194,6 @@ export const BIOMES = [
     trackWidth: 17,
     elevation: 6,
     offTrack: 'gravel',
-    hazardSurfaces: ['oil'],
-    surfacePatches: [3, 6],
 
     // Night. Everything below is chosen so the road is the brightest thing in
     // frame and the neon is the only saturated colour in it.
