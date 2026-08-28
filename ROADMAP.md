@@ -5,6 +5,27 @@ and what it will touch, so picking one up does not start from scratch.
 
 ---
 
+## The road's height, on the worst one per cent of it
+
+`sample()` reports the ground under a car as the path's height at the nearest
+station to it. The road mesh draws each ring flat across its width at that
+ring's own centreline height. On a curve those are different stations, so the
+two disagree — by 0.1 mm at the median and 2–13 mm at p95, which is nothing, and
+by up to 270 mm in the worst one per cent, which is a car sunk to its sills on
+a tight bend.
+
+The start grid was one of those spots, at 112 mm, and that one is fixed: cars
+are seated on the sampled ground rather than on the grid's own arithmetic, and
+`tools/contact-probe.mjs` holds it at zero. The general case is not fixed. The
+honest repair is for the two to ask the same question — either the mesh takes
+each vertex's height from `sample()`, which costs a projection per vertex once
+at generation, or `sample()` learns to answer for a point rather than for a
+station. Worth doing before anything else is tuned against ride height, and not
+worth doing blind: the sweep that produced those numbers is four lines and
+should be a probe.
+
+---
+
 ## A five-second frame, and a car that wins 87% of the time
 
 Two faults found by probes while working on something else, neither caused by

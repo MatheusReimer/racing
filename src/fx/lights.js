@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { radialSprite } from '../materials/noise.js';
 import { clamp } from '../core/math.js';
-import { ROAD_LIFT } from '../track/mesh.js';
+import { ROAD_LIFT } from '../track/track.js';
 
 // Street lighting.
 //

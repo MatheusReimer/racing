@@ -107,6 +107,33 @@ const momentum = (a, b) => [
     `jolt ${((b.body.joltPitchVel ?? 0) ** 2 + (b.body.joltRollVel ?? 0) ** 2) ** 0.5 > 0 ? 'yes' : 'no'}`);
 }
 {
+  // Leaning on somebody door to door. Both cars are planted, the contact is
+  // gentle, and neither should be turned by it: this is the thing that has to
+  // be survivable before any of the rest is worth having.
+  const a = car(0, 0, 0, -1.2, 40);
+  const b = car(1.75, 0.4, 0, 0, 40);
+  collide(a, b);
+  check('leaning on a rival door to door: nobody is turned',
+    Math.abs(a.body.impactSpin) < 0.01 && Math.abs(b.body.impactSpin) < 0.01,
+    `${a.body.impactSpin.toFixed(2)} / ${b.body.impactSpin.toFixed(2)} rad/s`);
+  check('leaning on a rival door to door: both keep their grip',
+    a.body.gripPenalty === 1 && b.body.gripPenalty === 1,
+    `grip ${a.body.gripPenalty.toFixed(2)} / ${b.body.gripPenalty.toFixed(2)}`);
+}
+{
+  // The PIT. Nose into a rival's rear quarter, turning in. The point of the
+  // manoeuvre is that it is asymmetric — they come round, you drive on — and a
+  // game where both cars spin is a game with no PIT in it.
+  const attacker = car(1.5, 1.6, 0, -5, 33);
+  const victim = car(0, 4.0, 0, 0, 30);
+  collide(attacker, victim);
+  const spun = Math.abs(victim.body.impactSpin);
+  const self = Math.abs(attacker.body.impactSpin);
+  check('PIT: the rival is spun', spun > 0.4, `${spun.toFixed(2)} rad/s`);
+  check('PIT: and you are not', self < spun * 0.5,
+    `you ${self.toFixed(2)} vs them ${spun.toFixed(2)} rad/s`);
+}
+{
   // Whatever else happens, two cars must not be left inside each other.
   const a = car(0, 0, 0, 0, 25);
   const b = car(0.6, 3.4, 0.3, 0, 0);

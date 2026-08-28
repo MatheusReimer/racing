@@ -108,9 +108,36 @@ for (const v of VEHICLES) {
   mesh.dispose();
 }
 
+// --- and on the grid, before anyone has moved -------------------------------
+//
+// Where the car is put and where the physics will hold it have to be the same
+// place. They were not: the grid took its height from the path station it laid
+// the slot out on and the physics from the nearest station to where the car
+// actually ended up, which on a curve is a different one.
+{
+  const { RaceSim } = await import('../src/race/sim.js');
+  const { BIOMES } = await import('../src/data/biomes.js');
+  const { Build } = await import('../src/build/build.js');
+  let worst = 0;
+  for (const seed of ['GRID-A', 'GRID-B', 'GRID-C']) {
+    const sim = new RaceSim({
+      seed, biome: BIOMES[0], playerBuild: new Build(VEHICLES[0].id),
+      config: { laps: 1, rivals: 5, difficulty: 1 },
+    });
+    for (const r of sim.racers) {
+      sim.track.sample(r.body.x, r.body.z, r.sample);
+      worst = Math.max(worst, Math.abs(r.body.y - r.sample.groundY));
+    }
+  }
+  const bad = worst > TOL;
+  if (bad) problems++;
+  console.log(`\n  ${'on the grid, every car starts on the road'.padEnd(41)} `
+    + `worst ${(worst * 1000).toFixed(2).padStart(6)} mm  ${bad ? 'FAIL' : 'ok'}`);
+}
+
 console.log('');
 if (problems) {
-  console.log(`${problems} vehicle(s) do not stand on the road.`);
+  console.log(`${problems} thing(s) do not stand on the road.`);
   process.exit(1);
 }
 console.log('every wheel touches the tarmac at every attitude, every car clears it at rest');

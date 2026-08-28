@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { asphaltTexture, groundTexture, roadNormal } from '../materials/noise.js';
-import { BARRIER_RAIL_OFFSET } from './track.js';
+import { BARRIER_RAIL_OFFSET, ROAD_LIFT, BRANCH_LIFT } from './track.js';
 import { clamp, clamp01, lerp, wrap } from '../core/math.js';
 
 // Turns a Track into geometry.
@@ -27,8 +27,6 @@ const BARRIER_HEIGHT = 1.35;
  * the tarmac and disappears wherever the depth buffer is precise enough to say
  * so, which is exactly where the player is looking.
  */
-export const ROAD_LIFT = 0.06;
-
 /** Where lane paint sits, as a fraction of half-width from the centre. */
 function laneColorAt(u, s, isBranch) {
   // u is -1 (left edge) .. +1 (right edge)
@@ -455,7 +453,7 @@ export class TrackMesh {
     // --- branches ---
     for (const br of track.branches) {
       const g = buildRibbon(br.path, br.path.length, () => br.halfWidth, {
-        isBranch: true, closed: false, lift: 0.075,
+        isBranch: true, closed: false, lift: BRANCH_LIFT,
       });
       const m = new THREE.Mesh(g, this.roadMat);
       m.receiveShadow = !!quality?.shadows;

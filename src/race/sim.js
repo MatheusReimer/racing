@@ -287,6 +287,17 @@ export class RaceSim {
     racer._trackLength = this.track.length;
     racer.placeAt(this.track.startPose(slot, total));
     this.track.sample(racer.body.x, racer.body.z, racer.sample);
+    // Sit the car where the physics is going to hold it, not where the grid
+    // maths put it.
+    //
+    // `startPose` takes its height from the path at the station it lays the
+    // slot out on; `sample` takes it from the nearest station to where the car
+    // ended up, and on a curve those are not the same station. With elevation
+    // under the track the two answers differ by up to a hundred millimetres —
+    // always on the inside of the bend, which is why it was the left-hand car
+    // on the grid, every time, with its wheels in the tarmac until the lights
+    // went out and the first physics step dropped it.
+    racer.body.y = racer.sample.groundY;
     racer._lastS = racer.sample.s;
     racer.trackS = racer.sample.s;
     // Fallback footprint; the presentation layer replaces these with the ones

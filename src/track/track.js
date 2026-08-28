@@ -3,6 +3,22 @@ import { generateCityLayout } from './city.js';
 import { SURFACES } from '../vehicle/physics.js';
 import { clamp, clamp01, lerp, wrap, TAU, smoothstep } from '../core/math.js';
 
+/**
+ * How far the road surface stands above the path it follows.
+ *
+ * It exists so the tarmac is not z-fighting the ground plane under it, and it
+ * lived in mesh.js — which draws the road — while `sample()` here went on
+ * reporting the bare path height as the ground. Nothing reconciled the two, so
+ * every car in the game drove six centimetres inside the asphalt: enough to bury
+ * the bottom of a tyre, and visible on the grid before the lights even go out.
+ *
+ * The road's height is a fact about the track, not about how it is drawn, so it
+ * belongs here and the mesh takes it from here.
+ */
+export const ROAD_LIFT = 0.06;
+/** Branches sit a little higher, so they read as a ramp off the main line. */
+export const BRANCH_LIFT = 0.075;
+
 // Track layout.
 //
 // The centreline is a sum of harmonics on a circle:
@@ -140,7 +156,10 @@ export class Track {
     out.onTrack = onTrack;
     out.branch = branch;
     out.path = path;
-    out.groundY = path.pointAt(branch ? this._branchLocalS(branch, s) : s, this._pt).y;
+    // The surface, not the path: what the car stands on is the tarmac, and the
+    // tarmac is lifted off the path it follows.
+    out.groundY = path.pointAt(branch ? this._branchLocalS(branch, s) : s, this._pt).y
+      + (branch ? BRANCH_LIFT : ROAD_LIFT);
     out.surface = this._surfaceAt(out.s, side, onTrack, absSide, halfWidth);
     return out;
   }
@@ -196,7 +215,8 @@ export class Track {
     const hw = this.halfWidthAt(s);
     const lateral = (col === 0 ? -1 : 1) * hw * 0.34;
     const p = this.path.offsetPoint(s, lateral, { x: 0, y: 0, z: 0 });
-    return { x: p.x, y: p.y, z: p.z, yaw: this.path.yawAt(s), s };
+    // On the road, not in it — the grid is the first thing anybody sees.
+    return { x: p.x, y: p.y + ROAD_LIFT, z: p.z, yaw: this.path.yawAt(s), s };
   }
 }
 

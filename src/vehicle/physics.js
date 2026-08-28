@@ -29,6 +29,19 @@ const DRIFT_GRIP_CUT = 0.22;
 
 const GRAVITY = 24;
 
+// How much rotation four loaded tyres can take out of a hit before the car
+// starts turning, in radians per second of would-be spin. Set against the
+// manoeuvre it exists for: a square nose-on shunt lands under it and a clip on
+// the rear quarter does not.
+const TYRE_YAW_HOLD = 1.1;
+// And how much of that each end is good for. The front can be shoved a long way
+// before the car changes direction, because the rear is what holds a heading;
+// once the rear is the thing being shoved, very little is needed.
+const FRONT_YAW_HOLD = 2.2;
+const REAR_YAW_HOLD = 0.30;
+// However hard you are hit, a car does not become a top. Beyond this it is
+// already unrecoverable and more only looks silly.
+const MAX_IMPACT_SPIN = 4.5;
 // How fast a collision's rotation bleeds away. Around a second and a half to
 // settle, which is long enough that being spun is a thing that happened to you
 // and short enough that it is not the end of the race.
@@ -501,9 +514,43 @@ export class VehicleBody {
     this.vx += ix / m;
     this.vz += iz / m;
 
-    // The 2D cross product of the lever and the impulse is the angular one.
+    // The 2D cross product of the lever and the impulse is the angular one —
+    // but only what the tyres cannot hold ever reaches the car.
+    //
+    // Rigid-body torque on its own says every contact rotates you, which is
+    // true of a car on ice and of nothing else. Four loaded contact patches
+    // generate a restoring moment, and under that threshold a hit is absorbed:
+    // you can lean on somebody door to door and stay pointed where you were
+    // going. Past it the rear steps out and you are a passenger. That threshold
+    // is the whole difference between a PIT manoeuvre and a game where touching
+    // anything ends your race — clipping a rival's rear quarter has to spin
+    // *them* while your own nose-on contact stays under your tyres' hold.
     const torque = leverX * iz - leverZ * ix;
-    this.impactSpin += torque / Math.max(1, yawInertia);
+    const raw = torque / Math.max(1, yawInertia);
+    const planted = this.airborne ? 0 : 1;
+    // Which end of the car took it decides how much it can hold, and this is
+    // the whole of why a PIT manoeuvre is a manoeuvre rather than a mutual
+    // accident.
+    //
+    // The rigid-body torque is the same for both cars: a lateral shove between
+    // two parallel cars offset along their length rotates each of them by the
+    // same amount, in the same direction. Which is true, and is not what
+    // happens, because the tyres are not the same at both ends. A side force
+    // landing behind the centre of mass levers the rear out, and the rear has
+    // no steering to catch it with. The same force ahead of the centre of mass
+    // pushes the front, and the rear — still planted — holds the car straight.
+    // So you clip their rear quarter, they come round, and you drive on.
+    const alongCar = leverX * this.forwardX + leverZ * this.forwardZ;
+    const end = alongCar < 0 ? REAR_YAW_HOLD : FRONT_YAW_HOLD;
+    const hold = TYRE_YAW_HOLD * end * planted * this.gripPenalty;
+    const excess = Math.max(0, Math.abs(raw) - hold);
+    if (excess > 0) {
+      this.impactSpin = clamp(this.impactSpin + Math.sign(raw) * excess,
+        -MAX_IMPACT_SPIN, MAX_IMPACT_SPIN);
+      // Breaking a tyre loose is what let the car rotate, so it is loose now.
+      this.gripPenalty = Math.min(this.gripPenalty, 0.7);
+      this.gripPenaltyTimer = Math.max(this.gripPenaltyTimer, 0.4);
+    }
 
     this.jolt(ix / m, iz / m);
     return this;
