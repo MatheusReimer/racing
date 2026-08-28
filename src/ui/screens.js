@@ -142,41 +142,57 @@ function runBar(run) {
   const bar = el('div', 'runbar');
   const dur = Math.round(run.durability);
   const max = Math.round(run.maxDurability);
+  // Labelled, and the seed pushed to the far end. It read as four unlabelled
+  // pairs separated by hairlines, which is a legend you have to learn; the
+  // seed in particular is the one thing here nobody needs mid-run and it sat
+  // second from the middle.
   bar.innerHTML =
-    `<span>Durability <b>${dur}/${max}</b></span>` +
-    `<span class="sep"></span>` +
-    `<span>Scrap <b>${run.scrap}</b></span>` +
-    `<span class="sep"></span>` +
-    `<span>Region <b>${run.regionIndex + 1}/${run.regionCount}</b></span>` +
-    `<span class="sep"></span>` +
-    `<span>Seed <b>${esc(run.seed)}</b></span>`;
+    `<span><span class="k">Durability</span><b>${dur}/${max}</b></span>` +
+    `<span><span class="k">Scrap</span><b>${run.scrap}</b></span>` +
+    `<span><span class="k">Region</span><b>${run.regionIndex + 1}/${run.regionCount}</b></span>` +
+    `<span class="seed"><span class="k">Seed</span><b>${esc(run.seed)}</b></span>`;
   return bar;
 }
 
-function frame(title, sub, run, { withPanel = false } = {}) {
+/**
+ * The chrome every screen shares: a status strip, a heading, a scrolling body,
+ * a footer with a hint on the left and actions on the right, and optionally the
+ * build panel down the side.
+ *
+ * The panel is a grid column. It used to be an absolutely positioned box with
+ * `paddingRight` written by hand onto the header, the body and the footer —
+ * the same layout stated three times, in inline styles, in the wrong language.
+ * Anything that changed its width had to change four places, the footer's rule
+ * ran under it, and on a narrow window it claimed a third of the screen.
+ *
+ * `foot.actions` is where buttons go; appending straight to `foot` still works
+ * and lands them on the right, which is where they were.
+ */
+function frame(title, sub, run, { withPanel = false, centred = false } = {}) {
   const s = el('div', 'screen');
+  if (withPanel && run) s.classList.add('has-panel');
+  if (centred) s.classList.add('screen--centred');
+
+  if (run) s.appendChild(runBar(run));
+
   const head = el('div', 'screen-head');
-  const left = el('div');
-  left.appendChild(el('div', 'screen-title', esc(title)));
-  if (sub) left.appendChild(el('div', 'screen-sub', esc(sub)));
-  head.appendChild(left);
-  if (run) head.appendChild(runBar(run));
+  head.appendChild(el('div', 'screen-title', esc(title)));
+  if (sub) head.appendChild(el('div', 'screen-sub', esc(sub)));
   s.appendChild(head);
 
   const body = el('div', 'screen-body');
   s.appendChild(body);
 
   const foot = el('div', 'screen-foot');
+  const hint = el('div', 'foot-hint');
+  const actions = el('div', 'foot-actions');
+  foot.appendChild(hint);
+  foot.appendChild(actions);
   s.appendChild(foot);
 
-  if (withPanel && run) {
-    s.appendChild(buildPanel(run));
-    body.style.paddingRight = 'calc(min(360px, 33vw) + 2vw)';
-    head.style.paddingRight = 'calc(min(360px, 33vw) + 2vw)';
-    foot.style.paddingRight = 'calc(min(360px, 33vw) + 2vw)';
-  }
+  if (withPanel && run) s.appendChild(buildPanel(run));
 
-  return { root: s, body, foot, head };
+  return { root: s, body, foot: actions, head, hint };
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +222,14 @@ export class Screens {
   }
 
   _show(node) {
+    // A footer with nothing in it is a rule across the bottom of the screen and
+    // nothing else. The event screen has no actions in its footer — its choices
+    // are the actions — so it drew a stray line under an empty band.
+    const foot = node.querySelector('.screen-foot');
+    if (foot && !foot.querySelector('.btn')
+      && !foot.querySelector('.foot-hint')?.textContent.trim()) {
+      foot.remove();
+    }
     this.clear();
     this.el = node;
     this.root.appendChild(node);
@@ -221,7 +245,8 @@ export class Screens {
   // --- title / vehicle select ----------------------------------------------
 
   title({ onStart, onPreview, lastSummary }) {
-    const { root, body, foot, head } = frame('ROGUE RACER', 'Build a machine. Find out how far it goes.', null);
+    const { root, body, head, hint } = frame('ROGUE RACER',
+      'Build a machine. Find out how far it goes.', null);
     // The showroom renders behind this screen, into the rectangle `.showroom`
     // reserves. The modifier lightens the screen's own backdrop over the top of
     // it and drops the blur, which would otherwise frost the car.
@@ -239,15 +264,16 @@ export class Screens {
           ? 'completed the tournament' : `destroyed after ${lastSummary.races} races`}.`));
     }
 
-    body.appendChild(el('div', 'screen-sub', 'Choose your machine'));
-    const cards = el('div', 'cards');
+    body.appendChild(el('div', 'section-label', 'Choose your machine'));
+    const cards = el('div', 'cards cards--roster');
     for (const v of VEHICLES) {
       const locked = !STARTER_VEHICLE_IDS.includes(v.id);
       const card = el('button', `card r-${locked ? 'common' : 'rare'}`);
       const head = el('div', 'card-head');
       head.appendChild(el('span', 'card-name', esc(v.name)));
-      head.appendChild(el('span', 'card-slot', esc(v.tagline)));
       card.appendChild(head);
+      // Its own line. A tagline is a sentence and `.card-slot` is a chip.
+      card.appendChild(el('div', 'card-tagline', esc(v.tagline)));
       card.appendChild(el('div', 'card-text', esc(v.identity)));
       if (v.rule) {
         card.appendChild(el('div', 'card-text',
@@ -280,8 +306,8 @@ export class Screens {
     onPreview?.(VEHICLES[0].id);
     highlight(cards.children[0]);
 
-    foot.appendChild(el('div', 'screen-sub',
-      'W/S throttle & brake · A/D steer · SHIFT drift · 1-4 skills · F1 perf overlay'));
+    hint.textContent =
+      'W/S throttle & brake · A/D steer · SHIFT drift · 1-4 skills · F1 perf overlay';
     const node = this._show(root);
     // After `_show`, which clears the previous screen — and with it whatever
     // stage that screen had registered.
@@ -384,12 +410,14 @@ export class Screens {
     const placeText = result.place === 1 ? 'Won the race'
       : result.place ? `Finished ${result.place}${['', 'st', 'nd', 'rd'][result.place] || 'th'}`
       : 'Race over';
-    const { root, body, foot } = frame(
+    const { root, body, foot, hint } = frame(
       placeText,
       result.challengeMet ? 'Challenge met — bonus reward' : `+${result.scrap} scrap`,
       run, { withPanel: true },
     );
+    hint.textContent = 'Tags you already run are highlighted';
 
+    body.appendChild(el('div', 'section-label', 'Take one'));
     const cards = el('div', 'cards');
     for (const offer of run.offer) {
       cards.appendChild(offerCard(offer, run.build, onTake));
@@ -410,8 +438,11 @@ export class Screens {
   // --- shop ----------------------------------------------------------------
 
   shop(run, { onBuy, onLeave }) {
-    const { root, body, foot } = frame('Shop', 'Spend it or carry it to the boss', run, { withPanel: true });
+    const { root, body, foot, hint } = frame('Shop', 'Spend it or carry it to the boss',
+      run, { withPanel: true });
+    hint.textContent = `${run.scrap} scrap to spend`;
 
+    body.appendChild(el('div', 'section-label', 'Stock'));
     const cards = el('div', 'cards');
     for (const item of run.shopStock) {
       const affordable = run.scrap >= item.price;
@@ -434,6 +465,7 @@ export class Screens {
     const { root, body } = frame(ev.title, 'Event', run, { withPanel: true });
 
     body.appendChild(el('div', 'event-body', esc(ev.body)));
+    body.appendChild(el('div', 'section-label', 'Your call'));
     const list = el('div', 'choice-list');
     ev.choices.forEach((c, i) => {
       const b = el('button', 'choice');
@@ -451,6 +483,7 @@ export class Screens {
   rest(run, { onRepair, onUpgrade }) {
     const { root, body } = frame('Garage', 'One job. Choose it.', run, { withPanel: true });
 
+    body.appendChild(el('div', 'section-label', 'One job'));
     const list = el('div', 'choice-list');
     const repair = el('button', 'choice');
     repair.appendChild(el('div', 'lbl', 'Repair'));
@@ -503,6 +536,7 @@ export class Screens {
       body.appendChild(box);
     }
 
+    body.appendChild(el('div', 'section-label', 'The race'));
     const tally = el('div', 'tally');
     tally.innerHTML =
       `<div class="item"><div class="v">${cfg.laps}</div><div class="k">Laps</div></div>` +
@@ -521,7 +555,8 @@ export class Screens {
 
   gameOver(summary, { onRestart }) {
     const won = summary.outcome === 'victory';
-    const { root, body, foot } = frame(won ? 'Tournament Complete' : 'Run Over', null, null);
+    const { root, body, foot } = frame(won ? 'Tournament Complete' : 'Run Over', null, null,
+      { centred: true });
 
     const hero = el('div', 'result-hero');
     hero.appendChild(el('div', 'big', won ? 'VICTORY' : 'DESTROYED'));
