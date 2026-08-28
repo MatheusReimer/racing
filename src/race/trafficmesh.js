@@ -41,28 +41,80 @@ function buildBody(spec, rng) {
   // a saloon's floor is nearer sixteen centimetres.
   const rideH = 0.16;
 
-  parts.push(boxOf(w, h, l, c, { y: rideH + h / 2, rng, variation: 0.05 }));
-  // Cabin, set back and narrower — the one shape difference that separates a
-  // van from a saloon at distance.
-  parts.push(boxOf(w * 0.88, roof, l * 0.46, c, {
-    y: rideH + h + roof / 2 - 0.04, z: -l * 0.06, rng, variation: 0.04,
+  // Three volumes, not one.
+  //
+  // A civilian used to be a box with a smaller box on it, at a few hundred
+  // triangles, on the argument that a car you pass at 180 is a silhouette. It
+  // is not, when it is stopped across the road because you just hit it, and
+  // there are only eighteen of them on a circuit — so the budget that argument
+  // was protecting was never large. A bonnet, a cabin and a boot at slightly
+  // different heights is what makes a shape read as a car rather than as a
+  // crate, and it is still under two thousand triangles.
+  const bonnet = l * 0.30;
+  const cabinL = l * 0.42;
+  const boot = l - bonnet - cabinL;
+  const zNose = l / 2;
+
+  // Lower body, stepped: the middle is fractionally wider and taller, the way
+  // a car's waist is.
+  parts.push(boxOf(w * 0.97, h * 0.86, bonnet, c,
+    { y: rideH + h * 0.43, z: zNose - bonnet / 2, rng, variation: 0.04 }));
+  parts.push(boxOf(w, h, cabinL, c,
+    { y: rideH + h / 2, z: zNose - bonnet - cabinL / 2, rng, variation: 0.04 }));
+  parts.push(boxOf(w * 0.98, h * 0.92, boot, c,
+    { y: rideH + h * 0.46, z: -l / 2 + boot / 2, rng, variation: 0.04 }));
+
+  // Greenhouse: a cabin box with a raked panel at each end, which is most of
+  // the difference between a saloon and a shipping container.
+  const cabY = rideH + h;
+  const cabW = w * 0.88;
+  parts.push(boxOf(cabW, roof, cabinL * 0.88, c,
+    { y: cabY + roof / 2 - 0.04, z: zNose - bonnet - cabinL / 2, rng, variation: 0.03 }));
+  for (const [iz, len] of [[1, 0.34], [-1, 0.28]]) {
+    const g = boxOf(cabW * 0.98, roof * 0.96, cabinL * len, 0x11161d, {
+      y: cabY + roof * 0.48,
+      z: zNose - bonnet - cabinL / 2 + iz * cabinL * 0.5,
+      rng,
+    });
+    g.rotateX(iz * 0.42);
+    parts.push(g);
+  }
+  // Side glass as one dark band, as before: four panes at this range is spend
+  // with nothing to show for it.
+  parts.push(boxOf(cabW * 1.01, roof * 0.58, cabinL * 0.80, 0x11161d, {
+    y: cabY + roof * 0.55, z: zNose - bonnet - cabinL / 2, rng,
   }));
-  // Glass as one dark band right round, rather than four panes.
-  parts.push(boxOf(w * 0.90, roof * 0.60, l * 0.44, 0x11161d, {
-    y: rideH + h + roof * 0.55, z: -l * 0.06, rng,
-  }));
-  // Bumpers.
+
+  // Bumpers and a grille.
   for (const iz of [1, -1]) {
     parts.push(boxOf(w * 0.94, 0.16, 0.14, 0x2b2f35, {
       y: rideH + 0.16, z: iz * (l / 2 + 0.04), rng,
     }));
   }
-  // Wheels: four short cylinders, no tread. Nobody is looking.
-  for (const ix of [-1, 1]) for (const iz of [1, -1]) {
-    const g = prism(10, 0.32, 0.32, 0.22, 0x15181c, { rng });
-    g.rotateZ(Math.PI / 2);
-    g.translate(ix * (w / 2 - 0.06), 0.32, iz * l * 0.31);
-    parts.push(g);
+  parts.push(boxOf(w * 0.52, h * 0.22, 0.06, 0x15181c,
+    { y: rideH + h * 0.42, z: l / 2 + 0.02, rng }));
+
+  // Mirrors. Two boxes, and the first thing that stops a car looking like a bar
+  // of soap from the side.
+  for (const ix of [-1, 1]) {
+    parts.push(boxOf(0.16, 0.09, 0.10, 0x1b1f24, {
+      x: ix * (w / 2 + 0.07), y: cabY + roof * 0.18,
+      z: zNose - bonnet - cabinL * 0.22, rng,
+    }));
+  }
+
+  // Wheels, with a rim face so they are not black discs.
+  for (const ix of [-1, 1]) {
+    for (const iz of [1, -1]) {
+      const tyre = prism(16, 0.32, 0.32, 0.22, 0x15181c, { rng });
+      tyre.rotateZ(Math.PI / 2);
+      tyre.translate(ix * (w / 2 - 0.06), 0.32, iz * l * 0.31);
+      parts.push(tyre);
+      const rim = prism(12, 0.19, 0.19, 0.06, 0x6a7078, { rng });
+      rim.rotateZ(Math.PI / 2);
+      rim.translate(ix * (w / 2 - 0.03), 0.32, iz * l * 0.31);
+      parts.push(rim);
+    }
   }
   return mergeFaceted(parts);
 }

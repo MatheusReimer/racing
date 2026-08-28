@@ -37,9 +37,19 @@ const SCENERY = 'scenery';      // background, never collides
 // so those are dropped rather than shrunk.
 
 export const LODS = [
-  { id: 0, sides: 1.00, fine: true },   // near the road, looked at
-  { id: 1, sides: 0.60, fine: false },  // mid-field, read as shape
-  { id: 2, sides: 0.40, fine: false },  // horizon, read as silhouette
+  // A fourth level, at the kerb.
+  //
+  // The verge and the near band both used to draw the same "full detail", and
+  // full detail was defined by what a prop seventy metres away needs. The
+  // things actually worth spending on are the ones you pass within a car's
+  // width of at two hundred: the barrels, the shacks, the frontages, the poles.
+  // They are also the smallest population — the verge band is metres wide
+  // against a field hundreds of metres deep — so raising them is close to free
+  // and it is all in the part of the frame anyone is looking at.
+  { id: 0, sides: 1.75, fine: true },   // at the kerb, passed within metres
+  { id: 1, sides: 1.00, fine: true },   // near the road, looked at
+  { id: 2, sides: 0.60, fine: false },  // mid-field, read as shape
+  { id: 3, sides: 0.40, fine: false },  // horizon, read as silhouette
 ];
 
 /** Segment count for this detail level. */
@@ -745,10 +755,19 @@ function building(rng, pal, ctx = {}) {
 
 function ridge(rng, pal, ctx = {}) {
   const parts = [];
-  const n = rng.int(3, 5);
+  // Two or three, not three to five, and smaller.
+  //
+  // At five rocks of up to twenty-five metres, stepped apart, a ridge spanned
+  // a hundred and seventy-five metres — which is a mountain range, not a prop,
+  // and on a two-kilometre circuit that folds back on itself there is nowhere
+  // to put one that does not cross a road. Once placement started checking
+  // every road rather than only the racing line, that meant ridges stopped
+  // being placed at all and the horizon band emptied out. A shorter one reads
+  // the same at four hundred metres and can actually stand somewhere.
+  const n = rng.int(2, 3);
   let x = 0;
   for (let i = 0; i < n; i++) {
-    const r = 9 + rng.range(0, 16);
+    const r = 8 + rng.range(0, 9);
     parts.push(rock(r, mix(pal.prop ?? 0x6a6258, 0x50565e, rng.next()), rng, {
       detail: Dt(1, ctx), jitter: 0.36, squash: rng.range(0.5, 0.95),
     }));
@@ -756,7 +775,7 @@ function ridge(rng, pal, ctx = {}) {
     // negative offset just buries up to six metres of geometry that then hangs
     // in the air the moment the terrain slopes away.
     parts[parts.length - 1].translate(x, 0, rng.spread(r * 0.7));
-    x += r * rng.range(0.9, 1.4);
+    x += r * rng.range(0.8, 1.15);
   }
   return mergeFaceted(parts);
 }
@@ -1285,7 +1304,7 @@ export const PROP_TYPES = {
   // building put sixty metres off one straight lands on another part of the
   // lap, and thirteen metres of it ends up in the road. These are half-extents
   // at the largest each generator builds.
-  grandstand: { build: grandstand, place: SCENERY, radius: 0, footprint: 14.8, toughness: null, height: 6 },
+  grandstand: { build: grandstand, place: SCENERY, radius: 0, footprint: 15.2, toughness: null, height: 6 },
 
   wreck: { build: wreck, place: TRACKSIDE, radius: 1.6, footprint: 3.5, toughness: 190, height: 1.2 },
   shack: { build: shack, place: SCENERY, radius: 2.4, footprint: 3.5, toughness: null, height: 3 },
@@ -1314,9 +1333,9 @@ export const PROP_TYPES = {
 
   container: { build: container, place: TRACKSIDE, radius: 3.1, footprint: 4.3, toughness: 320, height: 2.6 },
   crane: { build: crane, place: SCENERY, radius: 1.6, footprint: 1.3, toughness: null, height: 20 },
-  pipes: { build: pipes, place: SCENERY, radius: 1.0, footprint: 24.1, toughness: null, height: 2.5 },
+  pipes: { build: pipes, place: SCENERY, radius: 1.0, footprint: 20.9, toughness: null, height: 2.5 },
 
-  spire: { build: spire, place: SCENERY, radius: 1.6, footprint: 2.6, toughness: null, height: 14 },
+  spire: { build: spire, place: SCENERY, radius: 1.6, footprint: 2.8, toughness: null, height: 14 },
   streetlight: {
     build: streetlight, glow: streetlight.glow,
     place: TRACKSIDE, radius: 0.3, footprint: 0.4, toughness: null, height: 9,
@@ -1379,8 +1398,8 @@ export const PROP_TYPES = {
     place: TRACKSIDE, radius: 1.4, footprint: 3.5, toughness: null, height: 2.7, faceRoad: -1,
   },
 
-  building: { build: building, place: SCENERY, radius: 0, footprint: 16.8, toughness: null, height: 40, horizon: true },
-  ridge: { build: ridge, place: SCENERY, radius: 0, footprint: 144.7, toughness: null, height: 22, horizon: true },
+  building: { build: building, place: SCENERY, radius: 0, footprint: 14.6, toughness: null, height: 40, horizon: true },
+  ridge: { build: ridge, place: SCENERY, radius: 0, footprint: 46.7, toughness: null, height: 22, horizon: true },
 
   brazier: { build: brazier, place: TRACKSIDE, radius: 0.9, footprint: 1.3, toughness: 90, height: 2.2, emissive: 0xff5a1e },
 };

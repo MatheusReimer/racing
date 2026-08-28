@@ -116,6 +116,33 @@ function buildRibbon(path, lengthOf, halfWidthAt, opts = {}) {
  * than painted.
  */
 function buildBarrier(track, lengthOf, offsetAt, accent, closed = true) {
+  /**
+   * Whether a point on the rail line is standing in a road.
+   *
+   * Only the main line is railed, and its outer rail on a corner runs straight
+   * through any shortcut that cuts that corner — fifty-two samples of it, up to
+   * five metres inside another road. From the driver's seat that is a
+   * red-and-white barrier in the middle of the tarmac, and it was: the mesh
+   * follows the racing line and has never been asked what else is out there.
+   *
+   * Suppressing those segments also opens the rail where a shortcut leaves the
+   * main line, which it has to be: the simulation lets a car onto a branch and
+   * the rail was drawn straight across the entrance.
+   */
+  const otherRoads = (track.branches ?? []).map((b) => ({
+    path: b.path,
+    halfWidth: b.halfWidth,
+  }));
+  const railScratch = { s: 0, dist: 0, side: 0 };
+  const inAnotherRoad = (x, z) => {
+    for (const road of otherRoads) {
+      const q = road.path.project(x, z, railScratch);
+      if (q.s <= 0.01 || q.s >= road.path.length - 0.01) continue;
+      if (Math.abs(q.side) < road.halfWidth + 1.0) return true;
+    }
+    return false;
+  };
+
   const L = lengthOf;
   const rings = Math.max(8, Math.floor(L / 2.2));
   const path = track.path;
@@ -159,6 +186,9 @@ function buildBarrier(track, lengthOf, offsetAt, accent, closed = true) {
 
     const ax = p0.x + nA.x * oA, az = p0.z + nA.z * oA;
     const bx = p1.x + nB.x * oB, bz = p1.z + nB.z * oB;
+
+    // A rail standing in another road is not a rail, it is an obstacle.
+    if (inAnotherRoad(ax, az) || inAnotherRoad(bx, bz)) continue;
 
     for (const rail of RAILS) {
       // Alternate the bright rail so it flickers past as speed cues.

@@ -29,9 +29,9 @@ import { clamp, clamp01, lerp, wrap, TAU } from '../core/math.js';
 // are the price of running wide rather than a toll on the racing line.
 const BANDS = {
   verge: { min: 1.5, max: 16, lod: 0 },
-  near: { min: 16, max: 70, lod: 0 },
-  mid: { min: 70, max: 200, lod: 1 },
-  far: { min: 200, max: 480, lod: 2 },
+  near: { min: 16, max: 70, lod: 1 },
+  mid: { min: 70, max: 200, lod: 2 },
+  far: { min: 200, max: 480, lod: 3 },
 };
 
 /**
@@ -42,9 +42,10 @@ const BANDS = {
  * the mid level whether it was drawn as scenery or as horizon.
  */
 function lodFor(off) {
-  if (off < BANDS.near.max) return 0;
-  if (off < BANDS.mid.max) return 1;
-  return 2;
+  if (off < BANDS.verge.max) return 0;
+  if (off < BANDS.near.max) return 1;
+  if (off < BANDS.mid.max) return 2;
+  return 3;
 }
 
 /** Weighted pick from a { name: weight } table. */

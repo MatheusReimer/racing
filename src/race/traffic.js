@@ -1,5 +1,5 @@
 import { wrap, clamp, clamp01, TAU } from '../core/math.js';
-import { ROAD_LIFT } from '../track/track.js';
+import { ROAD_LIFT, BARRIER_RAIL_OFFSET } from '../track/track.js';
 
 // Civilian traffic.
 //
@@ -33,7 +33,7 @@ const HIT_COOLDOWN = 0.8;
 // what it was given. Long enough that you see where it went and it is still
 // there when you look in the mirror; short enough that the road clears.
 const DAZED_TIME = 2.6;
-const DAZED_DRAG = 0.9;
+const DAZED_DRAG = 1.6;
 const DAZED_SPIN_DECAY = 1.4;
 // Sheet metal, not rubber. Same figure the racers use on each other.
 const TRAFFIC_RESTITUTION = 0.28;
@@ -111,6 +111,27 @@ export function generateTraffic(rng, track, opts = {}) {
       kind: rng.int(0, 3),
     }));
   }
+
+  // Put them on the road before anyone can look at them.
+  //
+  // A `TrafficCar` is born at the world origin and only gets a position when
+  // `stepTraffic` first runs — which is when the race starts. Until then every
+  // civilian in the biome is stacked on top of itself at (0, 0, 0), which is
+  // wherever the circuit's coordinates happen to put that, and the mesh draws
+  // them there through the whole countdown. Found while chasing "the NPC cars
+  // are going off the map into the structures": one of them was two hundred and
+  // thirty metres off the road, and it had simply never been placed.
+  const scratch = { x: 0, y: 0, z: 0 };
+  for (const car of cars) {
+    const hw = track.halfWidthAt(car.s);
+    const p = track.path.offsetPoint(car.s, car.lane * hw, scratch);
+    car.x = p.x;
+    car.y = p.y + ROAD_LIFT;
+    car.z = p.z;
+    car.yaw = track.path.yawAt(car.s) + (car.dir < 0 ? Math.PI : 0);
+    car.vx = Math.sin(car.yaw) * car.speed * car.dir;
+    car.vz = Math.cos(car.yaw) * car.speed * car.dir;
+  }
   return cars;
 }
 
@@ -140,6 +161,36 @@ export function stepTraffic(cars, track, racers, dt, hooks = {}) {
       // Follow the ground rather than hanging at the height it was hit at.
       track.sample(car.x, car.z, scratch);
       car.y = (scratch.groundY ?? 0);
+
+      // And keep it on the road it was knocked along.
+      //
+      // A racer that is shoved meets the barrier; a civilian did not, because
+      // until now it could not be anywhere the barrier was — it was on rails.
+      // Set loose without one, a car took a shunt and simply left, twenty-odd
+      // metres out into the scenery, which is not somewhere a car can go and
+      // not somewhere it can come back from. It has the same wall the player
+      // does now: pushed back inside the rail and its velocity into the wall
+      // reflected, most of it lost to the impact.
+      const hwNow = scratch.halfWidth ?? null;
+      if (hwNow != null && scratch.side != null) {
+        const limit = hwNow + BARRIER_RAIL_OFFSET - (car.radius ?? 1.9) * 0.5;
+        const over = Math.abs(scratch.side) - limit;
+        if (over > 0) {
+          const t = track.path.tangentAt(scratch.s ?? 0);
+          const sign = Math.sign(scratch.side) || 1;
+          // Wall normal points back toward the centreline.
+          const wnx = -sign * t.z;
+          const wnz = sign * t.x;
+          car.x += wnx * Math.min(over, 2.5);
+          car.z += wnz * Math.min(over, 2.5);
+          const vn = car.vx * wnx + car.vz * wnz;
+          if (vn < 0) {
+            car.vx -= wnx * vn * 1.25;
+            car.vz -= wnz * vn * 1.25;
+            car.yawRate *= 0.6;
+          }
+        }
+      }
       car.speed = Math.hypot(car.vx, car.vz);
       if (car.dazed <= 0) {
         // Rejoin the road from wherever it ended up, rather than snapping back

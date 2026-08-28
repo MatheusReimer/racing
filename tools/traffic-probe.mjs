@@ -347,6 +347,52 @@ for (const biome of BIOMES) {
     + (bad ? 'FAIL — still on its rails' : 'ok'));
 }
 
+// --- and none of them are anywhere a car cannot be ------------------------
+//
+// Two ways a civilian used to end up in the scenery. It was born at the world
+// origin and only placed when `stepTraffic` first ran, which is when the race
+// starts — so through every countdown the entire biome's traffic sat stacked on
+// top of itself wherever (0, 0, 0) happened to fall, two hundred and thirty
+// metres off the road in the case that was measured. And once a hit could knock
+// one loose, it had no barrier: a racer that is shoved meets the rail, a
+// civilian left.
+{
+  const { BARRIER_RAIL_OFFSET } = await import('../src/track/track.js');
+  const { VEHICLES } = await import('../src/data/vehicles.js');
+  const sc = {};
+  let worst = 0;
+  let knocked = 0;
+  for (const seed of ['STRAY-1', 'STRAY-2']) {
+    const sim = new RaceSim({
+      seed, biome: BIOMES[0], playerBuild: new Build(VEHICLES[1].id),
+      config: { laps: 1, rivals: 5, difficulty: 1 },
+    });
+    sim.setAutopilot(true, 1);
+    for (let i = 0; i < 60 * 120; i++) {
+      sim.update(DT);
+      if (i % 6) continue;
+      for (const c of sim.traffic) {
+        if (!c.alive) continue;
+        if (c.dazed > 0) knocked++;
+        sim.track.sample(c.x, c.z, sc);
+        if (sc.halfWidth == null) continue;
+        worst = Math.max(worst, Math.abs(sc.side) - (sc.halfWidth + BARRIER_RAIL_OFFSET));
+      }
+      if (sim.state === 'finished') break;
+    }
+  }
+  // A metre past the rail is a car leaning on it mid-shunt. Ten is a car that
+  // has left, and two hundred is one that was never put anywhere. Whether the
+  // autopilot happened to hit anybody is reported but not required: it drives
+  // the line well and often threads the whole race cleanly, and a probe that
+  // insists on a crash would be testing the driver.
+  const bad = worst > 3;
+  if (bad) problems++;
+  console.log(`\n  civilians, at any moment of a race`.padEnd(50)
+    + `worst ${worst.toFixed(1)} m past the rail, ${knocked} samples mid-shunt  `
+    + (bad ? 'FAIL' : 'ok'));
+}
+
 console.log('');
 if (problems) {
   console.log(`${problems} problem(s) with traffic`);
