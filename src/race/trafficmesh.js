@@ -25,12 +25,21 @@ import { RNG } from '../core/rng.js';
 // being from a different game. These are the real figures for what each one is
 // meant to be, so a hatchback is still bigger than a Peugeot 205 and a van is
 // still a van, by the margin those actually differ by.
+// Sized against the cars they share a road with, and now measured against them
+// rather than against the real world.
+//
+// The racers are taken off real cars and come out between 3.55 and 4.52 m. Real
+// civilian figures put a van at 5.05, which is correct and reads wrong: it
+// stood longer than anything in the race, and the eye compares it to the car it
+// is driving rather than to a catalogue. These sit inside the same band, with
+// the same ordering between them — a van is still the biggest thing on the
+// road, by the margin the grid can absorb.
 const BODIES = [
   // width, length, height, roof drop, colour
-  { w: 1.76, l: 4.08, h: 0.62, roof: 0.50, c: 0x9aa0a8 },   // hatchback
-  { w: 1.82, l: 4.70, h: 0.60, roof: 0.48, c: 0x6b7480 },   // saloon
-  { w: 1.94, l: 5.05, h: 0.90, roof: 0.72, c: 0xb8b2a4 },   // van
-  { w: 1.79, l: 4.60, h: 0.62, roof: 0.50, c: 0x7d5a4a },   // estate
+  { w: 1.70, l: 3.80, h: 0.58, roof: 0.48, c: 0x9aa0a8 },   // hatchback
+  { w: 1.78, l: 4.30, h: 0.56, roof: 0.46, c: 0x6b7480 },   // saloon
+  { w: 1.86, l: 4.55, h: 0.82, roof: 0.66, c: 0xb8b2a4 },   // van
+  { w: 1.74, l: 4.20, h: 0.58, roof: 0.48, c: 0x7d5a4a },   // estate
 ];
 
 function buildBody(spec, rng) {
@@ -101,6 +110,32 @@ function buildBody(spec, rng) {
       x: ix * (w / 2 + 0.07), y: cabY + roof * 0.18,
       z: zNose - bonnet - cabinL * 0.22, rng,
     }));
+  }
+
+  // Shut lines and arch lips.
+  //
+  // Thin dark strips, twelve triangles each, and they are most of what stops a
+  // civilian reading as a single moulded lump: an eye finds a car by its panel
+  // gaps and its arches long before it counts its curves.
+  const shut = 0.035;
+  for (const ix of [-1, 1]) {
+    for (const dz of [0.06, -0.30]) {
+      parts.push(boxOf(shut, h * 0.72, 0.03, 0x1b1f24, {
+        x: ix * (w / 2 + 0.005), y: rideH + h * 0.5,
+        z: zNose - bonnet - cabinL * 0.5 + cabinL * dz, rng,
+      }));
+    }
+    // Bonnet and boot shuts, across the top.
+    for (const z of [zNose - bonnet, -l / 2 + boot]) {
+      parts.push(boxOf(w * 0.92, 0.03, shut, 0x1b1f24,
+        { x: 0, y: rideH + h * 0.86, z, rng }));
+    }
+    // A lip over each arch.
+    for (const iz of [1, -1]) {
+      parts.push(boxOf(0.10, 0.07, 0.62, 0x1f2429, {
+        x: ix * (w / 2 - 0.02), y: rideH + h * 0.30, z: iz * l * 0.31, rng,
+      }));
+    }
   }
 
   // Wheels, with a rim face so they are not black discs.

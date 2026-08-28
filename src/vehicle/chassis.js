@@ -210,7 +210,11 @@ function loft(sections, color, opts = {}) {
 // those look like in this game. Keeping the two apart is what lets six cars
 // taken off six references still read as one grid: the paint class takes
 // whatever colour the vehicle picked, and everything else is shared furniture.
-const HULL_GLASS = 0x0d1520;
+// Not a dark blue-grey shaded like paint, which is what it was: a car's glass
+// is the darkest thing on it from outside in almost any light, and the way to
+// draw that is to stop asking the lighting. Near black, with just enough blue
+// left in it to read as glass rather than as a hole.
+const HULL_GLASS = 0x070a0f;
 const HULL_DARK = 0x15181c;
 const HULL_CHROME = 0xb9bec6;
 // Lamp colours. Headlights are warm rather than white — a cold headlight reads
@@ -308,6 +312,11 @@ function hullShared(hull) {
 
   const CENTRE_BIAS = 0.02;
   const bodyIdx = [];
+  // Kept alongside, because the greenhouse rule below removes faces from the
+  // body and the two have to stay in step: rebuilt separately, every remaining
+  // face would come back as paint and the car would lose its trim.
+  const bodyCls = [];
+  const glassIdx = [];
   const front = [];
   const rear = [];
   for (let t = 0; t < n; t++) {
@@ -316,7 +325,15 @@ function hullShared(hull) {
     const p2 = indices[t * 3 + 2];
     const midZ = (positions[p0 * 3 + 2] + positions[p1 * 3 + 2] + positions[p2 * 3 + 2]) / 3;
     if (classes[t] === 4) (midZ > hull.length * CENTRE_BIAS ? front : rear).push(p0, p1, p2);
-    else bodyIdx.push(p0, p1, p2);
+    // Glass leaves the body.
+    //
+    // Painted into the body mesh it is shaded like the panel beside it, so it
+    // catches the same highlight and reads as grey paint rather than as a
+    // window. A car's glass is the darkest thing on it from outside in almost
+    // any light, and the only reliable way to draw that is to stop asking the
+    // lighting.
+    else if (classes[t] === 1) glassIdx.push(p0, p1, p2);
+    else { bodyIdx.push(p0, p1, p2); bodyCls.push(classes[t]); }
   }
 
   const cut = (idx) => {
@@ -335,9 +352,10 @@ function hullShared(hull) {
 
   const bodyGeo = cut(bodyIdx);
   const shared = {
+    glass: glassIdx.length ? cut(glassIdx) : null,
     // The class of each surviving triangle, in the order they were cut, so a
     // per-car colour array can be filled without walking the hull again.
-    bodyClasses: new Uint8Array(bodyIdx.length / 3),
+    bodyClasses: null,
     position: bodyGeo.getAttribute('position'),
     normal: bodyGeo.getAttribute('normal'),
     lampFront: null,
@@ -354,14 +372,69 @@ function hullShared(hull) {
     g.computeVertexNormals();
     return g;
   };
+  // A car with no glass at all.
+  //
+  // The GC8's eighty-six materials never say "window", so its cabin came out
+  // painted the same colour as its wings — a saloon with the windows filled in.
+  // Where the reference is silent the greenhouse is found by where it has to
+  // be: the band of the body between the beltline and just under the roof,
+  // inboard of the widest point, across the middle of the car. It is a coarse
+  // rule and it is far better than bodywork where the windscreen goes.
+  if (!shared.glass) {
+    const bb = { y0: Infinity, y1: -Infinity, x: 0 };
+    for (let i = 0; i < positions.length; i += 3) {
+      bb.y0 = Math.min(bb.y0, positions[i + 1]);
+      bb.y1 = Math.max(bb.y1, positions[i + 1]);
+      bb.x = Math.max(bb.x, Math.abs(positions[i]));
+    }
+    const loY = bb.y0 + (bb.y1 - bb.y0) * 0.68;
+    const hiY = bb.y0 + (bb.y1 - bb.y0) * 0.93;
+    const keep = [];
+    const rest = [];
+    const removed = [];
+    for (let t = 0; t < bodyIdx.length; t += 3) {
+      // By the face's centre, not by all three of its corners.
+      //
+      // Requiring every corner to be inside leaves anything straddling the
+      // edge painted, and a boundary made of the faces that half-qualify is a
+      // row of white teeth down the middle of the window. The centre either is
+      // in the greenhouse or is not.
+      let cy = 0;
+      let cx = 0;
+      let cz = 0;
+      for (let k = 0; k < 3; k++) {
+        const v = bodyIdx[t + k] * 3;
+        cx += Math.abs(positions[v]);
+        cy += positions[v + 1];
+        cz += positions[v + 2];
+      }
+      cx /= 3; cy /= 3; cz /= 3;
+      const inBand = cy >= loY && cy <= hiY
+        && cx <= bb.x * 0.90 && Math.abs(cz) <= hull.length * 0.28;
+      removed.push(inBand);
+      (inBand ? keep : rest).push(bodyIdx[t], bodyIdx[t + 1], bodyIdx[t + 2]);
+    }
+    if (keep.length / 3 > 40) {
+      shared.glass = cut(keep);
+      const reCls = [];
+      for (let t = 0, f = 0; t < bodyIdx.length; t += 3, f++) {
+        if (!removed[f]) reCls.push(bodyCls[f]);
+      }
+      bodyIdx.length = 0;
+      for (const v of rest) bodyIdx.push(v);
+      const re = cut(bodyIdx);
+      shared.position = re.getAttribute('position');
+      shared.normal = re.getAttribute('normal');
+      shared.bodyClasses = Uint8Array.from(reCls);
+    }
+  }
+
+  if (!shared.bodyClasses) shared.bodyClasses = Uint8Array.from(bodyCls);
+
   shared.lampFront = front.length / 3 >= MIN_FACES
     ? cut(front) : loose(synthLamps(hull, 1, 1, 1, true));
   shared.lampRear = rear.length / 3 >= MIN_FACES
     ? cut(rear) : loose(synthLamps(hull, 1, 1, 1, false));
-  {
-    let k = 0;
-    for (let t = 0; t < n; t++) if (classes[t] !== 4) shared.bodyClasses[k++] = classes[t];
-  }
   hullCache.set(hull, shared);
   return shared;
 }
@@ -407,6 +480,7 @@ function hullGeometry(hull, L, W, color, accent) {
 
   return {
     body,
+    glass: shared.glass,
     lampFront: shared.lampFront,
     lampRear: shared.lampRear,
     // Size is a scale on the node rather than baked into the vertices, which is
@@ -1369,6 +1443,14 @@ export class VehicleMesh {
     // reverse. One reference in seven marks its reversing lamps apart from its
     // tail lights, so both come off the same faces and the colour carries the
     // meaning — which is what a driver behind you reads anyway.
+    // Hull glass: unlit, so no highlight can turn a window into a grey panel.
+    this.hullGlassMat = hull
+      ? new THREE.MeshBasicMaterial({ color: HULL_GLASS, toneMapped: false })
+      : null;
+    this.hullGlass = hullLampGeo?.glass
+      ? new THREE.Mesh(hullLampGeo.glass, this.hullGlassMat) : null;
+    if (this.hullGlass) attach(this.hullGlass);
+
     this.lampFrontMat = new THREE.MeshBasicMaterial({ color: LAMP_HEAD, toneMapped: false });
     this.lampRearMat = new THREE.MeshBasicMaterial({ color: LAMP_TAIL, toneMapped: false });
     this.lampFront = hullLampGeo?.lampFront
@@ -1636,6 +1718,7 @@ export class VehicleMesh {
   dispose() {
     this.lampFrontMat?.dispose();
     this.lampRearMat?.dispose();
+    this.hullGlassMat?.dispose();
 
     // Hull geometry outlives the car.
     //
