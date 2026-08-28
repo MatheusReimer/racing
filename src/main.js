@@ -6,6 +6,7 @@ import { Renderer } from './render/renderer.js';
 import { Race } from './race/race.js';
 import { HUD } from './ui/hud.js';
 import { Screens } from './ui/screens.js';
+import { VEHICLES } from './data/vehicles.js';
 import { Run } from './run/run.js';
 import { Build } from './build/build.js';
 import { BIOMES } from './data/biomes.js';
@@ -115,26 +116,32 @@ class Game {
     this.hud.hide();
     this.loop.setMode('menu');
     this.input.enabled = false;
+    // The finished run is done with. It used to stay live on the title screen
+    // — nothing read it, but a stale run holding a build, a map and a durability
+    // count is the sort of thing the next feature reads by accident.
+    this.run = null;
     this.showroom = this.showroom || new Showroom();
-    this.screens.title({
-      lastSummary: this.lastSummary,
-      // Picking is not committing. The roster hands off to the machine screen,
-      // which is where a run actually starts.
-      onSelect: (vehicleId) => this.showMachine(vehicleId),
-      onPreview: (vehicleId) => this.showroom?.setVehicle(vehicleId),
-    });
+    this.showMachine(this.titleVehicleId || VEHICLES[0].id);
   }
 
-  /** One machine at the size it deserves, with everything known about it. */
+  /**
+   * The title screen, and the only view of a machine there is.
+   *
+   * The roster of cards it used to open on was six of these at thumbnail size:
+   * the same information, too small to read and too small to see the car. The
+   * arrows walk the same list, and there is nothing behind this screen.
+   */
   showMachine(vehicleId) {
+    this.titleVehicleId = vehicleId;
     this.hud.hide();
     this.loop.setMode('menu');
     this.input.enabled = false;
     this.showroom = this.showroom || new Showroom();
     this.showroom.setVehicle(vehicleId);
-    this.screens.machine(vehicleId, {
+    this.screens.title({
+      vehicleId,
+      lastSummary: this.lastSummary,
       onStart: (id) => this.startRun(id),
-      onBack: () => this.showTitle(),
       onSwitch: (id) => this.showMachine(id),
     });
   }

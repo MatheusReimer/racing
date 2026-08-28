@@ -62,44 +62,6 @@ function deltaRow(offer, build) {
   return row;
 }
 
-// The six axes every machine is compared on, in this order, on every card.
-//
-// A fixed axis is the whole point. The roster used to print whichever stats a
-// vehicle happened to modify, in whatever order the object listed them, as a
-// row of coloured monospace tokens that wrapped to three lines — so comparing
-// two machines meant reading two different lists and holding them in your
-// head. Six rows in the same order, drawn from a common centre, and the
-// comparison is a shape.
-const SPEC_AXES = ['topSpeed', 'acceleration', 'turning', 'grip', 'armor', 'weight'];
-
-/** How far from baseline a bar is drawn full. Beyond this it saturates. */
-const SPEC_FULL = 60;
-
-function specProfile(stats) {
-  const spec = el('div', 'spec');
-  for (const id of SPEC_AXES) {
-    const attr = ATTRIBUTE_BY_ID[id];
-    const d = stats[id] ?? 0;
-    const row = el('div', 'spec-row');
-    row.appendChild(el('span', 'spec-name', esc(attr.name)));
-
-    const track = el('div', 'spec-track');
-    const bar = el('div', 'spec-bar');
-    // Half the track is one direction, so a full bar is SPEC_FULL either way.
-    bar.style.width = `${Math.min(Math.abs(d) / SPEC_FULL, 1) * 50}%`;
-    bar.style[d >= 0 ? 'left' : 'right'] = '50%';
-    // Weight is bidirectional by design — never painted as a loss.
-    bar.classList.add(attr.higherIsBetter === null ? 'neutral'
-      : (d > 0) === attr.higherIsBetter ? 'good' : 'bad');
-    track.appendChild(bar);
-    row.appendChild(track);
-
-    row.appendChild(el('span', 'spec-val', d ? `${d > 0 ? '+' : ''}${d}` : '·'));
-    spec.appendChild(row);
-  }
-  return spec;
-}
-
 function offerCard(offer, build, onPick) {
   const card = el('button', `card r-${offer.rarity || 'common'}`);
   const head = el('div', 'card-head');
@@ -293,74 +255,8 @@ export class Screens {
 
   // --- title / vehicle select ----------------------------------------------
 
-  title({ onSelect, onPreview, lastSummary }) {
-    const { root, body, head, hint } = frame('ROGUE RACER',
-      'Build a machine. Find out how far it goes.', null);
-    // The showroom renders behind this screen, into the rectangle `.showroom`
-    // reserves. The modifier lightens the screen's own backdrop over the top of
-    // it and drops the blur, which would otherwise frost the car.
-    root.classList.add('has-showroom');
-
-    // Between the header and the body rather than inside it. The body scrolls
-    // when the card list does not fit, and a turntable that slides up under the
-    // title as you reach for the last card is worse than no turntable.
-    const stage = el('div', 'showroom');
-    head.after(stage);
-
-    if (lastSummary) {
-      body.appendChild(el('div', 'story',
-        `Last run: <b>${esc(lastSummary.vehicle)}</b> — ${lastSummary.outcome === 'victory'
-          ? 'completed the tournament' : `destroyed after ${lastSummary.races} races`}.`));
-    }
-
-    body.appendChild(el('div', 'section-label', 'Choose your machine'));
-    const cards = el('div', 'cards cards--roster');
-    for (const v of VEHICLES) {
-      const card = el('button', 'card card--machine');
-      // The machine's own colours, which the data has carried all along and
-      // the interface never used: six identical grey boxes for six cars that
-      // are supposed to be told apart at a glance.
-      card.style.setProperty('--machine', v.accent || v.color);
-      card.style.setProperty('--machine-body', v.color);
-
-      const head = el('div', 'card-head');
-      head.appendChild(el('span', 'card-name', esc(v.name)));
-      head.appendChild(el('span', 'machine-chip'));
-      card.appendChild(head);
-      // Its own line. A tagline is a sentence and `.card-slot` is a chip.
-      card.appendChild(el('div', 'card-tagline', esc(v.tagline)));
-      card.appendChild(el('div', 'card-text', esc(v.identity)));
-      if (v.rule) card.appendChild(el('div', 'rule', esc(v.rule.text)));
-      card.appendChild(specProfile(v.stats));
-      const foot = el('div', 'card-foot');
-      foot.appendChild(el('span', null,
-        `${v.partSlots} parts · ${v.skillSlots} skills`
-        + (v.startingSkill ? ` · ${esc(v.startingSkill.replace(/_/g, ' '))}` : '')));
-      foot.appendChild(el('span', 'card-go', 'Select'));
-      card.appendChild(foot);
-      card.onclick = () => onSelect(v.id);
-      // Pointing at a machine is asking to see it. Focus counts too, so the
-      // showroom follows a keyboard just as it follows a mouse.
-      const show = () => { onPreview?.(v.id); highlight(card); };
-      card.onpointerenter = show;
-      card.onfocus = show;
-      cards.appendChild(card);
-    }
-    const highlight = (active) => {
-      for (const c of cards.children) c.classList.toggle('showing', c === active);
-    };
-    body.appendChild(cards);
-
-    // Something has to be on the turntable before anything is hovered.
-    onPreview?.(VEHICLES[0].id);
-    highlight(cards.children[0]);
-
-    hint.textContent = 'Pick a machine to look at it properly';
-    const node = this._show(root);
-    // After `_show`, which clears the previous screen — and with it whatever
-    // stage that screen had registered.
-    this.showroomStage = stage;
-    return node;
+  title({ vehicleId, onStart, onSwitch, lastSummary }) {
+    return this.machine(vehicleId, { onStart, onSwitch, lastSummary });
   }
 
   // --- one machine, in detail ----------------------------------------------
@@ -375,10 +271,14 @@ export class Screens {
    * so. The arrows either side of it move along the roster, so comparing two
    * machines does not mean going back and forth through a menu.
    */
-  machine(vehicleId, { onStart, onBack, onSwitch }) {
+  machine(vehicleId, { onStart, onSwitch, lastSummary }) {
     const v = VEHICLE_BY_ID[vehicleId];
     const { root, body, foot, hint } = frame(v.name, v.tagline, null);
-    root.classList.add('has-showroom', 'screen--machine');
+    root.classList.add('screen--machine');
+    // The game's name, once, above the machine's. There is no longer a roster
+    // screen in front of this one to carry it.
+    root.querySelector('.screen-head')
+      .prepend(el('div', 'screen-overline', 'Rogue Racer'));
     root.style.setProperty('--machine', v.accent || v.color);
     root.style.setProperty('--machine-body', v.color);
 
@@ -444,10 +344,10 @@ export class Screens {
     wrap.appendChild(info);
     body.appendChild(wrap);
 
-    hint.textContent = 'Nothing is committed until you take the grid';
-    const back = el('button', 'btn', 'Back to the roster');
-    back.onclick = onBack;
-    foot.appendChild(back);
+    hint.textContent = lastSummary
+      ? `Last run: ${lastSummary.vehicle} — ${lastSummary.outcome === 'victory'
+        ? 'completed the tournament' : `destroyed after ${lastSummary.races} races`}`
+      : 'Nothing is committed until you take the grid';
     const go = el('button', 'btn primary', `Start a run in the ${v.name}`);
     go.onclick = () => onStart(v.id);
     foot.appendChild(go);

@@ -8,7 +8,7 @@
 
 import { chromium } from 'playwright';
 import { ensureServer } from './server.mjs';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 
 // Deterministic choices. Walking the run with Math.random() makes the set of
 // screens visited — and therefore the set of checks — differ between runs, so
@@ -86,13 +86,39 @@ const state = () => page.evaluate(() => ({
   nodes: document.querySelectorAll('.mapnode.available').length,
 }));
 
+// --- every class the screens build has a rule to draw it -------------------
+//
+// Static, and it runs first because it costs nothing. Deleting a screen means
+// deleting its styles, and the styles of two screens sit next to each other in
+// one file: a cut that takes one rule too many orphans a class that still gets
+// built, and the result is not an error — it is a gold callout rendering as
+// body text, which a passing click-through will not notice.
+{
+  const js = readFileSync('src/ui/screens.js', 'utf8');
+  const css = readFileSync('src/ui/screens.css', 'utf8');
+  const used = new Set();
+  for (const m of js.matchAll(/el\('[a-z0-9]+',\s*'([^']+)'/g)) {
+    for (const c of m[1].split(/\s+/)) used.add(c);
+  }
+  for (const m of js.matchAll(/classList\.add\(([^)]*)\)/g)) {
+    for (const c of m[1].match(/'([^']+)'/g) || []) used.add(c.slice(1, -1));
+  }
+  const orphans = [...used].filter((c) => !css.includes(`.${c}`));
+  check('every class the screens build has a style', orphans.length === 0,
+    orphans.length ? `no rule for ${orphans.join(', ')}` : `${used.size} classes`);
+}
+
 await page.goto('http://127.0.0.1:5173/', { waitUntil: 'load', timeout: 30000 });
 await page.waitForFunction(() => window.__game, { timeout: 20000 });
 
 // --- title ---
 await page.waitForSelector('.screen-title', { timeout: 10000 });
 let s = await state();
-check('title screen renders', s.screen === 'ROGUE RACER', `screen="${s.screen}" cards=${s.cards}`);
+check('title screen renders', !!s.screen && (await page.$$('.machine-info .statrow')).length >= 12,
+  `screen="${s.screen}" spec rows=${(await page.$$('.machine-info .statrow')).length}`);
+// The turntable draws on the next frame; shooting before it has is a picture
+// of an empty stage, which is not what this screen looks like.
+await page.waitForTimeout(500);
 await shot('title');
 
 // --- start a run ---
@@ -101,28 +127,21 @@ await shot('title');
 // regression is impossible to spot.
 await page.evaluate(() => { window.__game.forcedSeed = 'UIFLOW1'; });
 
-// Picking a machine off the roster no longer starts a run: it opens the
-// machine screen, and the run begins from there. A card that committed on
-// click is exactly the regression this step exists to catch.
-await page.click('.cards .card >> nth=2');   // The Drifter
-await page.waitForSelector('.screen--machine', { timeout: 10000 });
-s = await state();
-check('picking a machine opens it rather than starting a run', !s.run,
-  s.run ? 'a run started on the roster click' : `screen="${s.screen}"`);
-check('the machine screen shows a full specification',
-  (await page.$$('.machine-info .statrow')).length >= 12,
-  `${(await page.$$('.machine-info .statrow')).length} rows`);
-await shot('machine');
-
-// And the arrows walk the roster without leaving the screen.
+// The machine screen is the title screen: no roster in front of it, and
+// nothing committed until the primary button. Walk to a specific machine with
+// the arrows so the run below is always the same car.
+check('no run exists before the grid is taken', !s.run,
+  s.run ? 'a run started without the button being pressed' : 'clean');
 const firstMachine = s.screen;
 await page.click('.stage-nav.next');
 await page.waitForTimeout(150);
 s = await state();
 check('the arrows move along the roster', s.screen !== firstMachine,
   `${firstMachine} -> ${s.screen}`);
-await page.click('.stage-nav.prev');
+await page.click('.stage-nav.next');
 await page.waitForTimeout(150);
+s = await state();
+await shot('machine');
 
 await page.click('.screen-foot .btn.primary');
 await page.waitForSelector('.mapnode', { timeout: 10000 });
@@ -302,7 +321,9 @@ await shot('gameover');
 await page.click('.screen-foot .btn.primary');
 await page.waitForTimeout(400);
 const back = await page.evaluate(() => document.querySelector('.screen-title')?.textContent);
-check('restart returns to the title', back === 'ROGUE RACER', `"${back}"`);
+s = await state();
+check('restart returns to the title', !!(await page.$('.screen--machine')) && !s.run,
+  `screen="${back}"${s.run ? ' but a run is live' : ''}`);
 
 console.log(`\nscreens visited: ${[...seen].join(', ')}`);
 
