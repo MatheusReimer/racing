@@ -302,7 +302,7 @@ console.log('every prop generator is valid and every biome is populated');
   let glassSeen = 0;
   for (const biome of BIOMES) {
     const lib = buildPropLibrary(biome, 7);
-    for (const type of ['building', 'facade', 'tenement', 'townhouse', 'mall']) {
+    for (const type of ['building', 'facade', 'tenement', 'townhouse', 'mall', 'hospital', 'workshop']) {
       const entry = lib[type];
       if (!entry) continue;
       for (const geo of (entry.levels ?? [])[0] ?? []) {

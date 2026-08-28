@@ -721,19 +721,60 @@ function building(rng, pal, ctx = {}) {
 
   // Two or three stacked masses. A single box is a box; a setback is a
   // building, and it costs twelve triangles.
-  const stacks = rng.int(2, 3);
+  // Four ways to be a building, not one.
+  //
+  // Every block on the skyline was the same idea — two or three boxes, each a
+  // bit smaller than the last — so a street of forty of them was one building
+  // at forty scales. These are the massings a real skyline is made of, and
+  // they cost nothing but the arithmetic: the window grids, the roof furniture
+  // and the near-level bands all read the masses rather than assuming them.
+  //
+  // Every mass stays centred on the plot. An offset tower would be a better
+  // building and a worse prop: the declared footprint is what keeps these out
+  // of the road, and it is a radius, so anything eccentric has to declare the
+  // whole swing.
   const masses = [];
-  let cw = w, cd = d, cy = 0;
-  for (let i = 0; i < stacks; i++) {
-    const sh = h * (i === 0 ? 0.55 : 0.45 / (stacks - 1));
-    parts.push(boxOf(cw, sh, cd, shade(wall, 1 - i * 0.08), {
-      y: cy + sh / 2, rng, variation: 0.05,
-    }));
-    masses.push({ w: cw, d: cd, h: sh, y: cy });
-    cy += sh;
-    cw *= rng.range(0.62, 0.86);
-    cd *= rng.range(0.62, 0.86);
+  const shape = rng.int(0, 3);
+  if (shape === 0) {
+    // Setbacks: the wedding cake.
+    const stacks = rng.int(2, 3);
+    let cw = w, cd = d, cy = 0;
+    for (let i = 0; i < stacks; i++) {
+      const sh = h * (i === 0 ? 0.55 : 0.45 / (stacks - 1));
+      masses.push({ w: cw, d: cd, h: sh, y: cy });
+      cy += sh;
+      cw *= rng.range(0.62, 0.86);
+      cd *= rng.range(0.62, 0.86);
+    }
+  } else if (shape === 1) {
+    // Slab: one mass, thin, its whole height. The tallest silhouette here and
+    // the plainest, which is why it needs the others around it.
+    masses.push({ w, d: d * rng.range(0.34, 0.5), h, y: 0 });
+  } else if (shape === 2) {
+    // Podium and tower: a wide plinth of two or three floors with a narrow
+    // shaft off it. The commonest post-war office block there is.
+    const ph = 4 + rng.range(0, 6);
+    masses.push({ w, d, h: ph, y: 0 });
+    masses.push({
+      w: w * rng.range(0.42, 0.6), d: d * rng.range(0.42, 0.6), h: h - ph, y: ph,
+    });
+  } else {
+    // Ziggurat: four shallow steps. Reads as bulk rather than height.
+    let cw = w, cd = d, cy = 0;
+    for (let i = 0; i < 4; i++) {
+      const sh = h * 0.85 * (0.34 - i * 0.06);
+      masses.push({ w: cw, d: cd, h: sh, y: cy });
+      cy += sh;
+      cw *= 0.80; cd *= 0.80;
+    }
   }
+  masses.forEach((m, i) => parts.push(boxOf(m.w, m.h, m.d, shade(wall, 1 - i * 0.07), {
+    y: m.y + m.h / 2, rng, variation: 0.05,
+  })));
+  const top = masses[masses.length - 1];
+  const cw = top.w;
+  const cd = top.d;
+  const cy = top.y + top.h;
   // Roof furniture: the thing that stops a skyline being a bar chart.
   parts.push(boxOf(cw * 0.5, 1.2, cd * 0.5, shade(wall, 0.8), { y: cy + 0.6, rng }));
   if (rng.bool(0.5)) {
@@ -785,19 +826,196 @@ function building(rng, pal, ctx = {}) {
         }
       }
     }
-    // Window bands, only ever built for the near level.
-    const floors = Math.floor(h * 0.55 / 3.2);
-    for (let f = 1; f < floors; f++) {
-      for (const dz of [-d / 2 - 0.03, d / 2 + 0.03]) {
-        parts.push(boxOf(w * 0.86, 1.5, 0.06, 0x1a2028, { y: f * 3.2, z: dz, rng }));
-      }
-      for (const dx of [-w / 2 - 0.03, w / 2 + 0.03]) {
-        parts.push(boxOf(0.06, 1.5, d * 0.86, 0x1a2028, { x: dx, y: f * 3.2, rng }));
+    // Window bands, only ever built for the near level — and drawn per mass.
+    //
+    // These used to be laid out from the plot's w, d and h on the assumption
+    // that the base slab was all three. The moment a building could be a thin
+    // slab or a podium, that assumption put bands in the air beside a mass
+    // that was never that wide.
+    for (const m of masses) {
+      const floors = Math.floor(m.h / 3.2);
+      for (let f = 1; f < floors; f++) {
+        const y = m.y + f * 3.2;
+        for (const dz of [-m.d / 2 - 0.03, m.d / 2 + 0.03]) {
+          parts.push(boxOf(m.w * 0.86, 1.5, 0.06, 0x1a2028, { y, z: dz, rng }));
+        }
+        for (const dx of [-m.w / 2 - 0.03, m.w / 2 + 0.03]) {
+          parts.push(boxOf(0.06, 1.5, m.d * 0.86, 0x1a2028, { x: dx, y, rng }));
+        }
       }
     }
   }
   return mergeFaceted(parts);
 }
+
+// A workshop: the small industrial shed a town actually has more of than it
+// has towers.
+//
+// Wide roller doors, a shallow pitch, a lit office corner and a forecourt with
+// the trade's leavings on it. The point of this next to a `building` is grain:
+// it is one storey where everything else is ten, so a straight of these breaks
+// the skyline into something with a foreground.
+function workshop(rng, pal, ctx = {}) {
+  const fine = ctx.fine !== false;
+  const parts = [];
+  const w = 13 + rng.range(0, 7);
+  const d = 9 + rng.range(0, 4);
+  const h = 4.2 + rng.range(0, 1.6);
+  const wall = mix(pal.prop ?? 0x7a7266, 0x8d8375, rng.next() * 0.7);
+  const front = -d / 2;
+
+  parts.push(boxOf(d, h, w, wall, { y: h / 2, rng, variation: 0.05 }));
+  // Shallow gable, as a flattened four-sided cone turned along the shed.
+  const roof = cone(4, w * 0.60, 1.5 + rng.range(0, 0.5), shade(wall, 0.62),
+    { y: h, rng, variation: 0.05 });
+  roof.rotateY(Math.PI / 4);
+  roof.scale(d / (w * 0.85), 1, 1.12);
+  parts.push(roof);
+  // Roof vents, the giveaway that something inside is hot.
+  for (let i = 0; i < 3; i++) {
+    parts.push(prism(S(8, ctx), 0.34, 0.30, 0.55, shade(wall, 0.5),
+      { y: h + 0.9, z: -w * 0.28 + i * w * 0.28, rng }));
+  }
+
+  if (!fine) return mergeFaceted(parts);
+  const rich = (ctx.sides ?? 1) >= 3;
+
+  // Two roller doors and a service door between them.
+  const doorW = w * 0.26;
+  for (const iz of [-1, 1]) {
+    const z = iz * w * 0.24;
+    const dh = h * 0.74;
+    parts.push(boxOf(0.22, dh, doorW, shade(wall, 0.44), { x: front - 0.11, y: dh / 2, z, rng }));
+    if (rich) {
+      // Slats. A roller door read as a flat rectangle before, and it is the
+      // one thing on this building anybody looks at.
+      const slats = Math.max(6, Math.round(dh / 0.28));
+      for (let i = 0; i < slats; i++) {
+        parts.push(boxOf(0.10, dh / slats * 0.72, doorW * 0.96, shade(wall, 0.56),
+          { x: front - 0.26, y: (i + 0.5) * dh / slats, z, rng }));
+      }
+      // Guide rails and a lintel.
+      for (const s of [-1, 1]) {
+        parts.push(boxOf(0.30, dh + 0.2, 0.16, shade(wall, 0.66),
+          { x: front - 0.14, y: (dh + 0.2) / 2, z: z + s * (doorW / 2 + 0.08), rng }));
+      }
+      parts.push(boxOf(0.34, 0.26, doorW + 0.5, shade(wall, 0.70),
+        { x: front - 0.16, y: dh + 0.23, z, rng }));
+    }
+  }
+  parts.push(boxOf(0.16, 2.1, 0.95, 0x2b2f35, { x: front - 0.08, y: 1.05, rng }));
+
+  // The office end: a band of windows and a sign over the doors.
+  windowWall(parts, rng, {
+    x: front - 0.10, wall, glass: 0x0e131b,
+    width: w * 0.30, height: h * 0.34, base: h * 0.46,
+    floors: 1, cols: rich ? 4 : 2, depth: 0.20, rich,
+  });
+  parts.push(boxOf(0.30, 0.85, w * 0.52, shade(wall, 0.38), { x: front - 0.20, y: h * 0.90, rng }));
+
+  // Forecourt: the trade's leavings, which is what says what happens here.
+  parts.push(boxOf(1.1, 1.0, 2.4, 0x4a4038, { x: front - 2.4, y: 0.5, z: w * 0.40, rng }));
+  for (let i = 0; i < 4; i++) {
+    parts.push(prism(S(12, ctx), 0.42, 0.42, 0.20, 0x1a1c1f,
+      { x: front - 1.5, y: 0.10 + i * 0.20, z: -w * 0.40, rng }));
+  }
+  for (let i = 0; i < 3; i++) {
+    parts.push(prism(S(10, ctx), 0.28, 0.28, 0.88, [0x8a4a2c, 0x35506a, 0x5a5f52][i],
+      { x: front - 1.0, y: 0, z: -w * 0.30 + i * 0.62, rng }));
+  }
+  return mergeFaceted(parts);
+}
+
+/** The office light and the sign over the doors. */
+workshop.glow = (rng, pal, ctx = {}) => {
+  const w = 13 + rng.range(0, 7);
+  const d = 9 + rng.range(0, 4);
+  const h = 4.2 + rng.range(0, 1.6);
+  const front = -d / 2;
+  return mergeFaceted([
+    boxOf(0.10, h * 0.30, w * 0.28, 0xffe6b0, { x: front - 0.22, y: h * 0.63 }),
+    boxOf(0.12, 0.55, w * 0.42, [0xffb03a, 0x4ad0ff, 0xff5a4a][rng.int(0, 2)],
+      { x: front - 0.30, y: h * 0.90 }),
+  ]);
+};
+
+// A hospital: a mid-rise slab with a lower wing and an ambulance canopy.
+//
+// Recognisable at a glance and from a distance, which is the whole job — you
+// are doing 180 km/h past it. The cross does more work than the massing does.
+function hospital(rng, pal, ctx = {}) {
+  const fine = ctx.fine !== false;
+  const parts = [];
+  const w = 24 + rng.range(0, 8);         // along the street
+  const d = 15 + rng.range(0, 5);
+  const h = 20 + rng.range(0, 10);
+  const wing = 7 + rng.range(0, 2.5);
+  const wall = mix(0xd8d4cc, pal.prop ?? 0x9aa0a4, 0.18 + rng.next() * 0.22);
+  const front = -d / 2;
+
+  // Slab, plus a wing across its foot: the ward block over the outpatients.
+  parts.push(boxOf(d, h, w, wall, { y: h / 2, rng, variation: 0.03 }));
+  parts.push(boxOf(d * 1.0, wing, w * 0.62, shade(wall, 0.94),
+    { x: -d * 0.25, y: wing / 2, rng, variation: 0.03 }));
+  // Rooftop plant and a lift overrun.
+  parts.push(boxOf(d * 0.30, 2.6, w * 0.22, shade(wall, 0.80), { y: h + 1.3, rng }));
+  for (let i = 0; i < 2; i++) {
+    parts.push(prism(S(10, ctx), 1.05, 1.05, 1.5, shade(wall, 0.72),
+      { y: h, z: -w * 0.22 + i * w * 0.30, x: d * 0.16, rng }));
+  }
+
+  if (!fine) return mergeFaceted(parts);
+  const rich = (ctx.sides ?? 1) >= 3;
+
+  // Ward windows: small, regular, every floor. A hospital's elevation is the
+  // most repetitive thing on a street and that regularity is the recognition.
+  const floors = Math.max(4, Math.floor((h - wing - 2) / 3.3));
+  windowWall(parts, rng, {
+    x: front - 0.10, wall, glass: 0x0e131b,
+    width: w - 1.2, height: h - wing - 1.6, base: wing + 0.7,
+    floors, cols: rich ? 12 : 6, depth: 0.24, rich,
+  });
+  // Outpatients glazing along the wing.
+  windowWall(parts, rng, {
+    x: -d * 0.75 - 0.10, wall, glass: 0x101720,
+    width: w * 0.60, height: wing - 2.2, base: 1.1,
+    floors: 2, cols: rich ? 9 : 4, depth: 0.22, rich,
+  });
+
+  // Ambulance canopy on posts, over a bay set into the wing.
+  // Kept inside the plot the ward block already claims: the declared footprint
+  // is a radius, and a porte-cochere reaching further than the building does
+  // is the difference between a hospital that can stand somewhere and one that
+  // is never placed at all.
+  const cx = -d * 0.78;
+  parts.push(boxOf(3.0, 0.42, w * 0.40, shade(wall, 0.66), { x: cx - 1.2, y: wing - 0.6, rng }));
+  for (const iz of [-1, 1]) {
+    parts.push(prism(S(8, ctx), 0.20, 0.20, wing - 0.8,
+      shade(wall, 0.58), { x: cx - 2.4, z: iz * w * 0.17, rng }));
+  }
+  // The cross, on the slab and over the bay.
+  for (const [x, y, s] of [[front - 0.34, h * 0.82, 1.9], [cx - 2.6, wing - 1.7, 1.1]]) {
+    parts.push(boxOf(0.20, s, s * 0.30, 0xb8261e, { x, y, rng, variation: 0 }));
+    parts.push(boxOf(0.20, s * 0.30, s, 0xb8261e, { x, y, rng, variation: 0 }));
+  }
+  return mergeFaceted(parts);
+}
+
+/** Lit wards, the bay, and the cross. */
+hospital.glow = (rng, pal, ctx = {}) => {
+  const w = 24 + rng.range(0, 8);
+  const d = 15 + rng.range(0, 5);
+  const h = 20 + rng.range(0, 10);
+  const wing = 7 + rng.range(0, 2.5);
+  const front = -d / 2;
+  const cx = -d * 1.05;
+  return mergeFaceted([
+    boxOf(0.10, h - wing - 2.0, w * 0.90, 0xdfe9ff, { x: front - 0.26, y: wing + (h - wing) / 2 }),
+    boxOf(0.10, wing - 2.6, w * 0.56, 0xfff2d8, { x: -d * 0.79, y: 2.2 }),
+    boxOf(0.16, 2.0, 2.0 * 0.32, 0xff3a2a, { x: front - 0.46, y: h * 0.82 }),
+    boxOf(0.16, 2.0 * 0.32, 2.0, 0xff3a2a, { x: front - 0.46, y: h * 0.82 }),
+  ]);
+};
 
 function ridge(rng, pal, ctx = {}) {
   const parts = [];
@@ -1577,7 +1795,21 @@ export const PROP_TYPES = {
     place: TRACKSIDE, radius: 1.4, footprint: 3.5, toughness: null, height: 2.7, faceRoad: -1,
   },
 
-  building: { build: building, place: SCENERY, radius: 0, footprint: 16.7, toughness: null, height: 40, horizon: true },
+  workshop: {
+    build: workshop, glow: workshop.glow,
+    place: SCENERY, radius: 0, footprint: 12.1, toughness: null, height: 6,
+    faceRoad: -1,
+  },
+  hospital: {
+    build: hospital, glow: hospital.glow,
+    place: SCENERY, radius: 0, footprint: 24.2, toughness: null, height: 30,
+    faceRoad: -1,
+  },
+
+  // 17.0, not the 15.4 tools/footprints.mjs measures. Every mass is centred,
+  // so the half-extent is w/2 and w tops out at 25 — 12.5 m, and 16.9 with the
+  // probe's scale headroom. The tool samples one seed; this is the bound.
+  building: { build: building, place: SCENERY, radius: 0, footprint: 17.0, toughness: null, height: 40, horizon: true },
   ridge: { build: ridge, place: SCENERY, radius: 0, footprint: 46.7, toughness: null, height: 22, horizon: true },
 
   brazier: { build: brazier, place: TRACKSIDE, radius: 0.9, footprint: 1.3, toughness: 90, height: 2.2, emissive: 0xff5a1e },
@@ -1605,12 +1837,12 @@ export const CITY_FRONTAGES = {
 export const BIOME_PROPS = {
   wasteland: {
     trackside: { barrel: 3, tyre_stack: 3, crate: 2, wreck: 2, marker: 3, rock: 2 },
-    scenery: { pole: 3, dead_tree: 2, shack: 2, boulder: 1, grandstand: 0.5 },
-    horizon: { building: 2, ridge: 2, crane: 1 },
+    scenery: { pole: 3, dead_tree: 2, shack: 2, workshop: 2, boulder: 1, grandstand: 0.5 },
+    horizon: { building: 2, ridge: 2, crane: 1, hospital: 0.6 },
   },
   industrial: {
     trackside: { container: 3, barrel: 3, crate: 3, tyre_stack: 2, marker: 3 },
-    scenery: { crane: 2, pipes: 3, pole: 3, shack: 1, grandstand: 0.8 },
+    scenery: { crane: 2, pipes: 3, pole: 3, shack: 1, workshop: 2.5, grandstand: 0.8 },
     horizon: { building: 4, crane: 2, ridge: 1 },
   },
   desert: {
@@ -1628,8 +1860,8 @@ export const BIOME_PROPS = {
       streetlight: 4, neon_sign: 3, traffic_light: 3,
       jersey_barrier: 3, dumpster: 2, bus_stop: 2, marker: 1,
     },
-    scenery: { building: 3, billboard: 2.5, palm: 2, pole: 1, shack: 1 },
-    horizon: { building: 5, crane: 1 },
+    scenery: { building: 3, billboard: 2.5, palm: 2, pole: 1, shack: 1, workshop: 1.2, hospital: 0.8 },
+    horizon: { building: 5, crane: 1, hospital: 0.5 },
   },
 
   inferno: {
