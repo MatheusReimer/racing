@@ -17,6 +17,16 @@ import { Build } from '../src/build/build.js';
 import { VEHICLES } from '../src/data/vehicles.js';
 import { PART_BY_ID } from '../src/data/parts.js';
 
+// The bodies the game fetches at boot, read straight off disk: in Node there is
+// no relative URL to fetch, and a probe that quietly fell back to the generated
+// route would be checking a car the game no longer builds.
+import { readFileSync } from 'node:fs';
+import { HULLS, HULL_NAMES, parseHull } from '../src/data/bodies/index.js';
+for (const n of HULL_NAMES) {
+  const b = readFileSync(`public/bodies/${n}.bin`);
+  HULLS[n] = parseHull(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+}
+
 function analyse(geo) {
   const idx = geo.index.array;
   const pos = geo.attributes.position.array;
@@ -87,16 +97,32 @@ for (const c of cases) {
   const m = new VehicleMesh(visualProfile(c.build.stats.all(), c.build.tags, c.def),
     { shadows: false });
 
+  // A body decimated off a reference is exempt, and the exemption is the point
+  // rather than a way round a failure.
+  //
+  // This test asks whether a surface is closed and consistently wound, which is
+  // a fair question of geometry this project generated out of boxes and lofts:
+  // if it is not, somebody's arithmetic is wrong. It is not a fair question of
+  // a real car model. Those are built as dozens of open shells — a bonnet is a
+  // panel with a rim, glass is a plane, a door shut is a genuine gap — and no
+  // amount of care makes them watertight, because they were never meant to be.
+  // Their bodies are drawn double-sided for exactly that reason, which is what
+  // makes an inconsistent winding a non-event instead of a hole.
+  //
+  // Everything the generator still builds is checked as strictly as before.
+  const traced = !!HULLS[c.def?.bodyType];
+
   for (const [name, geo] of [['body', m.bodyGeo], ['glass', m.glassGeo], ['trim', m.trimGeo]]) {
     if (!geo) continue;
     const r = analyse(geo);
-    const bad = r.flipped > 0 || r.holes > 0;
+    const exempt = traced && name === 'body';
+    const bad = !exempt && (r.flipped > 0 || r.holes > 0);
     if (bad) problems++;
     console.log(
       `  ${c.label.padEnd(13)} ${name.padEnd(6)} ${String(r.tris).padStart(4)} tris  ` +
       `${String(r.edges).padStart(4)} edges  ` +
       `flipped ${String(r.flipped).padStart(3)}  holes ${String(r.holes).padStart(3)}  ` +
-      (bad ? 'FAIL' : 'ok'),
+      (bad ? 'FAIL' : (exempt ? 'traced — not expected to be closed' : 'ok')),
     );
   }
   m.dispose();

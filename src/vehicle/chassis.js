@@ -204,108 +204,58 @@ function loft(sections, color, opts = {}) {
  * is scaled onto the L and W the build asked for, with height following length
  * so a wide build widens the car instead of flattening it.
  */
-// What each surface class from tools/lowpoly.mjs is painted as.
+// What each surface class from tools/decimate.mjs is painted as.
 //
-// The hull says where the windows and the bumpers are; this says what those
-// look like in this game. Keeping the two apart is what lets six cars traced
-// off six references still read as one grid: the paint class takes whatever
-// colour the vehicle picked, and everything else is shared furniture.
+// The body file says where the windows and the bumpers are; this says what
+// those look like in this game. Keeping the two apart is what lets six cars
+// taken off six references still read as one grid: the paint class takes
+// whatever colour the vehicle picked, and everything else is shared furniture.
 const HULL_GLASS = 0x0d1520;
 const HULL_DARK = 0x15181c;
 const HULL_CHROME = 0xb9bec6;
 
 /**
- * Build a car from a hull traced off a real one by tools/lowpoly.mjs.
+ * Build a car from a body decimated off a real one by tools/decimate.mjs.
  *
- * Same stitch-and-cap as `loft`, and deliberately so: what changes is only
- * where a ring's points come from. `loft` evaluates a squircle, which is how
- * you draw a car nobody has ever seen; this reads the radii measured off one
- * that exists. The topology either way is a quad strip between consecutive
- * rings, so everything downstream — flat shading, merging, the shadow pass —
- * cannot tell the difference.
+ * De-indexed on the way in. The file is indexed because that is half the bytes,
+ * but a class belongs to a triangle rather than to a corner — a windscreen and
+ * the pillar beside it share vertices and are not the same surface — and an
+ * indexed buffer can only colour corners. Splitting them costs memory this
+ * budget has and buys panel edges that are lines rather than zigzags. It is
+ * also what `flatShading` wants: one normal per face, not an average of the
+ * faces a corner happens to touch.
  *
- * The hull arrives in metres with the road at `ground` and the nose at +Z. It
- * is scaled onto the L and W the build asked for, with height following length
- * so a wide build widens the car instead of flattening it.
+ * The body arrives in metres with the road at `ground` and the nose at +Z, and
+ * is scaled onto the L and W the build asked for, height following length so a
+ * wide build widens the car instead of flattening it.
  */
-function loftTraced(hull, L, W, color, accent) {
-  const M = hull.radial;
+function hullGeometry(hull, L, W, color, accent) {
+  const { positions, indices, classes } = hull;
   const sz = L / hull.length;
   const sx = W / hull.width;
   const sy = sz;
+  const n = classes.length;
 
   const byClass = [color, HULL_GLASS, HULL_DARK, HULL_CHROME, accent ?? 0xfff2d0]
     .map((c) => new THREE.Color(c));
 
-  const verts = [];
-  const cols = [];
-  const push = (tri, cls) => {
-    const c = byClass[cls] ?? byClass[0];
-    for (const p of tri) {
-      verts.push(p[0], p[1], p[2]);
-      cols.push(c.r, c.g, c.b);
-    }
-  };
-  // A quad wears one material, and both its triangles have to agree on which.
-  //
-  // Deciding per triangle instead leaves the two halves of a panel free to
-  // disagree, and every boundary in the car — the edge of a windscreen, the top
-  // of a sill — comes out as a zigzag of alternating half-squares rather than a
-  // line. Four corners vote; a tie goes to whichever class is rarer, because
-  // paint is the default everything else has to win an angle away from.
-  const RANK = [4, 0, 3, 1, 2];       // paint concedes, glass and lamps hold
-  const vote4 = (a, b, c, d) => {
-    const n = [0, 0, 0, 0, 0];
-    n[a]++; n[b]++; n[c]++; n[d]++;
-    let best = 0;
-    for (let i = 1; i < 5; i++) {
-      if (n[i] > n[best] || (n[i] === n[best] && RANK[i] < RANK[best])) best = i;
-    }
-    return best;
-  };
-
-  const rings = hull.rings.map((row) => {
-    const z = row[0] * sz;
-    const cy = (row[1] - hull.ground) * sy;
-    const pts = [];
-    for (let k = 0; k < M; k++) {
-      const a = (k / M) * Math.PI * 2;
-      pts.push([Math.cos(a) * row[2 + k] * sx, cy + Math.sin(a) * row[2 + k] * sy, z]);
-    }
-    return pts;
-  });
-  const cls = hull.classes ?? rings.map(() => new Array(M).fill(0));
-
-  for (let i = 0; i < rings.length - 1; i++) {
-    const A = rings[i];
-    const B = rings[i + 1];
-    const ca = cls[i];
-    const cb = cls[i + 1];
-    for (let k = 0; k < M; k++) {
-      const k2 = (k + 1) % M;
-      const q = vote4(ca[k], ca[k2], cb[k], cb[k2]);
-      push([A[k], B[k], A[k2]], q);
-      push([A[k2], B[k], B[k2]], q);
+  const pos = new Float32Array(n * 9);
+  const col = new Float32Array(n * 9);
+  for (let t = 0; t < n; t++) {
+    const c = byClass[classes[t]] ?? byClass[0];
+    for (let k = 0; k < 3; k++) {
+      const v = indices[t * 3 + k] * 3;
+      const o = t * 9 + k * 3;
+      pos[o] = positions[v] * sx;
+      pos[o + 1] = (positions[v + 1] - hull.ground) * sy;
+      pos[o + 2] = positions[v + 2] * sz;
+      col[o] = c.r; col[o + 1] = c.g; col[o + 2] = c.b;
     }
   }
-  // Nose and tail closed off, wound so neither is culled away from outside.
-  const cap = (ring, ringCls, front) => {
-    let cx = 0;
-    let cy = 0;
-    for (const q of ring) { cx += q[0]; cy += q[1]; }
-    const c = [cx / ring.length, cy / ring.length, ring[0][2]];
-    for (let k = 0; k < ring.length; k++) {
-      const k2 = (k + 1) % ring.length;
-      const t = front ? [c, ring[k], ring[k2]] : [c, ring[k2], ring[k]];
-      push(t, vote4(ringCls[k], ringCls[k2], ringCls[k], ringCls[k2]));
-    }
-  };
-  cap(rings[0], cls[0], true);
-  cap(rings[rings.length - 1], cls[cls.length - 1], false);
 
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(cols), 3));
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   geo.computeVertexNormals();
   return geo;
 }
@@ -1115,12 +1065,19 @@ export class VehicleMesh {
       opaque.length = 0;
       glass.length = 0;
       emissive.length = 0;
-      opaque.push(loftTraced(hull, L, W, body, accent));
+      opaque.push(hullGeometry(hull, L, W, body, accent));
     }
 
     this.bodyGeo = mergeGeometries(opaque);
     this.bodyMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
+      // A car built out of boxes is watertight and can be culled from behind. A
+      // car decimated off a reference is not: real models are dozens of open
+      // shells, and some of them are wound inconsistently to begin with, so
+      // back-face culling turns those into holes you can see the far side of
+      // the car through. Drawing both sides costs fill rate and fixes it
+      // outright, which is the right trade for geometry nobody here authored.
+      side: hull ? THREE.DoubleSide : THREE.FrontSide,
       // Faceted. The loft averages normals across its cross-sections, which
       // reads as a soft curve; flat shading puts the panel edges back and is
       // what makes the silhouette legible at speed.

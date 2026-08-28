@@ -12,6 +12,7 @@ import { BIOMES } from './data/biomes.js';
 import { randomSeedString } from './core/rng.js';
 import { Audio } from './audio/audio.js';
 import { Showroom } from './vehicle/showroom.js';
+import { loadHulls } from './data/bodies/index.js';
 
 // Bootstrap and the top-level state machine.
 //
@@ -356,6 +357,10 @@ class Game {
     return this.scene;
   }
 }
+
+// Bodies before the first car. `VehicleMesh` is built mid-race when a rival
+// spawns, so it has to stay synchronous; fetching here means it always is.
+await loadHulls();
 
 const game = new Game();
 game.start();
