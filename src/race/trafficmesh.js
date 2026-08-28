@@ -34,6 +34,15 @@ import { RNG } from '../core/rng.js';
 // is driving rather than to a catalogue. These sit inside the same band, with
 // the same ordering between them — a van is still the biggest thing on the
 // road, by the margin the grid can absorb.
+// The same near-black the racers' glass uses, drawn on the unlit material.
+//
+// It was 0x11161d on the lit body material at metalness 0.18, so in sun the
+// windows caught a specular highlight and read as pale blue-grey panels — the
+// exact thing black glass was asked for to stop. Glazing is the darkest part
+// of a car from outside in almost any light, and the way to draw that is to
+// stop asking the lighting.
+const TRAFFIC_GLASS = 0x070a0f;
+
 const BODIES = [
   // width, length, height, roof drop, colour
   { w: 1.70, l: 3.80, h: 0.58, roof: 0.48, c: 0x9aa0a8 },   // hatchback
@@ -59,6 +68,7 @@ function buildBody(spec, rng) {
   // was protecting was never large. A bonnet, a cabin and a boot at slightly
   // different heights is what makes a shape read as a car rather than as a
   // crate, and it is still under two thousand triangles.
+  const glass = [];
   const bonnet = l * 0.30;
   const cabinL = l * 0.42;
   const boot = l - bonnet - cabinL;
@@ -80,18 +90,19 @@ function buildBody(spec, rng) {
   parts.push(boxOf(cabW, roof, cabinL * 0.88, c,
     { y: cabY + roof / 2 - 0.04, z: zNose - bonnet - cabinL / 2, rng, variation: 0.03 }));
   for (const [iz, len] of [[1, 0.34], [-1, 0.28]]) {
-    const g = boxOf(cabW * 0.98, roof * 0.96, cabinL * len, 0x11161d, {
+    const g = boxOf(cabW * 0.98, roof * 0.96, cabinL * len, TRAFFIC_GLASS, {
       y: cabY + roof * 0.48,
       z: zNose - bonnet - cabinL / 2 + iz * cabinL * 0.5,
       rng,
+      variation: 0,
     });
     g.rotateX(iz * 0.42);
-    parts.push(g);
+    glass.push(g);
   }
   // Side glass as one dark band, as before: four panes at this range is spend
   // with nothing to show for it.
-  parts.push(boxOf(cabW * 1.01, roof * 0.58, cabinL * 0.80, 0x11161d, {
-    y: cabY + roof * 0.55, z: zNose - bonnet - cabinL / 2, rng,
+  glass.push(boxOf(cabW * 1.01, roof * 0.58, cabinL * 0.80, TRAFFIC_GLASS, {
+    y: cabY + roof * 0.55, z: zNose - bonnet - cabinL / 2, rng, variation: 0,
   }));
 
   // Bumpers and a grille.
@@ -151,13 +162,16 @@ function buildBody(spec, rng) {
       parts.push(rim);
     }
   }
-  return mergeFaceted(parts);
+  return { body: mergeFaceted(parts), glass: mergeFaceted(glass) };
 }
 
 function buildLights(spec) {
   const { w, l, h } = spec;
   const parts = [];
   const y = 0.34 + h * 0.62;
+  // Lamps and glass share this geometry because they share a material, not
+  // because they are the same thing: both want to be drawn without the
+  // lighting having a say. See TRAFFIC_GLASS.
   // Reds at the back, whites at the front, in the local frame. The renderer
   // never has to know which way the car is going; the geometry does.
   for (const ix of [-1, 1]) {
@@ -173,8 +187,10 @@ export class TrafficMesh {
     this.cars = cars;
 
     const rng = new RNG(`traffic:${seed}`);
-    this.bodyGeos = BODIES.map((b) => buildBody(b, rng));
-    this.lightGeos = BODIES.map((b) => buildLights(b));
+    const built = BODIES.map((b) => buildBody(b, rng));
+    this.bodyGeos = built.map((x) => x.body);
+    // Glass rides with the lamps, on the unlit material.
+    this.lightGeos = BODIES.map((b, i) => mergeFaceted([buildLights(b), built[i].glass]));
 
     this.bodyMat = facetedMaterial({ roughness: 0.62, metalness: 0.18 });
     this.lightMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });

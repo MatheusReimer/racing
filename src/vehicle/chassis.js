@@ -380,6 +380,20 @@ function hullShared(hull) {
   // be: the band of the body between the beltline and just under the roof,
   // inboard of the widest point, across the middle of the car. It is a coarse
   // rule and it is far better than bodywork where the windscreen goes.
+  // Enough of it to be a greenhouse, not merely some.
+  //
+  // The FD's materials do name a transparent one, and it is the tail lamp
+  // lens: seventy square centimetres at the back of the car, which satisfied
+  // "has glass" and left the windscreen and every side window painted the same
+  // colour as the wings. A car's greenhouse is two to five square metres, so
+  // the question the synthesis should ask is how much, not whether.
+  const GREENHOUSE_MIN = 1.2;   // m^2
+  if (shared.glass && surfaceArea(shared.glass) < GREENHOUSE_MIN) {
+    // What was found is real glazing, just not the windows — a lens, a sunroof
+    // trim. Kept, and the greenhouse built alongside it.
+    shared.strayGlass = shared.glass;
+    shared.glass = null;
+  }
   if (!shared.glass) {
     const bb = { y0: Infinity, y1: -Infinity, x: 0 };
     for (let i = 0; i < positions.length; i += 3) {
@@ -427,6 +441,12 @@ function hullShared(hull) {
       shared.normal = re.getAttribute('normal');
       shared.bodyClasses = Uint8Array.from(reCls);
     }
+  }
+
+  if (shared.strayGlass) {
+    shared.glass = shared.glass
+      ? mergeGeometries([shared.glass, shared.strayGlass]) : shared.strayGlass;
+    shared.strayGlass = null;
   }
 
   if (!shared.bodyClasses) shared.bodyClasses = Uint8Array.from(bodyCls);
@@ -488,6 +508,27 @@ function hullGeometry(hull, L, W, color, accent) {
     // did not.
     scale: [W / hull.width, L / hull.length, L / hull.length],
   };
+}
+
+/** Total area of a triangle soup, in square metres. */
+function surfaceArea(geo) {
+  const p = geo.getAttribute('position');
+  const ix = geo.index;
+  const n = ix ? ix.count : p.count;
+  let area = 0;
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  for (let t = 0; t + 2 < n; t += 3) {
+    const i0 = ix ? ix.getX(t) : t;
+    const i1 = ix ? ix.getX(t + 1) : t + 1;
+    const i2 = ix ? ix.getX(t + 2) : t + 2;
+    a.fromBufferAttribute(p, i0);
+    b.fromBufferAttribute(p, i1).sub(a);
+    c.fromBufferAttribute(p, i2).sub(a);
+    area += b.cross(c).length() / 2;
+  }
+  return area;
 }
 
 function mergeGeometries(list) {
