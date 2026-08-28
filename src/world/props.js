@@ -46,7 +46,7 @@ export const LODS = [
   // They are also the smallest population — the verge band is metres wide
   // against a field hundreds of metres deep — so raising them is close to free
   // and it is all in the part of the frame anyone is looking at.
-  { id: 0, sides: 1.75, fine: true },   // at the kerb, passed within metres
+  { id: 0, sides: 2.40, fine: true },   // at the kerb, passed within metres
   { id: 1, sides: 1.00, fine: true },   // near the road, looked at
   { id: 2, sides: 0.60, fine: false },  // mid-field, read as shape
   { id: 3, sides: 0.40, fine: false },  // horizon, read as silhouette
@@ -1314,7 +1314,7 @@ export const PROP_TYPES = {
   // building put sixty metres off one straight lands on another part of the
   // lap, and thirteen metres of it ends up in the road. These are half-extents
   // at the largest each generator builds.
-  grandstand: { build: grandstand, place: SCENERY, radius: 0, footprint: 15.2, toughness: null, height: 6 },
+  grandstand: { build: grandstand, place: SCENERY, radius: 0, footprint: 14.8, toughness: null, height: 6 },
 
   wreck: { build: wreck, place: TRACKSIDE, radius: 1.6, footprint: 3.5, toughness: 190, height: 1.2 },
   shack: { build: shack, place: SCENERY, radius: 2.4, footprint: 3.5, toughness: null, height: 3 },
@@ -1343,9 +1343,9 @@ export const PROP_TYPES = {
 
   container: { build: container, place: TRACKSIDE, radius: 3.1, footprint: 4.3, toughness: 320, height: 2.6 },
   crane: { build: crane, place: SCENERY, radius: 1.6, footprint: 1.3, toughness: null, height: 20 },
-  pipes: { build: pipes, place: SCENERY, radius: 1.0, footprint: 20.9, toughness: null, height: 2.5 },
+  pipes: { build: pipes, place: SCENERY, radius: 1.0, footprint: 23.3, toughness: null, height: 2.5 },
 
-  spire: { build: spire, place: SCENERY, radius: 1.6, footprint: 2.8, toughness: null, height: 14 },
+  spire: { build: spire, place: SCENERY, radius: 1.6, footprint: 2.7, toughness: null, height: 14 },
   streetlight: {
     build: streetlight, glow: streetlight.glow,
     place: TRACKSIDE, radius: 0.3, footprint: 0.4, toughness: null, height: 9,
@@ -1401,14 +1401,14 @@ export const PROP_TYPES = {
 
   billboard: {
     build: billboard, glow: billboard.glow,
-    place: SCENERY, radius: 0.5, footprint: 4.0, toughness: null, height: 11, faceRoad: -1,
+    place: SCENERY, radius: 0.5, footprint: 3.9, toughness: null, height: 11, faceRoad: -1,
   },
   bus_stop: {
     build: busStop, glow: busStop.glow,
     place: TRACKSIDE, radius: 1.4, footprint: 3.5, toughness: null, height: 2.7, faceRoad: -1,
   },
 
-  building: { build: building, place: SCENERY, radius: 0, footprint: 14.6, toughness: null, height: 40, horizon: true },
+  building: { build: building, place: SCENERY, radius: 0, footprint: 15.5, toughness: null, height: 40, horizon: true },
   ridge: { build: ridge, place: SCENERY, radius: 0, footprint: 46.7, toughness: null, height: 22, horizon: true },
 
   brazier: { build: brazier, place: TRACKSIDE, radius: 0.9, footprint: 1.3, toughness: 90, height: 2.2, emissive: 0xff5a1e },

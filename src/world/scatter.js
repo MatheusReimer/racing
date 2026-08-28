@@ -27,11 +27,19 @@ import { clamp, clamp01, lerp, wrap, TAU } from '../core/math.js';
 // design's way of making Weight and Impact decide routes; that is now gone by
 // choice, and the destructible props that remain are on the verge, where they
 // are the price of running wide rather than a toll on the racing line.
+// Where each band sits, and how far the last one reaches.
+//
+// The far band used to run to 480 m, which is past where any of this can be
+// seen: the fog is exponential and its half-visibility distance is 111 m in
+// Inferno, 122 in the city, 245 at the widest in the Wasteland. Everything put
+// beyond that was drawn and then dissolved, so making the horizon busier by
+// adding more of it did nothing at all. It is pulled in to 360 now, where the
+// clearest biomes still show it and the murkiest at least suggest it.
 const BANDS = {
   verge: { min: 1.5, max: 16, lod: 0 },
   near: { min: 16, max: 70, lod: 1 },
   mid: { min: 70, max: 200, lod: 2 },
-  far: { min: 200, max: 480, lod: 3 },
+  far: { min: 200, max: 360, lod: 3 },
 };
 
 /**
@@ -388,7 +396,9 @@ export function generateProps(rng, track, biome, opts = {}) {
       + rng.range(BANDS.verge.max, BANDS.near.max)));
   }
 
-  const midCount = Math.round((L / 26) * density);
+  // Doubled. This is the band that reads as depth — far enough to be scenery
+  // rather than furniture, near enough that the fog has not taken it yet.
+  const midCount = Math.round((L / 13) * density);
   for (let i = 0; i < midCount; i++) {
     const s = rng.range(0, L);
     const hw = track.halfWidthAt(s);
@@ -405,7 +415,10 @@ export function generateProps(rng, track, biome, opts = {}) {
   // this range they are an outline against the sky and nothing more.
   const horizonTable = spec.horizon;
   if (horizonTable) {
-    const horizonCount = Math.round((L / 34) * density);
+    // More than doubled, and now landing inside the visible range: a skyline
+    // is made of a lot of shapes at slightly different distances, and thirty of
+    // them around two kilometres of circuit is a few lonely towers.
+    const horizonCount = Math.round((L / 15) * density);
     for (let i = 0; i < horizonCount; i++) {
       const s = rng.range(0, L);
       const hw = track.halfWidthAt(s);
