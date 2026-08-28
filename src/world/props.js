@@ -722,12 +722,14 @@ function building(rng, pal, ctx = {}) {
   // Two or three stacked masses. A single box is a box; a setback is a
   // building, and it costs twelve triangles.
   const stacks = rng.int(2, 3);
+  const masses = [];
   let cw = w, cd = d, cy = 0;
   for (let i = 0; i < stacks; i++) {
     const sh = h * (i === 0 ? 0.55 : 0.45 / (stacks - 1));
     parts.push(boxOf(cw, sh, cd, shade(wall, 1 - i * 0.08), {
       y: cy + sh / 2, rng, variation: 0.05,
     }));
+    masses.push({ w: cw, d: cd, h: sh, y: cy });
     cy += sh;
     cw *= rng.range(0.62, 0.86);
     cd *= rng.range(0.62, 0.86);
@@ -741,25 +743,46 @@ function building(rng, pal, ctx = {}) {
   if (fine) {
     const rich = (ctx.sides ?? 1) >= 3;
     if (rich) {
-      // The full grid on the two faces a car can see. A building is the
-      // largest thing in the game and was among the plainest: a stack of
-      // slabs with a band of glass round it.
-      const floorsRich = Math.max(3, Math.floor((h * 0.55) / 3.2));
-      for (const [ax, aw] of [[-d / 2 - 0.08, w], [-w / 2 - 0.08, d]]) {
-        const from = parts.length;
-        windowWall(parts, rng, {
-          x: ax,
-          wall,
-          glass: 0x0c1118,
-          width: aw,
-          height: h * 0.5,
-          base: 3.0,
-          floors: floorsRich,
-          cols: 6,
-          depth: 0.26,
-          rich,
-        });
-        if (aw === d) for (let i = from; i < parts.length; i++) parts[i].rotateY(Math.PI / 2);
+      // The full grid on the two faces a car can see, once per stacked mass.
+      //
+      // The first version of this drew one grid, sized from the whole
+      // building, against the base slab — so it ran off the top of that slab
+      // and hung windows in the air above it, lit, with no wall behind them.
+      // Every mass gets its own grid now, sized and seated on that mass, and
+      // the setbacks are glazed too instead of being blank blocks.
+      for (const m of masses) {
+        const floors = Math.max(1, Math.floor((m.h - 1.6) / 3.2));
+        const cols = Math.min(9, Math.max(3, Math.round(m.w / 3.4)));
+        // `boxOf(w, h, d)` sizes x by its first argument, so a mass of
+        // (cw, sh, cd) faces the street at x = -cw/2 and runs cd deep along z.
+        // Getting that pair the wrong way round is what sank one elevation
+        // into the wall and left the other standing off it in mid-air.
+        // Inset from the corners as well as from the top and bottom. The
+        // grid's own trim — the coping band and the quoins — is built proud of
+        // the width it is given, so a grid the full width of the mass wraps
+        // past the corner and leaves glazing standing off the end of the slab.
+        const IN = 0.9;
+        for (const [face, ax, aw, cn] of [
+          ['x', -m.w / 2 - 0.08, m.d - IN, Math.min(9, Math.max(3, Math.round(m.d / 3.4)))],
+          ['z', -m.d / 2 - 0.08, m.w - IN, cols],
+        ]) {
+          const from = parts.length;
+          windowWall(parts, rng, {
+            x: ax,
+            wall,
+            glass: 0x0c1118,
+            width: aw,
+            // Seated inside the mass: a plinth below, a parapet above, so the
+            // top row cannot sit proud of the slab it belongs to.
+            height: m.h - 1.6,
+            base: m.y + 0.9,
+            floors,
+            cols: cn,
+            depth: 0.26,
+            rich,
+          });
+          if (face === 'z') for (let i = from; i < parts.length; i++) parts[i].rotateY(Math.PI / 2);
+        }
       }
     }
     // Window bands, only ever built for the near level.

@@ -281,3 +281,161 @@ if (problems) {
   process.exit(1);
 }
 console.log('every prop generator is valid and every biome is populated');
+
+// --- every window has a wall immediately behind it --------------------------
+//
+// The building is a stack of masses that step in as they rise. The first
+// window grid was sized from the whole building and seated on the base slab,
+// so it ran off the top of that slab and left lit windows hanging in the air
+// with nothing behind them — visible from the road as floors that are not
+// there. A ray cast inward from the glass catches it: behind a real window is
+// the wall it is set into, a couple of hundred millimetres away. Behind a
+// floating one is either nothing, or the next mass in — which is narrower and
+// centred, so it is metres away rather than centimetres. Hence a *near* hit is
+// required, not just any hit; "some geometry is over there somewhere" is what
+// the eye is already telling us is wrong.
+{
+  console.log('\nEvery window has a wall behind it:\n');
+  const REACH = 0.6;          // metres; a wall this far back reads as absent
+  const GLASS_LUMA = 0.02;    // linear-space; glazing is far darker than render
+  const bad = [];
+  let glassSeen = 0;
+  for (const biome of BIOMES) {
+    const lib = buildPropLibrary(biome, 7);
+    for (const type of ['building', 'facade', 'tenement', 'townhouse', 'mall']) {
+      const entry = lib[type];
+      if (!entry) continue;
+      for (const geo of (entry.levels ?? [])[0] ?? []) {
+        const pos = geo?.attributes?.position;
+        const col = geo?.attributes?.color;
+        if (!pos || !col) continue;
+        const glass = [];
+        const solid = [];
+        for (let t = 0; t < pos.count; t += 3) {
+          const luma = 0.2126 * col.getX(t) + 0.7152 * col.getY(t) + 0.0722 * col.getZ(t);
+          const tri = [0, 1, 2].map((k) => [pos.getX(t + k), pos.getY(t + k), pos.getZ(t + k)]);
+          (luma < GLASS_LUMA ? glass : solid).push(tri);
+        }
+        // Only elevations, not one-off panes.
+        //
+        // A projecting bay or a shopfront return is glazing whose side faces
+        // have no wall behind them and never did — that is what a bay is. The
+        // regression this guards against is a *grid* left standing where its
+        // slab ended, so panes are bucketed by the plane they lie in and only
+        // planes carrying a row of them are tested.
+        const plane = (n, c) => {
+          const ax = Math.abs(n[0]) > Math.abs(n[2]) ? 0 : 2;
+          return `${ax}:${Math.round(c[ax] * 4)}`;
+        };
+        const rows = new Map();
+        for (const tri of glass) {
+          const n = faceNormal(tri);
+          if (Math.abs(n[1]) > 0.5) continue;
+          const c = centroid(tri);
+          const k = plane(n, c);
+          rows.set(k, (rows.get(k) ?? 0) + 1);
+        }
+        // Every pane, not a sample of them. Sampling one in four looked
+        // harmless and was not: between the inward faces, the slivers and the
+        // panes that are not on an elevation, four fifths of the glass is
+        // filtered out before it is tested, and a quarter of what is left is
+        // three triangles. Checked against the bug it was written for, the
+        // sampled version reported clean and the exhaustive one found ten.
+        for (let i = 0; i < glass.length; i++) {
+          const tri = glass[i];
+          const e1 = sub(tri[1], tri[0]);
+          const e2 = sub(tri[2], tri[0]);
+          const n = norm(cross(e1, e2));
+          // The near level's colour bands are 60 mm strips in the same near-
+          // black as the glazing, and their end caps look exactly like small
+          // panes to everything above. A window is big; a strip's end is not.
+          if (Math.hypot(...cross(e1, e2)) / 2 < 0.10) continue;
+          // Only the outward pane, not the reveals or the box's own back.
+          const c = [0, 1, 2].map((k) => (tri[0][k] + tri[1][k] + tri[2][k]) / 3);
+          // Outward-facing means the normal agrees with the direction out
+          // from the building's axis — horizontally only, since every pane
+          // sits well above the origin and height would swamp the sign.
+          if (n[0] * c[0] + n[2] * c[2] <= 0) continue;
+          glassSeen++;
+          // A glass box has six faces, and its two side faces also point away
+          // from the building's axis — with the opposite jamb a pane's width
+          // "behind" them. Only the outermost surface is a window: if there is
+          // anything in front of this face, it is an edge, not a view.
+          if ((rows.get(plane(n, c)) ?? 0) < 8) continue;
+          // And on the outside of the building at its own height. A pane's
+          // side faces point sideways from well inside the envelope; an
+          // elevation's panes sit at the extremity. Measured per height band
+          // so a setback's own narrower face still counts as an extremity.
+          const ax = Math.abs(n[0]) > Math.abs(n[2]) ? 0 : 2;
+          if (Math.abs(c[ax]) < 0.85 * envelopeAt(solid, c[1], ax)) continue;
+          const ahead = [0, 1, 2].map((k) => c[k] + n[k] * 0.02);
+          if (hitsWithin(solid, ahead, n, 1.0)) continue;
+          if (hitsWithin(glassTris(glass), ahead, n, 1.0)) continue;
+          const from = [0, 1, 2].map((k) => c[k] - n[k] * 0.02);
+          const dir = [-n[0], -n[1], -n[2]];
+          if (!hitsWithin(solid, from, dir, REACH)) {
+            bad.push(`${biome.id}/${type} (${c.map((v) => v.toFixed(1)).join(',')}) n=${n.map((v) => v.toFixed(0)).join(',')}`);
+            break;
+          }
+        }
+      }
+    }
+    disposePropLibrary(lib);
+  }
+  if (bad.length) problems++;
+  console.log(`  ${glassSeen} panes checked, ${bad.length} with no wall within ${REACH} m`
+    .padEnd(52) + (bad.length ? `FAIL ${bad.slice(0, 4).join('; ')}` : 'ok'));
+}
+
+/** The soup, unchanged — named so the intent at the call site reads. */
+function glassTris(g) { return g; }
+
+/** Half-extent of the solid mass on `ax`, within a couple of metres of `y`. */
+function envelopeAt(solid, y, ax) {
+  let half = 0;
+  for (const tri of solid) {
+    for (const v of tri) {
+      if (Math.abs(v[1] - y) > 2.0) continue;
+      half = Math.max(half, Math.abs(v[ax]));
+    }
+  }
+  return half;
+}
+
+function faceNormal(tri) {
+  return norm(cross(sub(tri[1], tri[0]), sub(tri[2], tri[0])));
+}
+function centroid(tri) {
+  return [0, 1, 2].map((k) => (tri[0][k] + tri[1][k] + tri[2][k]) / 3);
+}
+
+function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function cross(a, b) {
+  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+}
+function norm(v) {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / l, v[1] / l, v[2] / l];
+}
+
+/** Möller–Trumbore against a triangle soup, stopping at the first close hit. */
+function hitsWithin(tris, o, d, maxT) {
+  for (const tri of tris) {
+    const e1 = sub(tri[1], tri[0]);
+    const e2 = sub(tri[2], tri[0]);
+    const p = cross(d, e2);
+    const det = dot(e1, p);
+    if (Math.abs(det) < 1e-9) continue;
+    const inv = 1 / det;
+    const tv = sub(o, tri[0]);
+    const u = dot(tv, p) * inv;
+    if (u < 0 || u > 1) continue;
+    const q = cross(tv, e1);
+    const v = dot(d, q) * inv;
+    if (v < 0 || u + v > 1) continue;
+    const t = dot(e2, q) * inv;
+    if (t > 1e-4 && t <= maxT) return true;
+  }
+  return false;
+}
