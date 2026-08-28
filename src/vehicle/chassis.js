@@ -204,13 +204,65 @@ function loft(sections, color, opts = {}) {
  * is scaled onto the L and W the build asked for, with height following length
  * so a wide build widens the car instead of flattening it.
  */
-function loftTraced(hull, L, W, color) {
+// What each surface class from tools/lowpoly.mjs is painted as.
+//
+// The hull says where the windows and the bumpers are; this says what those
+// look like in this game. Keeping the two apart is what lets six cars traced
+// off six references still read as one grid: the paint class takes whatever
+// colour the vehicle picked, and everything else is shared furniture.
+const HULL_GLASS = 0x0d1520;
+const HULL_DARK = 0x15181c;
+const HULL_CHROME = 0xb9bec6;
+
+/**
+ * Build a car from a hull traced off a real one by tools/lowpoly.mjs.
+ *
+ * Same stitch-and-cap as `loft`, and deliberately so: what changes is only
+ * where a ring's points come from. `loft` evaluates a squircle, which is how
+ * you draw a car nobody has ever seen; this reads the radii measured off one
+ * that exists. The topology either way is a quad strip between consecutive
+ * rings, so everything downstream — flat shading, merging, the shadow pass —
+ * cannot tell the difference.
+ *
+ * The hull arrives in metres with the road at `ground` and the nose at +Z. It
+ * is scaled onto the L and W the build asked for, with height following length
+ * so a wide build widens the car instead of flattening it.
+ */
+function loftTraced(hull, L, W, color, accent) {
   const M = hull.radial;
   const sz = L / hull.length;
   const sx = W / hull.width;
   const sy = sz;
+
+  const byClass = [color, HULL_GLASS, HULL_DARK, HULL_CHROME, accent ?? 0xfff2d0]
+    .map((c) => new THREE.Color(c));
+
   const verts = [];
-  const push = (a, b, c) => { for (const p of [a, b, c]) verts.push(p[0], p[1], p[2]); };
+  const cols = [];
+  const push = (tri, cls) => {
+    const c = byClass[cls] ?? byClass[0];
+    for (const p of tri) {
+      verts.push(p[0], p[1], p[2]);
+      cols.push(c.r, c.g, c.b);
+    }
+  };
+  // A quad wears one material, and both its triangles have to agree on which.
+  //
+  // Deciding per triangle instead leaves the two halves of a panel free to
+  // disagree, and every boundary in the car — the edge of a windscreen, the top
+  // of a sill — comes out as a zigzag of alternating half-squares rather than a
+  // line. Four corners vote; a tie goes to whichever class is rarer, because
+  // paint is the default everything else has to win an angle away from.
+  const RANK = [4, 0, 3, 1, 2];       // paint concedes, glass and lamps hold
+  const vote4 = (a, b, c, d) => {
+    const n = [0, 0, 0, 0, 0];
+    n[a]++; n[b]++; n[c]++; n[d]++;
+    let best = 0;
+    for (let i = 1; i < 5; i++) {
+      if (n[i] > n[best] || (n[i] === n[best] && RANK[i] < RANK[best])) best = i;
+    }
+    return best;
+  };
 
   const rings = hull.rings.map((row) => {
     const z = row[0] * sz;
@@ -222,32 +274,40 @@ function loftTraced(hull, L, W, color) {
     }
     return pts;
   });
+  const cls = hull.classes ?? rings.map(() => new Array(M).fill(0));
 
   for (let i = 0; i < rings.length - 1; i++) {
-    const A = rings[i]; const B = rings[i + 1];
+    const A = rings[i];
+    const B = rings[i + 1];
+    const ca = cls[i];
+    const cb = cls[i + 1];
     for (let k = 0; k < M; k++) {
       const k2 = (k + 1) % M;
-      push(A[k], B[k], A[k2]);
-      push(A[k2], B[k], B[k2]);
+      const q = vote4(ca[k], ca[k2], cb[k], cb[k2]);
+      push([A[k], B[k], A[k2]], q);
+      push([A[k2], B[k], B[k2]], q);
     }
   }
   // Nose and tail closed off, wound so neither is culled away from outside.
-  const cap = (ring, front) => {
-    let cx = 0; let cy = 0;
+  const cap = (ring, ringCls, front) => {
+    let cx = 0;
+    let cy = 0;
     for (const q of ring) { cx += q[0]; cy += q[1]; }
     const c = [cx / ring.length, cy / ring.length, ring[0][2]];
     for (let k = 0; k < ring.length; k++) {
       const k2 = (k + 1) % ring.length;
-      if (front) push(c, ring[k], ring[k2]); else push(c, ring[k2], ring[k]);
+      const t = front ? [c, ring[k], ring[k2]] : [c, ring[k2], ring[k]];
+      push(t, vote4(ringCls[k], ringCls[k2], ringCls[k], ringCls[k2]));
     }
   };
-  cap(rings[0], true);
-  cap(rings[rings.length - 1], false);
+  cap(rings[0], cls[0], true);
+  cap(rings[rings.length - 1], cls[cls.length - 1], false);
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(cols), 3));
   geo.computeVertexNormals();
-  return paint(geo, color);
+  return geo;
 }
 
 function mergeGeometries(list) {
@@ -1055,7 +1115,7 @@ export class VehicleMesh {
       opaque.length = 0;
       glass.length = 0;
       emissive.length = 0;
-      opaque.push(loftTraced(hull, L, W, body));
+      opaque.push(loftTraced(hull, L, W, body, accent));
     }
 
     this.bodyGeo = mergeGeometries(opaque);

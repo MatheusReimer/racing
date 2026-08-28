@@ -63,20 +63,36 @@ function readGLB(path) {
     const world = new THREE.Matrix4().multiplyMatrices(parent, local);
 
     if (node.mesh != null) {
-      const tris = [];
       const v = new THREE.Vector3();
+      // One entry per primitive rather than per node. A node's glass and its
+      // paint are different primitives with different materials, and merging
+      // them loses the only reliable signal for which part of a car a triangle
+      // belongs to — plenty of references name every node `Object_41`.
       for (const prim of json.meshes[node.mesh].primitives) {
         if (prim.attributes?.POSITION == null) continue;
         const pos = read(prim.attributes.POSITION);
         const idx = prim.indices != null ? read(prim.indices) : null;
         const count = idx ? idx.length : pos.length / 3;
+        const tris = [];
         for (let i = 0; i < count; i++) {
           const k = (idx ? idx[i] : i) * 3;
           v.set(pos[k], pos[k + 1], pos[k + 2]).applyMatrix4(world);
           tris.push(v.x, v.y, v.z);
         }
+        if (!tris.length) continue;
+        const m = prim.material != null ? json.materials?.[prim.material] : null;
+        out.push({
+          name: node.name ?? json.meshes[node.mesh].name ?? '',
+          mat: m?.name ?? '',
+          // glTF ignores baseColorFactor's alpha unless alphaMode says to use
+          // it. Reading it regardless makes every material a window on files
+          // that park unrelated data in that channel — the GC8 has several at
+          // zero that are opaque bodywork.
+          alpha: (m?.alphaMode === 'BLEND' || m?.alphaMode === 'MASK')
+            ? (m?.pbrMetallicRoughness?.baseColorFactor?.[3] ?? 1) : 1,
+          tris,
+        });
       }
-      if (tris.length) out.push({ name: node.name ?? json.meshes[node.mesh].name ?? '', tris });
     }
     for (const child of node.children ?? []) walk(child, world);
   };
@@ -107,7 +123,7 @@ function readOBJ(path) {
       }
     }
   }
-  return groups.filter((g) => g.tris.length);
+  return groups.filter((g) => g.tris.length).map((g) => ({ ...g, mat: '', alpha: 1 }));
 }
 
 function readSTL(path) {
@@ -130,7 +146,7 @@ function readSTL(path) {
     }
   }
   // An STL is one anonymous soup, so no wheels can be told apart in it.
-  return [{ name: '', tris }];
+  return [{ name: '', mat: '', alpha: 1, tris }];
 }
 
 export function readModel(path) {

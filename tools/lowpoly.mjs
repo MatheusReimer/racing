@@ -44,8 +44,8 @@ const list = (k) => (args.find((a) => a.startsWith(`--${k}=`))?.slice(k.length +
 const file = pos[0];
 const NAME = pos[1];
 const TARGET_L = num('length', 0);
-const RINGS = num('rings', 28);
-const RADIAL = num('radial', 16);
+const RINGS = num('rings', 56);
+const RADIAL = num('radial', 32);
 const flip = args.includes('--flip');
 const exclude = list('exclude');
 const asWheels = list('wheels');
@@ -53,17 +53,66 @@ const asWheels = list('wheels');
 const isWheelName = (n) => /wheel|tyre|tire|rim|hub/i.test(n)
   && !/steer|fly ?wheel|arch|well|house|spare|cover/i.test(n);
 
+/**
+ * Which part of a car a triangle belongs to, from the material it wears.
+ *
+ * A hull in one colour is a bar of soap. What stops it being one is knowing
+ * that this face is a windscreen and that one is a bumper — and the reference
+ * already knows, because whoever built it assigned materials. The names differ
+ * per author (`Carro_Vidro`, `NGlassMtl1`, `Headlight_Glass`) but the vocabulary
+ * is small and it survives translation, which is more than can be said for the
+ * node names: half these files call every node `Object_41`.
+ *
+ * A class, not a colour. Shipping the reference's own paint would fight the
+ * game, where each vehicle picks its own; shipping "this is glass" lets the
+ * game paint it and keep the layout.
+ */
+export const CLS = { PAINT: 0, GLASS: 1, DARK: 2, CHROME: 3, LAMP: 4, INSIDE: 5 };
+
+// Seats, carpet, dashboard, the wheel in front of the driver. Not the outside
+// of a car, and so not part of a hull of it — but a ray fired at the greenhouse
+// goes straight through the window opening and lands on the upholstery, which
+// is how a Beetle came out forty percent black. Dropped before the outline is
+// traced, the way wheels are.
+const INTERIOR = /interior|\bint_|seat|banco|cloth|carpet|leather|couro|dash|painel|steer|volante|gauge|pedal|belt|cinto/;
+function classify(matName) {
+  const n = matName.toLowerCase();
+  // Not the alpha channel. glTF only honours it when alphaMode says to, and
+  // these files disagree about that so thoroughly that the GC8 declares its own
+  // bodywork fully transparent across eight thousand triangles. The names are
+  // the signal that survived every reference tried: authors differ on spelling
+  // but not on vocabulary.
+  //
+  // A number-plate lamp is not a headlight, and on the GC8 it is the name
+  // attached to fifty thousand triangles of car, so the plate words are ruled
+  // out before the lamp words are looked for.
+  if (/plate|number|placa|licen/.test(n)) return CLS.PAINT;
+  if (INTERIOR.test(n)) return CLS.INSIDE;
+  if (/light|lamp|farol|lanterna|blink|indicat/.test(n)) return CLS.LAMP;
+  if (/glass|vidro|window|janela|screen|glazing|windshield/.test(n)) return CLS.GLASS;
+  if (/tire|tyre|pneu|rubber|borracha|interior|\bint_|plastic|plastico|preto|black|seal|rim|roda|wheel|caliper|disc|grille|grelha|trim|espelho|mirror|carpet|cloth|seat|leather/.test(n)) return CLS.DARK;
+  if (/chrome|crom|alumin|steel|inox|badge|emblem|bumper|parachoque/.test(n)) return CLS.CHROME;
+  return CLS.PAINT;
+}
+
 // --- load, split, normalise ------------------------------------------------
 
 const meshes = readModel(file);
 const bodyTris = [];
+const bodyCls = [];          // one class per triangle, so nine floats to one entry
 const wheelTris = [];
 let dropped = 0;
 for (const m of meshes) {
   const lower = m.name.toLowerCase();
   if (exclude.some((t) => lower.includes(t))) { dropped++; continue; }
-  const dst = (isWheelName(m.name) || asWheels.some((t) => lower.includes(t))) ? wheelTris : bodyTris;
-  for (let i = 0; i < m.tris.length; i++) dst.push(m.tris[i]);
+  if (isWheelName(m.name) || asWheels.some((t) => lower.includes(t))) {
+    for (let i = 0; i < m.tris.length; i++) wheelTris.push(m.tris[i]);
+    continue;
+  }
+  const c = classify(m.mat ?? '');
+  if (c === CLS.INSIDE) continue;
+  for (let i = 0; i < m.tris.length; i++) bodyTris.push(m.tris[i]);
+  for (let i = 0; i < m.tris.length; i += 9) bodyCls.push(c);
 }
 if (exclude.length && !dropped) throw new Error(`--exclude matched no mesh in ${basename(file)}`);
 if (!bodyTris.length) throw new Error('no bodywork left after --exclude/--wheels');
@@ -119,7 +168,7 @@ const L = bb.z1 - bb.z0;
 
 /** Every segment where the surface crosses the plane z = zc, as flat [x,y,x,y]. */
 function sliceSegments(tris, zc) {
-  const out = [];
+  const out = [];   // x,y, x,y, class  per crossing triangle
   const hit = [];
   for (let i = 0; i < tris.length; i += 9) {
     hit.length = 0;
@@ -132,7 +181,7 @@ function sliceSegments(tris, zc) {
       const t = (zc - za) / (zb - za);
       hit.push(tris[a] + (tris[b] - tris[a]) * t, tris[a + 1] + (tris[b + 1] - tris[a + 1]) * t);
     }
-    if (hit.length >= 4) out.push(hit[0], hit[1], hit[2], hit[3]);
+    if (hit.length >= 4) out.push(hit[0], hit[1], hit[2], hit[3], bodyCls[i / 9]);
   }
   return out;
 }
@@ -154,52 +203,106 @@ function ring(zc) {
 
   let y0 = Infinity;
   let y1 = -Infinity;
-  for (let i = 1; i < seg.length; i += 2) {
+  for (let i = 1; i < seg.length; i += 5) {
     if (seg[i] < y0) y0 = seg[i];
     if (seg[i] > y1) y1 = seg[i];
+    if (seg[i + 2] < y0) y0 = seg[i + 2];
+    if (seg[i + 2] > y1) y1 = seg[i + 2];
   }
   const cy = (y0 + y1) / 2;
 
   const r = new Float64Array(RADIAL);
+  const cls = new Int8Array(RADIAL).fill(-1);
+  // Furthest reach of each class separately, so a surface that loses the radius
+  // contest by a centimetre can still win the material one.
+  const perClass = Array.from({ length: 5 }, () => new Float64Array(RADIAL));
   const step = (Math.PI * 2) / RADIAL;
-  const put = (x, y) => {
-    const dx = x;
+  const put = (x, y, c) => {
     const dy = y - cy;
-    const rad = Math.hypot(dx, dy);
+    const rad = Math.hypot(x, dy);
     if (rad <= 0) return;
-    let k = Math.round(Math.atan2(dy, dx) / step);
+    let k = Math.round(Math.atan2(dy, x) / step);
     k = ((k % RADIAL) + RADIAL) % RADIAL;
     if (rad > r[k]) r[k] = rad;
+    if (rad > perClass[c][k]) perClass[c][k] = rad;
   };
-  for (let i = 0; i < seg.length; i += 4) {
+  for (let i = 0; i < seg.length; i += 5) {
     const ax = seg[i];
     const ay = seg[i + 1];
     const bx = seg[i + 2];
     const by = seg[i + 3];
-    const n = Math.max(2, Math.ceil(Math.hypot(bx - ax, by - ay) / 0.01));
-    for (let s = 0; s <= n; s++) put(ax + (bx - ax) * (s / n), ay + (by - ay) * (s / n));
+    const c = seg[i + 4];
+    const n = Math.max(2, Math.ceil(Math.hypot(bx - ax, by - ay) / 0.008));
+    for (let t = 0; t <= n; t++) put(ax + (bx - ax) * (t / n), ay + (by - ay) * (t / n), c);
+  }
+
+  // Resolve each angle to one material.
+  //
+  // Not simply the outermost surface: on a real car the glass is set inboard of
+  // the pillars that frame it and a headlight sits behind the bodywork line, so
+  // taking the furthest thing at each angle paints a car with no windows. Any
+  // class reaching within a couple of centimetres of the outermost surface is
+  // treated as being at that angle too, and the more particular one wins —
+  // paint is what the rest of a car is, so it only takes an angle nothing else
+  // claims.
+  // Five centimetres, not one. A windscreen sits behind its pillars, a side
+  // window behind the drip rail and the door top, and a headlight behind the
+  // bodywork around it — on a real car these are not flush and the recess is
+  // several centimetres, so a tight tolerance paints a car with no windows.
+  const TOL = 0.05;
+  const PRIORITY = [CLS.LAMP, CLS.GLASS, CLS.CHROME, CLS.DARK, CLS.PAINT];
+  for (let k = 0; k < RADIAL; k++) {
+    if (r[k] <= 0) continue;
+    for (const c of PRIORITY) {
+      if (perClass[c][k] > 0 && perClass[c][k] >= r[k] - TOL) { cls[k] = c; break; }
+    }
   }
 
   // A car is symmetric; a scan of one is not quite. Taking the wider side of
   // each mirrored pair keeps the silhouette and drops the asymmetry.
   for (let k = 0; k < RADIAL; k++) {
-    const m = ((RADIAL / 2 - k) % RADIAL + RADIAL) % RADIAL;   // mirror across x
-    const v = Math.max(r[k], r[m]);
-    r[k] = v; r[m] = v;
+    const m = ((RADIAL / 2 - k) % RADIAL + RADIAL) % RADIAL;
+    if (r[k] >= r[m]) { r[m] = r[k]; cls[m] = cls[k]; } else { r[k] = r[m]; cls[k] = cls[m]; }
   }
   // Angles the outline never reached — fill from whichever neighbours did.
   for (let k = 0; k < RADIAL; k++) {
     if (r[k] > 0) continue;
-    let a = k; let b = k;
-    for (let s = 1; s < RADIAL; s++) {
-      if (r[(k - s + RADIAL) % RADIAL] > 0) { a = (k - s + RADIAL) % RADIAL; break; }
+    let a = k;
+    let b = k;
+    for (let t = 1; t < RADIAL; t++) {
+      if (r[(k - t + RADIAL) % RADIAL] > 0) { a = (k - t + RADIAL) % RADIAL; break; }
     }
-    for (let s = 1; s < RADIAL; s++) {
-      if (r[(k + s) % RADIAL] > 0) { b = (k + s) % RADIAL; break; }
+    for (let t = 1; t < RADIAL; t++) {
+      if (r[(k + t) % RADIAL] > 0) { b = (k + t) % RADIAL; break; }
     }
     r[k] = (r[a] + r[b]) / 2 || 0.01;
+    cls[k] = cls[a] >= 0 ? cls[a] : 0;
   }
-  return { z: zc, cy, r: Array.from(r) };
+  for (let k = 0; k < RADIAL; k++) if (cls[k] < 0) cls[k] = 0;
+
+  // A light 1-2-1 around the ring. At sixteen radii the bins were wide enough
+  // to average their own noise; at thirty-two a single stray triangle owns a
+  // bin outright and the hull grows a tooth. Smoothing is what buys the extra
+  // resolution back as detail instead of as sawtooth.
+  const sm = new Float64Array(RADIAL);
+  for (let k = 0; k < RADIAL; k++) {
+    const a = r[(k - 1 + RADIAL) % RADIAL];
+    const b = r[(k + 1) % RADIAL];
+    sm[k] = (a + r[k] * 2 + b) / 4;
+  }
+
+  // Classes get a majority vote over the same neighbourhood, so a lone face of
+  // chrome in the middle of a door does not stipple the panel.
+  const sc = new Int8Array(RADIAL);
+  for (let k = 0; k < RADIAL; k++) {
+    const a = cls[(k - 1 + RADIAL) % RADIAL];
+    const b = cls[(k + 1) % RADIAL];
+    // Glass and lamps survive the vote on their own: they are small by nature
+    // and outvoting them is how a greenhouse turns back into sheet metal.
+    sc[k] = (cls[k] === CLS.GLASS || cls[k] === CLS.LAMP
+      || cls[k] === a || cls[k] === b) ? cls[k] : (a === b ? a : cls[k]);
+  }
+  return { z: zc, cy, r: Array.from(sm), cls: Array.from(sc) };
 }
 
 const rings = [];
@@ -210,6 +313,20 @@ for (let i = 0; i < RINGS; i++) {
   if (g) rings.push(g);
 }
 if (rings.length < 4) throw new Error('too few sections — is the model hollow?');
+
+// The same 1-2-1 along the car. A section is measured independently of its
+// neighbours, so a panel gap or a shut line lands in one station and nowhere
+// near the next, and the hull ripples along its length instead of across it.
+{
+  const src = rings.map((g) => g.r.slice());
+  const cys = rings.map((g) => g.cy);
+  for (let i = 1; i < rings.length - 1; i++) {
+    for (let k = 0; k < RADIAL; k++) {
+      rings[i].r[k] = (src[i - 1][k] + src[i][k] * 2 + src[i + 1][k]) / 4;
+    }
+    rings[i].cy = (cys[i - 1] + cys[i] * 2 + cys[i + 1]) / 4;
+  }
+}
 
 // --- wheels ----------------------------------------------------------------
 //
@@ -270,16 +387,22 @@ const out = {
   radial: RADIAL,
   wheel,
   rings: rings.map((g) => [f3(g.z), f3(g.cy), ...g.r.map(f3)]),
+  classes: rings.map((g) => g.cls),
 };
 
 mkdirSync('src/data/bodies', { recursive: true });
 const path = `src/data/bodies/${NAME}.js`;
 writeFileSync(path, `// ${NAME} — low-poly hull traced from ${basename(file)} by tools/lowpoly.mjs.
 //
-// ${rings.length} sections of ${RADIAL} radii. Each row is [z, cy, r0..r${RADIAL - 1}]: a station
-// along the car, the height its outline is centred on, and the distance to the
-// surface at each of ${RADIAL} angles around that centre, starting at the right flank
-// and turning towards the roof. Metres, nose at +Z, car centred on x = 0.
+// ${rings.length} sections of ${RADIAL} radii. Each 'rings' row is [z, cy, r0..r${RADIAL - 1}]: a
+// station along the car, the height its outline is centred on, and the distance
+// to the surface at each of ${RADIAL} angles around that centre, starting at the right
+// flank and turning towards the roof. Metres, nose at +Z, car centred on x = 0.
+//
+// 'classes' matches it angle for angle and says what the surface is made of,
+// read off the material the reference gave that triangle:
+// 0 paint, 1 glass, 2 dark trim or rubber, 3 chrome, 4 lamp. The game picks the
+// colours; this only says where the windows are.
 //
 // Derived geometry: the reference's licence applies. See refs/README.txt.
 export default ${JSON.stringify(out, null, 2).replace(/\n\s+(-?[\d.]+),/g, ' $1,').replace(/\[\s+/g, '[')};
