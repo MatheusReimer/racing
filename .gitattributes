@@ -1,0 +1,8 @@
+# Store text with LF and check out with LF everywhere.
+#
+# This project is developed across machines, and letting Git rewrite line
+# endings per platform makes every file look modified on the other one.
+* text=auto eol=lf
+
+# Generated screenshots are binary if they ever get committed deliberately.
+*.png binary

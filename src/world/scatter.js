@@ -1,0 +1,311 @@
+import { PROP_TYPES, BIOME_PROPS } from './props.js';
+import { BARRIER_RAIL_OFFSET } from '../track/track.js';
+import { clamp, clamp01, lerp, wrap, TAU } from '../core/math.js';
+
+// Where the props go.
+//
+// Pure data — no Three.js — because the simulation needs to know about the
+// destructible ones. `generateProps` is part of track generation, so a seed
+// reproduces the scenery exactly along with the circuit.
+//
+// Four bands, and the distinction matters more than it looks:
+//
+//   road    on the racing surface. Only light, smashable things, and sparse.
+//           This is the band that turns Weight and Impact into a *navigation*
+//           stat, which the design brief asks for: a Truck drives through a
+//           barrel stack that stops a Rocket.
+//   verge   just off the road. Punishes cutting a corner without walling it.
+//   outer   past the barrier. Scenery you read at speed.
+//   far     the horizon. Cranes, spires, grandstands — the things that make a
+//           circuit feel like somewhere rather than a ribbon in a void.
+
+// Distance bands, measured *outward from the road edge* rather than from the
+// centreline, so a wide corner and a narrow straight both get scenery in the
+// same place relative to the tarmac.
+//
+// Nothing is placed on the racing surface. Obstacles in the road were the
+// design's way of making Weight and Impact decide routes; that is now gone by
+// choice, and the destructible props that remain are on the verge, where they
+// are the price of running wide rather than a toll on the racing line.
+const BANDS = {
+  verge: { min: 1.5, max: 16, lod: 0 },
+  near: { min: 16, max: 70, lod: 0 },
+  mid: { min: 70, max: 200, lod: 1 },
+  far: { min: 200, max: 480, lod: 2 },
+};
+
+/**
+ * Detail level for something this far out from the road edge.
+ *
+ * The thresholds are the band boundaries, applied to the actual placement
+ * rather than to which table it came from — a boulder that lands at 180 m gets
+ * the mid level whether it was drawn as scenery or as horizon.
+ */
+function lodFor(off) {
+  if (off < BANDS.near.max) return 0;
+  if (off < BANDS.mid.max) return 1;
+  return 2;
+}
+
+/** Weighted pick from a { name: weight } table. */
+function pickWeighted(rng, table, filter) {
+  const entries = Object.entries(table).filter(([name]) => !filter || filter(name));
+  let total = 0;
+  for (const [, w] of entries) total += w;
+  if (total <= 0) return null;
+  let r = rng.next() * total;
+  for (const [name, w] of entries) {
+    r -= w;
+    if (r <= 0) return name;
+  }
+  return entries.length ? entries[entries.length - 1][0] : null;
+}
+
+/**
+ * @param rng    seeded
+ * @param track  the generated Track
+ * @param biome  biome definition
+ * @param opts   { density } 0..1.5, from the quality tier
+ */
+export function generateProps(rng, track, biome, opts = {}) {
+  const density = opts.density ?? 1;
+  const spec = BIOME_PROPS[biome.id] || BIOME_PROPS.wasteland;
+  const props = [];
+  const L = track.length;
+
+  // Keep the grid and the run-up to the start line clear.
+  const nearStart = (s) => {
+    const d = Math.abs(track.path.deltaAlong(track.startS, s));
+    return d < 60;
+  };
+
+  const scratch = {};
+
+  /**
+   * Would something here be standing in a road?
+   *
+   * Offsetting sideways from a centreline assumes open country either side, and
+   * that assumption fails twice. In a city, 200 m sideways is three blocks over
+   * — on *another street*, which is how buildings ended up in the middle of the
+   * road. And on any circuit, an inward offset larger than the local radius of
+   * curvature folds through the centre of the corner and comes out the far
+   * side; a 26 m city corner does that to anything placed past 26 m in.
+   *
+   * Rather than guard each cause separately, ask the track where the thing
+   * actually landed. It is one sample per prop at generation time and it closes
+   * both, plus whichever third one exists that nobody has found yet.
+   */
+  const landsOnRoad = (x, z, clearance) => {
+    const sm = track.sample(x, z, scratch);
+    if (sm.halfWidth == null || sm.side == null) return false;
+    return Math.abs(sm.side) < sm.halfWidth + clearance;
+  };
+
+  const place = (type, s, lateral, extra = {}) => {
+    const def = PROP_TYPES[type];
+    if (!def) return;
+    const p = track.path.offsetPoint(s, lateral, { x: 0, y: 0, z: 0 });
+    // Spanning structures are built to stand over the road on purpose.
+    if (!def.spanning) {
+      const clearance = extra.clearance ?? (def.frontage ? 0.5 : 2.0);
+      if (landsOnRoad(p.x, p.z, clearance)) return;
+    }
+    const off = Math.abs(lateral) - track.halfWidthAt(s);
+    const scale = extra.scale ?? (1 + rng.spread(0.22));
+    props.push({
+      type,
+      variant: rng.int(0, 2),
+      x: p.x,
+      y: p.y,
+      z: p.z,
+      // Trackside things face roughly along the road; scenery is free to spin.
+      yaw: extra.alignToTrack
+        ? track.path.yawAt(s) + rng.spread(0.25)
+        : rng.range(0, TAU),
+      scale,
+      s,
+      lateral,
+      radius: def.radius * scale,
+      height: (def.height ?? 1) * scale,
+      // A prop with a toughness can be driven through; one without is scenery
+      // and is never collided against at all.
+      destructible: def.toughness != null,
+      toughness: def.toughness,
+      alive: true,
+      emissive: def.emissive ?? null,
+      lod: extra.lod ?? lodFor(off),
+    });
+  };
+
+  // Nothing is placed on the racing surface, on the main line or on a
+  // shortcut. Road clusters and shortcut hazards used to live here.
+
+  // --- street frontage ----------------------------------------------------
+  //
+  // The thing that makes a city a city. Buildings are laid end to end down both
+  // sides of the road at a fixed setback, so the street has walls; scattering
+  // them at random distances — which is what every other district does — gives
+  // buildings *near* a road rather than a street.
+  //
+  // Gaps are deliberate and sparse: a side street or an empty lot every so
+  // often, which is where the alley shortcuts come out and what stops the wall
+  // reading as one extruded ribbon.
+  if (biome.city) {
+    const front = PROP_TYPES.facade?.frontage;
+    if (front) {
+      // The alleys have to stay open. Shortcuts cut diagonally across a corner,
+      // straight through the block a frontage row would otherwise wall off —
+      // and a shortcut with a building in it is worse than no shortcut, because
+      // it is a route the map offers and the world refuses.
+      const alley = [];
+      for (const br of track.branches) {
+        const n = Math.max(4, Math.round(br.path.length / 8));
+        for (let i = 0; i <= n; i++) {
+          alley.push(br.path.pointAt((i / n) * br.path.length, { x: 0, y: 0, z: 0 }));
+        }
+      }
+      const blocksAlley = (x, z) => alley.some((a) =>
+        Math.hypot(a.x - x, a.z - z) < front.depth * 0.75);
+      const step = front.width;
+      // Right at the kerb. A generous setback leaves a strip of open ground
+      // between the barrier and the buildings, and open ground beside a city
+      // street reads as a field with offices behind it — the wall has to be
+      // close enough that the road is the only floor you can see.
+      const setback = 2.4;
+      for (let s = 0; s < L; s += step) {
+        if (nearStart(s)) continue;
+        const hw = track.halfWidthAt(s);
+        for (const side of [-1, 1]) {
+          // A gap on one side does not force a gap on the other.
+          if (rng.bool(0.14)) continue;
+          const fs = wrap(s + rng.spread(1.2), L);
+          const lat = side * (hw + BARRIER_RAIL_OFFSET + setback + front.depth / 2);
+          const at = track.path.offsetPoint(fs, lat, { x: 0, y: 0, z: 0 });
+          if (blocksAlley(at.x, at.z)) continue;
+          // A frontage is deep, so its *back* can reach the next street even
+          // when its centre does not. Check both ends of it.
+          const yaw = track.path.yawAt(fs);
+          const bx = at.x - Math.sin(yaw + Math.PI / 2) * side * front.depth * 0.45;
+          const bz = at.z - Math.cos(yaw + Math.PI / 2) * side * front.depth * 0.45;
+          if (landsOnRoad(bx, bz, 0.5)) continue;
+          place('facade', fs, lat, { alignToTrack: true, scale: 1, lod: 0 });
+        }
+      }
+
+      // Street lighting on a regular pitch, alternating sides. Regular is the
+      // point: the rhythm of light pools going past is most of what reads as
+      // speed at night, and scattering them at random spacing destroys it.
+      let lampSide = 1;
+      for (let s = 0; s < L; s += 34) {
+        if (nearStart(s)) continue;
+        const hw = track.halfWidthAt(s);
+        place('streetlight', s, lampSide * (hw + BARRIER_RAIL_OFFSET + 1.2),
+          { alignToTrack: true, scale: 1, lod: 0 });
+        lampSide = -lampSide;
+      }
+    }
+  }
+
+  // --- verge --------------------------------------------------------------
+  const vergeCount = Math.round((L / 20) * density);
+  for (let i = 0; i < vergeCount; i++) {
+    const s = rng.range(0, L);
+    const hw = track.halfWidthAt(s);
+    const type = pickWeighted(rng, spec.trackside);
+    if (!type) continue;
+    const side = rng.bool() ? 1 : -1;
+    place(type, s, side * (hw + BARRIER_RAIL_OFFSET + rng.range(0.8, BANDS.verge.max)),
+      { alignToTrack: PROP_TYPES[type].place === 'trackside' });
+  }
+
+  // --- markers, regularly, so the road always has edge cues ---------------
+  const markerEvery = 42;
+  for (let s = 0; s < L; s += markerEvery) {
+    if (nearStart(s)) continue;
+    const hw = track.halfWidthAt(s);
+    // Place on the outside of the corner, where a marker board belongs.
+    const curv = track.path.curvatureAt(s, 16);
+    const side = curv > 0 ? -1 : 1;
+    place('marker', s, side * (hw + BARRIER_RAIL_OFFSET + 1.3), { alignToTrack: true, scale: 1 });
+  }
+
+  // --- outer scenery ------------------------------------------------------
+  // Near and mid scenery. Denser close in, thinning outward — the far bands
+  // cover many times the area, so a flat rate per metre of track would put a
+  // wall of props at the horizon and a bare strip beside the road.
+  const nearCount = Math.round((L / 13) * density);
+  for (let i = 0; i < nearCount; i++) {
+    const s = rng.range(0, L);
+    const hw = track.halfWidthAt(s);
+    const type = pickWeighted(rng, spec.scenery);
+    if (!type) continue;
+    const side = rng.bool() ? 1 : -1;
+    place(type, s, side * (hw + BARRIER_RAIL_OFFSET
+      + rng.range(BANDS.verge.max, BANDS.near.max)));
+  }
+
+  const midCount = Math.round((L / 26) * density);
+  for (let i = 0; i < midCount; i++) {
+    const s = rng.range(0, L);
+    const hw = track.halfWidthAt(s);
+    const type = pickWeighted(rng, spec.scenery);
+    if (!type) continue;
+    const side = rng.bool() ? 1 : -1;
+    place(type, s, side * (hw + BARRIER_RAIL_OFFSET
+      + rng.range(BANDS.near.max, BANDS.mid.max)));
+  }
+
+  // --- horizon ------------------------------------------------------------
+  // Silhouettes at the edge of what the fog lets through. Placed on both sides
+  // so the infield is not empty either, and always at the coarsest level: at
+  // this range they are an outline against the sky and nothing more.
+  const horizonTable = spec.horizon;
+  if (horizonTable) {
+    const horizonCount = Math.round((L / 34) * density);
+    for (let i = 0; i < horizonCount; i++) {
+      const s = rng.range(0, L);
+      const hw = track.halfWidthAt(s);
+      const type = pickWeighted(rng, horizonTable);
+      if (!type) continue;
+      const side = rng.bool() ? 1 : -1;
+      place(type, s, side * (hw + BARRIER_RAIL_OFFSET
+        + rng.range(BANDS.mid.max, BANDS.far.max)),
+      { scale: 1 + rng.spread(0.35) });
+    }
+  }
+
+  // --- gantries -----------------------------------------------------------
+  // Spanning the road, on the straightest stretches, spaced far apart. They are
+  // the single strongest cue that you are moving.
+  const gantryCount = clamp(Math.round(L / 700), 1, 4);
+  for (let i = 0; i < gantryCount; i++) {
+    let best = null;
+    let flattest = Infinity;
+    for (let k = 0; k < 24; k++) {
+      const s = wrap(rng.range(0, L), L);
+      if (nearStart(s)) continue;
+      if (props.some((p) => p.type === 'gantry'
+        && Math.abs(track.path.deltaAlong(p.s, s)) < 380)) continue;
+      const c = Math.abs(track.path.curvatureAt(s, 26));
+      if (c < flattest) { flattest = c; best = s; }
+    }
+    if (best == null) continue;
+    const p = track.path.offsetPoint(best, 0, { x: 0, y: 0, z: 0 });
+    props.push({
+      type: 'gantry', variant: 0, x: p.x, y: p.y, z: p.z,
+      yaw: track.path.yawAt(best),
+      // Gantries are built to the width of the road they span.
+      scale: 1, spanScale: track.halfWidthAt(best),
+      s: best, lateral: 0,
+      radius: 0, height: 6.5,
+      destructible: false, toughness: null, alive: true, emissive: null,
+    });
+  }
+
+  return props;
+}
+
+/** The subset the simulation has to collide against. */
+export function collidableProps(props) {
+  return props.filter((p) => p.destructible && p.radius > 0);
+}

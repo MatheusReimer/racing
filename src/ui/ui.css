@@ -1,0 +1,349 @@
+/* All UI is DOM over the canvas. Nothing here is an image: the HUD is boxes,
+   gradients and type, which keeps it crisp at any resolution and costs no
+   texture memory or draw calls. */
+
+:root {
+  --bg: #0b0d10;
+  --panel: rgba(14, 17, 21, 0.86);
+  --panel-solid: #12161b;
+  --edge: rgba(255, 255, 255, 0.10);
+  --edge-bright: rgba(255, 255, 255, 0.22);
+  --text: #e8ecf1;
+  --text-dim: #98a3b0;
+  --text-faint: #5f6b78;
+
+  --speed: #4fc3f7;
+  --physical: #ffb74d;
+  --survival: #81c784;
+  --combat: #e57373;
+
+  --energy: #4fd1ff;
+  --heat-cool: #7ec8e3;
+  --heat-hot: #ffd166;
+  --heat-crit: #ff5c5c;
+  --durability: #7ddc8f;
+  --danger: #ff4d4d;
+  --gold: #ffcc4d;
+
+  --common: #9aa5b1;
+  --rare: #4fa3e3;
+  --epic: #b06be0;
+  --legendary: #ffa726;
+  --cursed: #e5484d;
+
+  --font: 'Segoe UI', Roboto, system-ui, -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', 'Consolas', 'SF Mono', monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+#app { position: fixed; inset: 0; }
+
+#gl { position: absolute; inset: 0; display: block; }
+
+#ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+#ui > * { pointer-events: auto; }
+
+/* ...but never the HUD. `#ui > *` carries an id's specificity, so it silently
+   overrides `.hud { pointer-events: none }` below and the HUD ends up
+   intercepting every pointer event over the canvas for the whole race. Same
+   specificity, declared later, so this wins. */
+#ui > .hud { pointer-events: none; }
+
+/* ---------------------------------------------------------------- HUD ---- */
+
+.hud { position: absolute; inset: 0; pointer-events: none; }
+
+.hud-speed {
+  position: absolute;
+  right: 3.2vw;
+  bottom: 3.4vh;
+  text-align: right;
+  line-height: 0.86;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.8);
+}
+
+.hud-speed .val {
+  font-family: var(--mono);
+  font-size: clamp(48px, 7.6vw, 104px);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-speed .unit {
+  font-size: clamp(11px, 1.1vw, 15px);
+  letter-spacing: 0.28em;
+  color: var(--text-dim);
+  margin-right: 0.2em;
+}
+
+/* Gauges sit bottom-left, stacked, so the eye finds them without leaving the
+   road. Width is capped so they never crowd a narrow window. */
+.hud-gauges {
+  position: absolute;
+  left: 3.2vw;
+  bottom: 3.4vh;
+  width: min(300px, 26vw);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.gauge { position: relative; }
+
+.gauge-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  text-shadow: 0 1px 8px #000;
+}
+
+.gauge-label .num { font-family: var(--mono); color: var(--text); }
+
+.gauge-track {
+  height: 9px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.gauge-fill {
+  height: 100%;
+  width: 0%;
+  transition: width 90ms linear, background-color 200ms ease;
+  border-radius: 1px;
+}
+
+.gauge-fill.durability { background: var(--durability); }
+.gauge-fill.energy { background: var(--energy); }
+.gauge-fill.heat { background: var(--heat-cool); }
+
+/* Heat crossing into overdrive should be impossible to miss. */
+.gauge.critical .gauge-fill { animation: pulse 0.5s ease-in-out infinite; }
+.gauge.critical .gauge-label { color: var(--heat-crit); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* Position + lap, top-left */
+.hud-position {
+  position: absolute;
+  left: 3.2vw;
+  top: 3.2vh;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.85);
+}
+
+.hud-position .place {
+  font-family: var(--mono);
+  font-size: clamp(34px, 4.4vw, 60px);
+  font-weight: 700;
+  line-height: 0.9;
+}
+
+.hud-position .place sup { font-size: 0.45em; margin-left: 2px; }
+
+.hud-position .lap {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+/* Skills, bottom centre */
+.hud-skills {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 3.2vh;
+  display: flex;
+  gap: 10px;
+}
+
+.skill-slot {
+  width: 62px;
+  height: 62px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: var(--panel);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.skill-slot .key {
+  position: absolute;
+  top: 3px;
+  left: 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.skill-slot .icon { font-size: 22px; line-height: 1; }
+
+.skill-slot .name {
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  text-align: center;
+  padding: 0 3px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Cooldown wipes bottom-up; unaffordable dims the whole tile. */
+.skill-slot .cd {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  transform-origin: bottom;
+  pointer-events: none;
+}
+
+.skill-slot.ready { border-color: var(--edge-bright); }
+.skill-slot.poor { opacity: 0.42; }
+
+.skill-slot .lvl {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--gold);
+}
+
+/* Countdown */
+.hud-countdown {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: clamp(80px, 14vw, 200px);
+  font-weight: 700;
+  text-shadow: 0 0 60px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+
+/* Drift meter — appears only while sliding */
+.hud-drift {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(3.2vh + 78px);
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--energy);
+  opacity: 0;
+  transition: opacity 120ms ease;
+  text-shadow: 0 0 20px rgba(79, 209, 255, 0.7);
+}
+
+.hud-drift.on { opacity: 1; }
+
+/* Perf readout */
+.hud-perf {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  white-space: pre;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  text-align: right;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+.hud-perf .warn { color: var(--heat-hot); }
+
+/* Why the car is not answering the controls.
+   Sits directly above the skill row, in the middle of the screen, because it is
+   the one piece of HUD the player needs to read without looking away from the
+   road. */
+.hud-state {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(3.2vh + 108px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 110ms ease;
+  pointer-events: none;
+  text-align: center;
+}
+
+.hud-state.on { opacity: 1; }
+
+.hud-state .lbl {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--heat-hot);
+  text-shadow: 0 0 18px rgba(0, 0, 0, 0.9);
+}
+
+.hud-state .why {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  text-shadow: 0 1px 8px #000;
+}
+
+.hud-state.severe .lbl {
+  color: var(--danger);
+  animation: pulse 0.6s ease-in-out infinite;
+}
+
+
+/* --- nitrous ------------------------------------------------------------ */
+.gauge-fill.nos {
+  background: linear-gradient(90deg, #2b6fe0, #6fd2ff);
+}
+.g-nos.firing .gauge-fill.nos {
+  background: linear-gradient(90deg, #6fd2ff, #eaffff);
+  box-shadow: 0 0 12px rgba(120, 210, 255, 0.85);
+}
+.g-nos.firing .gauge-label { color: #9fe4ff; }

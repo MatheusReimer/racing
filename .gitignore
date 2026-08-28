@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.vite/
+shots/
+*.log
+
+# scratch diagnostics, not part of the harness
+tools/_*.mjs
