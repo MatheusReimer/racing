@@ -60,6 +60,44 @@ function deltaRow(offer, build) {
   return row;
 }
 
+// The six axes every machine is compared on, in this order, on every card.
+//
+// A fixed axis is the whole point. The roster used to print whichever stats a
+// vehicle happened to modify, in whatever order the object listed them, as a
+// row of coloured monospace tokens that wrapped to three lines — so comparing
+// two machines meant reading two different lists and holding them in your
+// head. Six rows in the same order, drawn from a common centre, and the
+// comparison is a shape.
+const SPEC_AXES = ['topSpeed', 'acceleration', 'turning', 'grip', 'armor', 'weight'];
+
+/** How far from baseline a bar is drawn full. Beyond this it saturates. */
+const SPEC_FULL = 60;
+
+function specProfile(stats) {
+  const spec = el('div', 'spec');
+  for (const id of SPEC_AXES) {
+    const attr = ATTRIBUTE_BY_ID[id];
+    const d = stats[id] ?? 0;
+    const row = el('div', 'spec-row');
+    row.appendChild(el('span', 'spec-name', esc(attr.name)));
+
+    const track = el('div', 'spec-track');
+    const bar = el('div', 'spec-bar');
+    // Half the track is one direction, so a full bar is SPEC_FULL either way.
+    bar.style.width = `${Math.min(Math.abs(d) / SPEC_FULL, 1) * 50}%`;
+    bar.style[d >= 0 ? 'left' : 'right'] = '50%';
+    // Weight is bidirectional by design — never painted as a loss.
+    bar.classList.add(attr.higherIsBetter === null ? 'neutral'
+      : (d > 0) === attr.higherIsBetter ? 'good' : 'bad');
+    track.appendChild(bar);
+    row.appendChild(track);
+
+    row.appendChild(el('span', 'spec-val', d ? `${d > 0 ? '+' : ''}${d}` : '·'));
+    spec.appendChild(row);
+  }
+  return spec;
+}
+
 function offerCard(offer, build, onPick) {
   const card = el('button', `card r-${offer.rarity || 'common'}`);
   const head = el('div', 'card-head');
@@ -72,7 +110,13 @@ function offerCard(offer, build, onPick) {
   if (offer.tags) card.appendChild(tagRow(offer.tags, build));
   const d = deltaRow(offer, build);
   if (d) card.appendChild(d);
-  if (offer.price != null) card.appendChild(el('div', 'card-price', `${offer.price} scrap`));
+  // The same affordance the roster cards carry: a card is a button, and
+  // nothing on it said so but the cursor.
+  const foot = el('div', 'card-foot');
+  foot.appendChild(el('span', 'card-price',
+    offer.price != null ? `${offer.price} scrap` : ''));
+  foot.appendChild(el('span', 'card-go', offer.price != null ? 'Buy' : 'Take'));
+  card.appendChild(foot);
   if (offer.disabled) card.classList.add('disabled');
   if (offer.sold) card.classList.add('sold');
   card.onclick = () => { if (!offer.disabled && !offer.sold) onPick(offer); };
@@ -176,9 +220,12 @@ function frame(title, sub, run, { withPanel = false, centred = false } = {}) {
   if (run) s.appendChild(runBar(run));
 
   const head = el('div', 'screen-head');
-  head.appendChild(el('div', 'screen-title', esc(title)));
+  if (title) head.appendChild(el('div', 'screen-title', esc(title)));
   if (sub) head.appendChild(el('div', 'screen-sub', esc(sub)));
-  s.appendChild(head);
+  // A heading with nothing in it is 60px of padding above the content. The
+  // end-of-run screen says DESTROYED in ninety-point type; it does not also
+  // need "Run Over" in the corner saying the same thing smaller.
+  if (head.childNodes.length) s.appendChild(head);
 
   const body = el('div', 'screen-body');
   s.appendChild(body);
@@ -267,28 +314,28 @@ export class Screens {
     body.appendChild(el('div', 'section-label', 'Choose your machine'));
     const cards = el('div', 'cards cards--roster');
     for (const v of VEHICLES) {
-      const locked = !STARTER_VEHICLE_IDS.includes(v.id);
-      const card = el('button', `card r-${locked ? 'common' : 'rare'}`);
+      const card = el('button', 'card card--machine');
+      // The machine's own colours, which the data has carried all along and
+      // the interface never used: six identical grey boxes for six cars that
+      // are supposed to be told apart at a glance.
+      card.style.setProperty('--machine', v.accent || v.color);
+      card.style.setProperty('--machine-body', v.color);
+
       const head = el('div', 'card-head');
       head.appendChild(el('span', 'card-name', esc(v.name)));
+      head.appendChild(el('span', 'machine-chip'));
       card.appendChild(head);
       // Its own line. A tagline is a sentence and `.card-slot` is a chip.
       card.appendChild(el('div', 'card-tagline', esc(v.tagline)));
       card.appendChild(el('div', 'card-text', esc(v.identity)));
-      if (v.rule) {
-        card.appendChild(el('div', 'card-text',
-          `<em style="color:var(--gold)">${esc(v.rule.text)}</em>`));
-      }
-      const d = el('div', 'deltas');
-      for (const [k, val] of Object.entries(v.stats)) {
-        const a = ATTRIBUTE_BY_ID[k];
-        const cls = a.higherIsBetter === null ? 'neutral' : (val > 0) === a.higherIsBetter ? 'up' : 'down';
-        d.appendChild(el('span', `delta ${cls}`, `${a.name.split(' ')[0]} ${val > 0 ? '+' : ''}${val}`));
-      }
-      card.appendChild(d);
-      card.appendChild(el('div', 'card-price',
-        `${v.partSlots} part slots · ${v.skillSlots} skill slots`
-        + (v.startingSkill ? ` · starts with ${esc(v.startingSkill.replace(/_/g, ' '))}` : '')));
+      if (v.rule) card.appendChild(el('div', 'rule', esc(v.rule.text)));
+      card.appendChild(specProfile(v.stats));
+      const foot = el('div', 'card-foot');
+      foot.appendChild(el('span', null,
+        `${v.partSlots} parts · ${v.skillSlots} skills`
+        + (v.startingSkill ? ` · ${esc(v.startingSkill.replace(/_/g, ' '))}` : '')));
+      foot.appendChild(el('span', 'card-go', 'Select'));
+      card.appendChild(foot);
       card.onclick = () => onStart(v.id);
       // Pointing at a machine is asking to see it. Focus counts too, so the
       // showroom follows a keyboard just as it follows a mouse.
@@ -555,8 +602,7 @@ export class Screens {
 
   gameOver(summary, { onRestart }) {
     const won = summary.outcome === 'victory';
-    const { root, body, foot } = frame(won ? 'Tournament Complete' : 'Run Over', null, null,
-      { centred: true });
+    const { root, body, foot } = frame(null, null, null, { centred: true });
 
     const hero = el('div', 'result-hero');
     hero.appendChild(el('div', 'big', won ? 'VICTORY' : 'DESTROYED'));

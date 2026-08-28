@@ -168,27 +168,47 @@
 .btn {
   font: inherit;
   font-size: 13px;
-  letter-spacing: 0.06em;
-  padding: 11px 22px;
-  border-radius: 5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 12px 26px;
+  border-radius: var(--radius);
   border: 1px solid var(--edge-bright);
-  background: rgba(255, 255, 255, 0.05);
+  /* A lit top edge and a shadow underneath: enough to read as a raised thing
+     rather than a translucent rectangle laid over the scene. */
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.03));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 1px 2px rgba(0, 0, 0, 0.4);
   color: var(--text);
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+  transition: background 120ms ease, border-color 120ms ease,
+    transform 80ms ease, box-shadow 120ms ease;
 }
 
-.btn:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.4); }
-.btn:active { transform: translateY(1px); }
-.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.07));
+  border-color: rgba(255, 255, 255, 0.45);
+}
 
+.btn:active { transform: translateY(1px); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4); }
+.btn:disabled { opacity: 0.3; cursor: not-allowed; box-shadow: none; }
+.btn:focus-visible { outline: 2px solid var(--speed); outline-offset: 2px; }
+
+/* The one action the screen wants. It should look like the way out. */
 .btn.primary {
-  background: var(--speed);
-  border-color: var(--speed);
-  color: #06202b;
-  font-weight: 600;
+  background: linear-gradient(180deg, #6fd2ff, var(--speed));
+  border-color: #8adcff;
+  color: #04222e;
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 0 24px rgba(79, 195, 247, 0.30), 0 2px 6px rgba(0, 0, 0, 0.4);
 }
-.btn.primary:hover { background: #6fd2ff; }
+
+.btn.primary:hover {
+  background: linear-gradient(180deg, #8adcff, #5ac9ff);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 0 34px rgba(79, 195, 247, 0.45), 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
 .btn.danger { border-color: var(--danger); color: #ff9b9b; }
 
 /* -------------------------------------------------------------- showroom --- */
@@ -210,16 +230,157 @@
 .showroom {
   /* Its own grid row, outside the scrolling body: it never moves when the
      card list under it does. */
+  position: relative;
   height: clamp(140px, 21vh, 240px);
   margin-bottom: var(--s2);
   pointer-events: none;
 }
 
-/* Which machine is on the turntable. A left edge rather than a glow, so it
-   reads at a glance without competing with the rarity colour on the top edge. */
+/* The turntable is drawn by `Renderer.renderInset` into exactly this
+   rectangle, so the scissor cuts the car's ground disc off with a straight
+   line across the screen. Faded out, the car rises out of the dark instead of
+   being sliced by it. */
+.showroom::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -1px 0;
+  height: 42%;
+  background: linear-gradient(180deg, rgba(8, 10, 13, 0), rgba(8, 10, 13, 0.92));
+}
+
+/* ------------------------------------------------------- machine cards --- */
+
+/* Each machine in its own colour, which `vehicles.js` has carried all along.
+   Six identical grey boxes is not a roster, it is a list. */
+.card--machine {
+  border-top: 2px solid var(--machine);
+  gap: var(--s2);
+}
+
+.card--machine .card-name { font-size: 16px; }
+
+/* Two lines reserved for each, so the six spec blocks start at the same height
+   on every card in the row. Comparing shapes only works if the shapes are
+   side by side rather than staggered by however long a sentence ran. */
+.card--machine .card-text { min-height: 3em; }
+.card--machine .rule { min-height: 3em; }
+
+/* A paint chip: the body colour with the accent round it, the same pairing
+   the car on the turntable is actually built from. */
+.machine-chip {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--machine-body);
+  box-shadow: 0 0 0 2px var(--machine), 0 0 10px color-mix(in srgb, var(--machine) 55%, transparent);
+}
+
+/* The rule is the machine's one mechanical promise, so it gets a mark of its
+   own instead of being a third paragraph in the same grey. */
+.rule {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--gold);
+  border-left: 2px solid var(--gold);
+  padding-left: var(--s2);
+}
+
+.card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  margin-top: auto;
+  padding-top: var(--s2);
+  border-top: 1px solid var(--edge);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* Something on the card that says it is a button. */
+.card-go {
+  color: var(--machine, var(--speed));
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.card-go::after { content: ' →'; }
+
+/* Which machine is on the turntable. It was a blue border on a card that
+   already had blue borders everywhere; now it is lifted, ringed in the car's
+   own colour, and says so. */
 .card.showing {
-  border-color: var(--speed);
-  background: rgba(28, 34, 42, 0.94);
+  border-color: var(--machine, var(--speed));
+  background: rgba(30, 36, 45, 0.96);
+  box-shadow: 0 0 0 1px var(--machine, var(--speed)),
+    0 12px 32px rgba(0, 0, 0, 0.55);
+  transform: translateY(-3px);
+}
+
+.card.showing::before {
+  content: 'On the turntable';
+  position: absolute;
+  top: -9px;
+  right: var(--s3);
+  padding: 1px 8px;
+  border-radius: 99px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #06202b;
+  background: var(--machine, var(--speed));
+}
+
+/* ------------------------------------------------------ spec profile --- */
+
+.spec { display: grid; gap: 5px; }
+
+.spec-row {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.spec-name {
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.spec-track {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* The baseline every machine is a deviation from. Without it the bars are
+   lengths from the left and the whole comparison collapses. */
+.spec-track::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.spec-bar { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
+.spec-bar.good { background: var(--durability); }
+.spec-bar.bad { background: var(--danger); }
+.spec-bar.neutral { background: var(--physical); }
+
+.spec-val {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-align: right;
+  color: var(--text-dim);
 }
 
 /* ---------------------------------------------------------------- cards --- */
@@ -298,9 +459,17 @@
 
 .card-price {
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
   color: var(--gold);
 }
+
+/* Offer cards get the same foot as the roster's, so the price and the action
+   sit on one rule at the bottom instead of floating at different heights
+   depending on how many tags a part happened to carry. */
+.card .card-foot { color: var(--text-faint); }
+.card.sold .card-go, .card.disabled .card-go { color: var(--text-faint); }
 
 .tags { display: flex; flex-wrap: wrap; gap: 5px; }
 
@@ -522,12 +691,14 @@
 
 /* ------------------------------------------------------------------ misc --- */
 
-/* Clear of the status strip. At 3vh it landed on the screen title. */
+/* Above the footer, not over the title. At the top it landed on the screen
+   heading — and a toast reports what the last click did, which is where the
+   last click was. */
 .toast {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  top: 54px;
+  bottom: 92px;
   padding: 10px 20px;
   background: var(--panel-solid);
   border: 1px solid var(--edge-bright);
@@ -538,7 +709,7 @@
 }
 
 @keyframes toastIn {
-  from { opacity: 0; transform: translate(-50%, -12px); }
+  from { opacity: 0; transform: translate(-50%, 12px); }
 }
 
 .modline {
@@ -564,21 +735,57 @@
   gap: var(--s2);
 }
 
+/* The same raised treatment the buttons and cards got. These are the actions
+   on their screens, and they were flat panels beside a lit primary button. */
 .choice {
+  position: relative;
   text-align: left;
-  padding: 15px 18px;
+  padding: var(--s3) var(--s5) var(--s3) var(--s4);
   border: 1px solid var(--edge);
-  border-radius: 5px;
-  background: var(--panel);
+  border-left: 2px solid var(--edge-bright);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 2px rgba(0, 0, 0, 0.35);
   cursor: pointer;
   font: inherit;
   color: inherit;
-  transition: border-color 110ms ease, background 110ms ease, transform 80ms ease;
+  transition: border-color 110ms ease, background 110ms ease,
+    transform 80ms ease, box-shadow 110ms ease;
 }
 
-.choice:hover { border-color: var(--speed); background: rgba(28, 34, 42, 0.95); transform: translateX(3px); }
-.choice .lbl { font-size: 14px; font-weight: 600; }
-.choice .det { font-size: 12px; color: var(--text-dim); margin-top: 5px; }
+/* A chevron, so a row of these reads as a list of things you can do. */
+.choice::after {
+  content: '→';
+  position: absolute;
+  right: var(--s4);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-faint);
+  transition: color 110ms ease, transform 110ms ease;
+}
+
+.choice:hover {
+  border-color: var(--edge-bright);
+  border-left-color: var(--speed);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.04));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 6px 18px rgba(0, 0, 0, 0.45);
+  transform: translateX(3px);
+}
+
+.choice:hover::after { color: var(--speed); transform: translate(3px, -50%); }
+.choice:focus-visible { outline: 2px solid var(--speed); outline-offset: 2px; }
+
+.choice.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.choice.disabled::after { content: ''; }
+
+.choice .lbl { font-size: 14.5px; font-weight: 600; }
+.choice .det { font-size: 12px; color: var(--text-dim); margin-top: var(--s1); }
 
 
 /* ------------------------------------------------------------- narrow --- */
