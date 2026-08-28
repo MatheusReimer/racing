@@ -18,7 +18,38 @@ export const CLS = { PAINT: 0, GLASS: 1, DARK: 2, CHROME: 3, LAMP: 4, INSIDE: 5 
 // the greenhouse otherwise goes through the window and lands on the upholstery.
 const INTERIOR = /interior|\bint_|seat|banco|cloth|carpet|leather|couro|dash|painel|steer|volante|gauge|pedal|belt|cinto/;
 
-export function classify(matName) {
+/**
+ * A name that carries no information about what it is.
+ *
+ * Blender's default, and what a good half of Sketchfab's catalogue ships with:
+ * `Material`, `Material.005`, `Material__2`. The RX-7 has fifteen of them and
+ * one called `redglass`, so on that file the name-based reading returns a car
+ * that is ninety-nine per cent paint.
+ */
+const ANONYMOUS = /^(material|mat|standard|default|lambert|phong|surface|untitled)?[\s._-]*\d*$/;
+
+/**
+ * The fallback when the name says nothing: read the material's own appearance.
+ *
+ * Weaker than a name and used only where there is no name worth reading, but
+ * the distinctions that matter here survive it. A tyre is near-black and fully
+ * rough; a bumper trim is near-black and smooth; chrome is bright and fully
+ * metallic; an indicator lens is small, saturated and orange. Bodywork is
+ * whatever is left, which is the same default the named path uses.
+ */
+function classifyByLook({ rgb, metallic }) {
+  if (!rgb) return CLS.PAINT;
+  const [r, g, b] = rgb;
+  const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const max = Math.max(r, g, b);
+  const sat = max > 0 ? (max - Math.min(r, g, b)) / max : 0;
+  if (luma < 0.12) return CLS.DARK;
+  if (sat > 0.55 && r >= g && g >= b) return CLS.LAMP;   // amber and red lenses
+  if (metallic >= 0.7 && luma > 0.35) return CLS.CHROME;
+  return CLS.PAINT;
+}
+
+export function classify(matName, look = null) {
   const n = (matName ?? '').toLowerCase();
   // A number-plate lamp is not a headlight, and on the GC8 it is the name
   // attached to fifty thousand triangles of car.
@@ -28,6 +59,7 @@ export function classify(matName) {
   if (/glass|vidro|window|janela|screen|glazing|windshield/.test(n)) return CLS.GLASS;
   if (/tire|tyre|pneu|rubber|borracha|plastic|plastico|preto|black|seal|rim|roda|wheel|caliper|disc|grille|grelha|trim|espelho|mirror/.test(n)) return CLS.DARK;
   if (/chrome|crom|alumin|steel|inox|badge|emblem|bumper|parachoque/.test(n)) return CLS.CHROME;
+  if (look && ANONYMOUS.test(n)) return classifyByLook(look);
   return CLS.PAINT;
 }
 

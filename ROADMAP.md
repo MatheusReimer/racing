@@ -5,6 +5,41 @@ and what it will touch, so picking one up does not start from scratch.
 
 ---
 
+## Physics: put the car on the road
+
+Three faults, reported from play. They are grouped because they are probably one
+problem seen from three angles — the contact between wheel and ground — and
+fixing them separately risks three patches that disagree.
+
+**The car does not sit on the road.** In most situations it is either hovering
+slightly above the surface or sunk into it. This is the one to solve first,
+because the other two are read through it: a car whose contact point is wrong
+has wrong suspension travel, wrong load transfer and wrong collision depth, so
+tuning either of those against the current contact only bakes the error in. What
+"correct" means here is not a tolerance — it is that a wheel touches the road and
+neither floats nor intersects, in every situation, the way a real one does.
+
+**Accelerating lifts the car.** Throttle should transfer load rearward and
+squat the back, not raise the body. A nose that rises under power suggests the
+force is being applied above the centre of mass, or that the suspension response
+has the wrong sign.
+
+**Crash physics.** Impacts do not read as impacts. What is wanted is contact
+that behaves like the real thing rather than a scripted nudge.
+
+What it touches: `src/vehicle/physics.js` for the model itself, `src/race/sim.js`
+where it is stepped, and `src/vehicle/chassis.js` only for where the wheels are
+placed — the bodies now carry measured wheel radii and axle positions taken off
+the reference cars, so the visual contact point and the physical one can be made
+to agree instead of being tuned apart.
+
+Worth knowing before starting: `tools/physics-probe.mjs`, `tools/handling-probe.mjs`
+and `tools/control-probe.mjs` already exist and pass, which means they do not
+currently test any of this. Whatever is built here should come with the probe
+that would have caught it.
+
+---
+
 ## Body kits, vinyls and underglow
 
 The roster is now six distinct tuner silhouettes, but a car still does not

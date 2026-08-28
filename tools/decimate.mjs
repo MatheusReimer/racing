@@ -61,7 +61,7 @@ for (const m of meshes) {
     for (let i = 0; i < m.tris.length; i++) wheelPts.push(m.tris[i]);
     continue;
   }
-  const c = classify(m.mat);
+  const c = classify(m.mat, m);
   if (c === CLS.INSIDE) { inside += m.tris.length / 9; continue; }
   for (let i = 0; i < m.tris.length; i++) body.push(m.tris[i]);
   for (let i = 0; i < m.tris.length; i += 9) bodyCls.push(c);

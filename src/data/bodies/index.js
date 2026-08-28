@@ -6,11 +6,21 @@
 //
 // These are derivative geometry — the reference's own surface with fewer
 // vertices in it, not a measurement of a car — so the reference's licence
-// reaches the game. The 205 GTI, MX-5 (NA), Impreza GC8 and Beetle are CC-BY
-// and want crediting; the S15 is CC BY-NC-SA, which is non-commercial and
-// share-alike. refs/README.txt carries the provenance.
+// reaches the game:
+//
+//   hatch     1997 Peugeot 205 GTI            CC-BY
+//   coupe     1999 Nissan Silvia S15 Spec-S   CC BY-NC-SA
+//   rotary    1999 Mazda RX-7 FD              CC BY-NC-SA
+//   gt        1982 Audi Quattro B2            CC BY-NC-SA
+//   roadster  1989 Mazda MX-5 (NA)            CC-BY
+//   rally     Subaru Impreza WRX STi (GC8)    CC-BY
+//   beetle    early-fifties VW Beetle         CC-BY
+//
+// Four want crediting. Three are non-commercial and share-alike, which is a
+// constraint on the whole game now that their surfaces are in it.
+// refs/README.txt carries the provenance.
 
-export const HULL_NAMES = ['hatch', 'coupe', 'roadster', 'rally', 'beetle'];
+export const HULL_NAMES = ['hatch', 'coupe', 'rotary', 'gt', 'roadster', 'rally', 'beetle'];
 const MAGIC = 0x524c4852;
 
 /** @type {Record<string, {positions: Float32Array, indices: Uint32Array,

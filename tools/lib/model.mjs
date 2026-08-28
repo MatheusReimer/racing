@@ -90,6 +90,13 @@ function readGLB(path) {
           // zero that are opaque bodywork.
           alpha: (m?.alphaMode === 'BLEND' || m?.alphaMode === 'MASK')
             ? (m?.pbrMetallicRoughness?.baseColorFactor?.[3] ?? 1) : 1,
+          // Kept for references whose material names say nothing. Plenty are
+          // exported straight out of Blender as `Material.005`, and then the
+          // only thing left that distinguishes a tyre from a wing is what
+          // colour the author made it.
+          rgb: m?.pbrMetallicRoughness?.baseColorFactor?.slice(0, 3) ?? null,
+          metallic: m?.pbrMetallicRoughness?.metallicFactor ?? 1,
+          roughness: m?.pbrMetallicRoughness?.roughnessFactor ?? 1,
           tris,
         });
       }
@@ -123,7 +130,7 @@ function readOBJ(path) {
       }
     }
   }
-  return groups.filter((g) => g.tris.length).map((g) => ({ ...g, mat: '', alpha: 1 }));
+  return groups.filter((g) => g.tris.length).map((g) => ({ ...g, mat: '', alpha: 1, rgb: null, metallic: 1, roughness: 1 }));
 }
 
 function readSTL(path) {
@@ -146,7 +153,7 @@ function readSTL(path) {
     }
   }
   // An STL is one anonymous soup, so no wheels can be told apart in it.
-  return [{ name: '', mat: '', alpha: 1, tris }];
+  return [{ name: '', mat: '', alpha: 1, rgb: null, metallic: 1, roughness: 1, tris }];
 }
 
 export function readModel(path) {
