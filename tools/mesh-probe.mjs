@@ -28,8 +28,14 @@ for (const n of HULL_NAMES) {
 }
 
 function analyse(geo) {
-  const idx = geo.index.array;
   const pos = geo.attributes.position.array;
+  // Indexed or not. A generated body comes out of `mergeGeometries` indexed; a
+  // hull is de-indexed by construction, because a class belongs to a triangle
+  // and an indexed buffer can only colour corners. The welding below makes the
+  // distinction irrelevant, so a missing index is just the identity.
+  const idx = geo.index
+    ? geo.index.array
+    : Uint32Array.from({ length: pos.length / 3 }, (_, i) => i);
 
   // Weld by position: separate boxes have distinct vertex indices, and an
   // unwelded test would call every shared corner a hole.

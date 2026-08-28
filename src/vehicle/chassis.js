@@ -281,6 +281,92 @@ function synthLamps(hull, sx, sy, sz, atFront) {
 }
 
 /**
+ * The de-indexed hull, built once per reference and shared by every car that
+ * uses it.
+ *
+ * Splitting fifty thousand indexed triangles into a hundred and fifty thousand
+ * loose vertices, and computing a normal for each, is fifteen milliseconds —
+ * the largest single cost in building a car, and it was paid again for every
+ * car on the grid even though they are all the same shape. Positions and
+ * normals do not depend on the paint or on how big the build made the car, so
+ * they are cut once and every instance points at the same buffers: Three
+ * uploads an attribute per attribute object, so sharing the object shares the
+ * GPU memory too.
+ *
+ * Size is applied as a scale on the node, not baked into the vertices, which is
+ * what lets the same buffers serve a car the build stretched and one it did
+ * not. Only the colours are per car, and filling a colour array is a tenth of
+ * the work of cutting the mesh.
+ */
+const hullCache = new WeakMap();
+
+function hullShared(hull) {
+  const cached = hullCache.get(hull);
+  if (cached) return cached;
+  const { positions, indices, classes } = hull;
+  const n = classes.length;
+
+  const CENTRE_BIAS = 0.02;
+  const bodyIdx = [];
+  const front = [];
+  const rear = [];
+  for (let t = 0; t < n; t++) {
+    const p0 = indices[t * 3];
+    const p1 = indices[t * 3 + 1];
+    const p2 = indices[t * 3 + 2];
+    const midZ = (positions[p0 * 3 + 2] + positions[p1 * 3 + 2] + positions[p2 * 3 + 2]) / 3;
+    if (classes[t] === 4) (midZ > hull.length * CENTRE_BIAS ? front : rear).push(p0, p1, p2);
+    else bodyIdx.push(p0, p1, p2);
+  }
+
+  const cut = (idx) => {
+    const a = new Float32Array(idx.length * 3);
+    for (let i = 0; i < idx.length; i++) {
+      const v = idx[i] * 3;
+      a[i * 3] = positions[v];
+      a[i * 3 + 1] = positions[v + 1] - hull.ground;
+      a[i * 3 + 2] = positions[v + 2];
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(a, 3));
+    g.computeVertexNormals();
+    return g;
+  };
+
+  const bodyGeo = cut(bodyIdx);
+  const shared = {
+    // The class of each surviving triangle, in the order they were cut, so a
+    // per-car colour array can be filled without walking the hull again.
+    bodyClasses: new Uint8Array(bodyIdx.length / 3),
+    position: bodyGeo.getAttribute('position'),
+    normal: bodyGeo.getAttribute('normal'),
+    lampFront: null,
+    lampRear: null,
+  };
+  // Where the reference marked too few faces to be a lamp, make a pair. Built
+  // at native size like everything else here, because the node carries the
+  // scale now.
+  const MIN_FACES = 24;
+  const loose = (arr) => {
+    if (!arr) return null;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(arr), 3));
+    g.computeVertexNormals();
+    return g;
+  };
+  shared.lampFront = front.length / 3 >= MIN_FACES
+    ? cut(front) : loose(synthLamps(hull, 1, 1, 1, true));
+  shared.lampRear = rear.length / 3 >= MIN_FACES
+    ? cut(rear) : loose(synthLamps(hull, 1, 1, 1, false));
+  {
+    let k = 0;
+    for (let t = 0; t < n; t++) if (classes[t] !== 4) shared.bodyClasses[k++] = classes[t];
+  }
+  hullCache.set(hull, shared);
+  return shared;
+}
+
+/**
  * Build a car from a body decimated off a real one by tools/decimate.mjs.
  *
  * De-indexed on the way in. The file is indexed because that is half the bytes,
@@ -296,56 +382,38 @@ function synthLamps(hull, sx, sy, sz, atFront) {
  * wide build widens the car instead of flattening it.
  */
 function hullGeometry(hull, L, W, color, accent) {
-  const { positions, indices, classes } = hull;
-  const sz = L / hull.length;
-  const sx = W / hull.width;
-  const sy = sz;
-  const n = classes.length;
-
   const byClass = [color, HULL_GLASS, HULL_DARK, HULL_CHROME, accent ?? 0xfff2d0]
     .map((c) => new THREE.Color(c));
 
-  // Lamps come out into their own meshes.
-  //
-  // A headlight that is shaded like paint is not a headlight, it is a pale
-  // patch — the thing that makes it read as a lamp is that it does not care
-  // about the scene's lighting. And they have to be separable front from rear,
-  // because a brake light and a headlight do different things at different
-  // times, and the class the reference gave us says "lamp" without saying
-  // which. Their position does: the ones ahead of the middle face forward.
-  const CENTRE_BIAS = 0.02;
-  const body = [];
-  const bodyCol = [];
-  const front = [];
-  const rear = [];
-
-  for (let t = 0; t < n; t++) {
-    const cls = classes[t];
-    const p0 = indices[t * 3] * 3;
-    const p1 = indices[t * 3 + 1] * 3;
-    const p2 = indices[t * 3 + 2] * 3;
-    const midZ = (positions[p0 + 2] + positions[p1 + 2] + positions[p2 + 2]) / 3;
-    const dst = cls === 4 ? (midZ > hull.length * CENTRE_BIAS ? front : rear) : body;
-    const c = byClass[cls] ?? byClass[0];
-    for (const v of [p0, p1, p2]) {
-      dst.push(positions[v] * sx, (positions[v + 1] - hull.ground) * sy, positions[v + 2] * sz);
-      if (dst === body) bodyCol.push(c.r, c.g, c.b);
+  const shared = hullShared(hull);
+  const tris = shared.bodyClasses.length;
+  const col = new Float32Array(tris * 9);
+  for (let t = 0; t < tris; t++) {
+    const c = byClass[shared.bodyClasses[t]] ?? byClass[0];
+    for (let k = 0; k < 3; k++) {
+      const o = t * 9 + k * 3;
+      col[o] = c.r;
+      col[o + 1] = c.g;
+      col[o + 2] = c.b;
     }
   }
 
-  const make = (arr, colours) => {
-    if (!arr.length) return null;
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(arr), 3));
-    if (colours) g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colours), 3));
-    g.computeVertexNormals();
-    return g;
+  // Its own geometry object, pointing at the shared buffers. Only the colours
+  // belong to this car.
+  const body = new THREE.BufferGeometry();
+  body.setAttribute('position', shared.position);
+  body.setAttribute('normal', shared.normal);
+  body.setAttribute('color', new THREE.BufferAttribute(col, 3));
+
+  return {
+    body,
+    lampFront: shared.lampFront,
+    lampRear: shared.lampRear,
+    // Size is a scale on the node rather than baked into the vertices, which is
+    // what lets one set of buffers serve a car the build stretched and one it
+    // did not.
+    scale: [W / hull.width, L / hull.length, L / hull.length],
   };
-  // Where the reference marked too few faces to be a lamp, make a pair.
-  const MIN_FACES = 24;
-  const frontGeo = front.length / 9 >= MIN_FACES ? front : synthLamps(hull, sx, sy, sz, true);
-  const rearGeo = rear.length / 9 >= MIN_FACES ? rear : synthLamps(hull, sx, sy, sz, false);
-  return { body: make(body, bodyCol), lampFront: make(frontGeo), lampRear: make(rearGeo) };
 }
 
 function mergeGeometries(list) {
@@ -670,6 +738,18 @@ const RUBBER = 0x121418;
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Cut every hull before the first race asks for one.
+ *
+ * The cut is cached per reference and shared by every car of that shape, so it
+ * is paid once — but "once" would otherwise be in the frame where six cars are
+ * created, which is the frame the player is watching. Called at boot, right
+ * after the bodies are fetched, it lands in the load instead.
+ */
+export function warmHulls(hulls) {
+  for (const hull of Object.values(hulls ?? {})) hullShared(hull);
+}
+
 export class VehicleMesh {
   constructor(profile, quality) {
     this.profile = profile;
@@ -727,167 +807,12 @@ export class VehicleMesh {
     const emissive = [];
     const glass = [];
 
-    // --- lower body ---------------------------------------------------------
-    const y = rideH + bodyH * 0.5;
-    // Sixteen rings rather than seven, and sixteen sides rather than four. The
-    // silhouette is where a car is recognised, so this is the one place extra
-    // geometry is unambiguously worth spending.
-    const BODY_PROFILE = BT.profile ?? [
-      [0.500, 0.56, 0.38, -0.18],
-      [0.455, 0.70, 0.50, -0.13],
-      [0.410, 0.82, 0.62, -0.08],
-      [0.350, 0.90, 0.72, -0.04],
-      [0.280, 0.95, 0.82, -0.01],
-      [0.200, 0.97, 0.88, 0.00],
-      [0.110, 0.99, 0.96, 0.01],
-      [0.020, 1.00, 1.00, 0.02],
-      [-0.070, 1.00, 1.00, 0.02],
-      [-0.150, 1.00, 1.00, 0.02],
-      [-0.230, 0.99, 0.98, 0.02],
-      [-0.310, 0.97, 0.90, 0.01],
-      [-0.380, 0.95, 0.82, 0.00],
-      [-0.440, 0.88, 0.70, -0.03],
-      [-0.480, 0.78, 0.60, -0.06],
-      [-0.500, 0.68, 0.52, -0.08],
-    ];
-    // Resample the profile to a finer ring spacing. Catmull-like smoothing on
-    // an already-hand-shaped curve would drift; plain interpolation adds rings
-    // without moving the silhouette the profile describes.
-    const BODY_RINGS = 72;
-    const sampleProfile = (u) => {
-      const x = u * (BODY_PROFILE.length - 1);
-      const i = Math.min(BODY_PROFILE.length - 2, Math.floor(x));
-      const t = x - i;
-      const a = BODY_PROFILE[i], b = BODY_PROFILE[i + 1];
-      return [lerp(a[0], b[0], t), lerp(a[1], b[1], t),
-        lerp(a[2], b[2], t), lerp(a[3], b[3], t)];
-    };
-    const bodySections = [];
-    for (let i = 0; i < BODY_RINGS; i++) {
-      const [fz, fw, fh, fy] = sampleProfile(i / (BODY_RINGS - 1));
-      bodySections.push({ z: L * fz, w: W * fw, h: bodyH * fh, y: y + bodyH * fy });
-    }
-    opaque.push(loft(bodySections, body, { sides: 44, roundness: 3.6 }));
-
-    /**
-     * Half-width of the bodywork at a length fraction and a world height.
-     *
-     * Anything meant to sit *on* the car asks this rather than assuming the
-     * body is a full-width box: the profile tapers toward both ends and the
-     * cross-section is a squircle, so a flank at `W / 2` is in mid air
-     * everywhere except the widest ring's waistline.
-     */
-    const bodyHalfWidth = (fz, worldY) => {
-      let a = BODY_PROFILE[0];
-      let b = BODY_PROFILE[BODY_PROFILE.length - 1];
-      for (let i = 0; i < BODY_PROFILE.length - 1; i++) {
-        if (fz <= BODY_PROFILE[i][0] && fz >= BODY_PROFILE[i + 1][0]) {
-          a = BODY_PROFILE[i]; b = BODY_PROFILE[i + 1];
-          break;
-        }
-      }
-      const span = a[0] - b[0];
-      const t = span === 0 ? 0 : clamp01((a[0] - fz) / span);
-      const w = lerp(a[1], b[1], t) * W;
-      const h = lerp(a[2], b[2], t) * bodyH;
-      const cy = y + lerp(a[3], b[3], t) * bodyH;
-      // Invert the squircle |x|^n + |v|^n = 1 used by `sectionPoints`.
-      const v = Math.min(0.999, Math.abs((worldY - cy) / (h * 0.5 || 1)));
-      const n = 3.6;
-      return (w * 0.5) * Math.pow(Math.max(0, 1 - Math.pow(v, n)), 1 / n);
-    };
-
-    // --- cabin --------------------------------------------------------------
-    const cabY = rideH + bodyH + 0.30 * BT.cabin.rise;
-    if (BT.cabin.roof) opaque.push(loft([
-      { z: L * 0.115, w: W * 0.52, h: 0.08, y: cabY - 0.26 },
-      { z: L * 0.060, w: W * 0.58, h: 0.24, y: cabY - 0.16 },
-      { z: L * 0.010, w: W * 0.63, h: 0.42, y: cabY - 0.04 },
-      { z: -L * 0.050, w: W * 0.66, h: 0.52, y: cabY },
-      { z: -L * 0.130, w: W * 0.66, h: 0.53, y: cabY + 0.02 },
-      { z: -L * 0.210, w: W * 0.65, h: 0.52, y: cabY + 0.02 },
-      { z: -L * 0.275, w: W * 0.60, h: 0.38, y: cabY - 0.06 },
-      { z: -L * 0.330, w: W * 0.52, h: 0.18, y: cabY - 0.19 },
-    ].map((r) => ({
-      ...r,
-      z: r.z + L * BT.cabin.shift,
-      w: r.w * BT.cabin.width,
-      h: r.h * BT.cabin.tall,
-      y: cabY + (r.y - cabY) * BT.cabin.tall,
-    })), roofCol, { sides: 24, roundness: 4.0 }));
-    else {
-      // Open-topped: a windscreen frame, a roll hoop behind the driver, and the
-      // rear deck closed off so you are not looking into a hollow shell.
-      opaque.push(box(W * 0.60, 0.06, L * 0.20, 0, cabY - 0.24, -L * 0.16, roofCol));
-      for (const side of [-1, 1]) {
-        const a = box(0.07, 0.46, 0.07, side * W * 0.28, cabY - 0.05, L * 0.075, roofCol);
-        a.rotateX(0);
-        opaque.push(a);
-      }
-      opaque.push(box(W * 0.60, 0.07, 0.08, 0, cabY + 0.16, L * 0.075, roofCol));
-      for (const side of [-1, 1]) {
-        opaque.push(box(0.10, 0.34, 0.14, side * W * 0.24, cabY - 0.10, -L * 0.20, 0x2b3037));
-      }
-    }
-
-    // --- interior, visible through the glass -----------------------------
-    // Cheap, and it is the whole difference between a cockpit and a tinted void.
-    const iy = rideH + bodyH * 0.55;
-    for (const side of [-1, 1]) {
-      opaque.push(box(0.44, 0.10, 0.46, side * W * 0.17, iy + 0.16, -L * 0.10, 0x1e2126));
-      opaque.push(panel(0.44, 0.10, 0.52, side * W * 0.17, iy + 0.42, -L * 0.17, 0.22, 0x24282e));
-      opaque.push(box(0.30, 0.16, 0.10, side * W * 0.17, iy + 0.66, -L * 0.20, 0x2a2f35));
-    }
-    opaque.push(panel(W * 0.52, 0.12, 0.30, 0, iy + 0.34, L * 0.030, -0.35, 0x191c20));
-    opaque.push(cylinder(0.16, 0.05, -W * 0.17, iy + 0.44, -L * 0.005, 0x14171a, 12, 'z'));
-    opaque.push(box(0.05, 0.14, 0.05, -W * 0.17, iy + 0.36, -L * 0.01, 0x14171a));
-    // A driver as three blocks. At racing distance that is all it needs to be.
-    opaque.push(box(0.30, 0.36, 0.24, -W * 0.17, iy + 0.44, -L * 0.10, 0x2f3a4a));
-    opaque.push(box(0.22, 0.22, 0.22, -W * 0.17, iy + 0.74, -L * 0.11, 0xc9a07a));
-    opaque.push(box(0.26, 0.12, 0.26, -W * 0.17, iy + 0.85, -L * 0.11, 0x1c1f24));
-    // Harness straps, gearshift, pedals, and a gauge cluster. All small, all
-    // behind glass, and together they are the difference between a cockpit and
-    // a dark box with a head in it.
-    for (const sx of [-1, 1]) {
-      opaque.push(tube(-W * 0.17 + sx * 0.11, iy + 0.72, -L * 0.135,
-        -W * 0.17 + sx * 0.05, iy + 0.30, -L * 0.085, 0.022, 0xc23b2b, 6));
-    }
-    opaque.push(tube(-W * 0.17, iy + 0.30, -L * 0.08, -W * 0.17, iy + 0.18, -L * 0.05, 0.02, 0xc23b2b, 6));
-    opaque.push(cylinder(0.028, 0.20, -W * 0.02, iy + 0.30, -L * 0.06, 0x15181c, 8));
-    opaque.push(cylinder(0.05, 0.05, -W * 0.02, iy + 0.41, -L * 0.06, 0xd8d2c6, 8));
-    for (let i = 0; i < 3; i++) {
-      opaque.push(cylinder(0.045, 0.03, -W * 0.17 + (i - 1) * 0.09, iy + 0.50,
-        L * 0.005, i === 1 ? 0xd8d2c6 : 0x2a2e33, 10, 'z'));
-    }
-    for (let i = 0; i < 3; i++) {
-      opaque.push(box(0.05, 0.11, 0.03, -W * 0.24 + i * 0.07, iy + 0.14, L * 0.02, 0x4a5058));
-    }
-
-    glass.push(panel(W * 0.52, 0.05, 0.52, 0, cabY - 0.05, L * 0.055, -0.60, 0x0d1520));
-    glass.push(panel(W * 0.50, 0.05, 0.38, 0, cabY - 0.04, -L * 0.295, 0.68, 0x0d1520));
-    // Quarter lights, and the frames between the panes. Splitting the glazing
-    // is what stops the cabin reading as one dark lozenge.
-    for (const side of [-1, 1]) {
-      glass.push(box(0.035, 0.26, L * 0.075, side * W * 0.332, cabY + 0.06, L * 0.005, 0x0d1520));
-      glass.push(box(0.035, 0.22, L * 0.06, side * W * 0.322, cabY + 0.02, -L * 0.255, 0x0d1520));
-    }
-    for (const side of [-1, 1]) {
-      glass.push(box(0.04, 0.32, L * 0.19, side * W * 0.325, cabY + 0.03, -L * 0.11, 0x0d1520));
-      // Window frame and door mirror stalk root, in body colour.
-      opaque.push(box(0.05, 0.045, L * 0.20, side * W * 0.330, cabY - 0.14, -L * 0.11, DARK));
-      opaque.push(box(0.05, 0.045, L * 0.20, side * W * 0.330, cabY + 0.20, -L * 0.11, DARK));
-      opaque.push(box(0.05, 0.30, 0.05, side * W * 0.330, cabY + 0.03, -L * 0.205, DARK));
-    }
-    // Wipers and washer jets.
-    for (const side of [-1, 1]) {
-      opaque.push(tube(side * W * 0.05, cabY - 0.27, L * 0.145,
-        side * W * 0.28, cabY - 0.20, L * 0.115, 0.016, 0x15181c, 6));
-      opaque.push(box(0.035, 0.03, 0.035, side * W * 0.14, cabY - 0.30, L * 0.16, 0x15181c));
-    }
-
-    // --- wheel arches -------------------------------------------------------
+    // The wheels, in numbers. Hoisted above the generated body because they are
+    // the only things it declares that the rest of the build needs — which is
+    // what lets the whole of it be skipped for a car that has a real hull.
+    //
     // Wheels are rebuilt, never traced: one radius per angle cannot describe an
-    // arch that curls under itself, so `lowpoly.mjs` measures them instead and
+    // arch that curls under itself, so `decimate.mjs` measures them instead and
     // the numbers land here. Scaled with the car, so a build that stretches the
     // body does not leave its wheels behind.
     const hw = hull?.wheel ?? null;
@@ -895,271 +820,446 @@ export class VehicleMesh {
     const wheelR = hw ? hw.radius * hs : lerp(0.44, 0.58, bulk);
     const wheelT = hw ? hw.width * hs : lerp(0.26, 0.42, bulk);
     const wheelbase = hw ? (hw.front - hw.rear) * hs * 0.5 : L * 0.33;
-    // Where the wheels sit across the car.
-    //
-    // Taken from the reference when there is one, because the car's own width
-    // cannot give it: a hull's width is measured over the mirrors and a wheel
-    // arch is nowhere near that far out. Deriving the track from `W` put every
-    // wheel outside the bodywork it belongs under — every car but the 205,
-    // which happened to be the one whose mirrors were excluded when it was cut.
+    // Where the wheels sit across the car. Taken from the reference when there
+    // is one, because the car's own width cannot give it: a hull's width is
+    // measured over the mirrors and a wheel arch is nowhere near that far out.
     const trackW = hull?.wheel?.track
       ? (hull.wheel.track * 0.5) * (W / hull.width)
       : W * 0.5 - wheelT * 0.30;
 
-    // A single tight lip per wheel. Separate multi-segment arches read as black
-    // clumps proud of the bodywork, and the loft already flares at the
-    // wheelbase, so the lip only has to suggest the edge.
-    for (const iz of [1, -1]) {
-      for (const ix of [-1, 1]) {
-        opaque.push(box(wheelT + 0.10, 0.09, wheelR * 1.55,
-          ix * (trackW + 0.02), rideH + bodyH * 0.30 + wheelR * 0.62,
-          iz * wheelbase, roofCol));
-      }
-    }
-
-    // --- nose ---------------------------------------------------------------
-    opaque.push(box(W * 0.52, bodyH * 0.32, 0.10, 0, rideH + bodyH * 0.30, L * 0.503, DARK));
-    for (let i = 0; i < 4; i++) {
-      opaque.push(box(W * 0.47, 0.032, 0.13,
-        0, rideH + bodyH * 0.18 + i * 0.072, L * 0.507, METAL));
-    }
-    opaque.push(box(W * 0.86, 0.06, 0.26, 0, rideH * 0.55, L * 0.455, DARK));
-    for (const side of [-1, 1]) {
-      emissive.push(box(0.26, 0.11, 0.06,
-        side * W * 0.30, rideH + bodyH * 0.64, L * 0.49, 0xfff2d0));
-    }
-
-    // --- tail ---------------------------------------------------------------
-    for (const side of [-1, 1]) {
-      emissive.push(box(W * 0.22, 0.09, 0.05,
-        side * W * 0.24, rideH + bodyH * 0.60, -L * 0.503, 0xff3b30));
-    }
-    opaque.push(panel(W * 0.70, 0.06, 0.30, 0, rideH * 0.70, -L * 0.465, 0.35, DARK));
-    for (const side of [-1, 1]) {
-      opaque.push(cylinder(0.085, 0.26, side * W * 0.24, rideH * 0.92, -L * 0.50, METAL, 8, 'z'));
-    }
-
-    // --- sides --------------------------------------------------------------
-    for (const side of [-1, 1]) {
-      opaque.push(box(0.07, 0.14, L * 0.42, side * (W * 0.5 + 0.01), rideH * 0.78, -L * 0.04, DARK));
-      for (let i = 0; i < 3; i++) {
-        opaque.push(box(0.05, 0.032, 0.20,
-          side * (W * 0.5 + 0.015), rideH + bodyH * 0.58 + i * 0.052, L * 0.06, DARK));
-      }
-      opaque.push(box(0.05, 0.04, 0.12, side * W * 0.40, cabY - 0.16, L * 0.05, DARK));
-      opaque.push(box(0.14, 0.10, 0.05, side * W * 0.47, cabY - 0.14, L * 0.042, roofCol));
-    }
-
-    opaque.push(box(W * 0.16, 0.02, L * 0.34, 0, rideH + bodyH + 0.005, L * 0.24, accent));
-
-    // --- Impact -------------------------------------------------------------
-    if (ram > 0.12) {
-      const barW = W * lerp(0.92, 1.16, ram);
-      const barH = lerp(0.18, 0.40, ram);
-      opaque.push(box(barW, barH, lerp(0.20, 0.42, ram),
-        0, rideH + barH * 0.55, L * 0.50 + 0.16, METAL));
-      for (const side of [-1, 1]) {
-        opaque.push(box(0.10, barH * 0.8, 0.34,
-          side * barW * 0.44, rideH + barH * 0.55, L * 0.44, METAL));
-      }
-      if (ram > 0.5) {
-        const teeth = 5;
-        for (let i = 0; i < teeth; i++) {
-          const tx = lerp(-barW * 0.40, barW * 0.40, i / (teeth - 1));
-          opaque.push(box(0.11, barH * 0.85, 0.34,
-            tx, rideH + barH * 0.62, L * 0.50 + 0.34, 0x9aa1a9));
-        }
-      }
-    }
-
-    // --- Armor --------------------------------------------------------------
-    if (armor > 0.15) {
-      const th = lerp(0.06, 0.19, armor);
-      for (const side of [-1, 1]) {
-        opaque.push(box(th, lerp(0.26, 0.46, armor), L * 0.66,
-          side * (W * 0.5 + th * 0.5), rideH + bodyH * 0.60, -L * 0.03, 0x596068));
-        for (let i = 0; i < 4; i++) {
-          opaque.push(box(th * 0.6, 0.05, 0.05,
-            side * (W * 0.5 + th), rideH + bodyH * 0.60,
-            lerp(-L * 0.30, L * 0.24, i / 3), METAL));
-        }
-      }
-      if (armor > 0.5) {
-        for (const side of [-1, 1]) {
-          opaque.push(box(0.06, 0.50, 0.06, side * W * 0.30, cabY + 0.02, -L * 0.02, METAL));
-          opaque.push(box(0.06, 0.50, 0.06, side * W * 0.30, cabY + 0.02, -L * 0.28, METAL));
-        }
-        opaque.push(box(W * 0.62, 0.06, 0.06, 0, cabY + 0.27, -L * 0.02, METAL));
-        opaque.push(box(W * 0.62, 0.06, 0.06, 0, cabY + 0.27, -L * 0.28, METAL));
-        opaque.push(box(0.06, 0.06, L * 0.28, 0, cabY + 0.27, -L * 0.15, METAL));
-      }
-    }
-
-    // --- Top Speed ----------------------------------------------------------
-    if (speed > 0.22) {
-      const wingW = W * lerp(0.86, 1.02, speed);
-      const wingY = rideH + bodyH + lerp(0.26, 0.52, speed);
-      const wingZ = -L * 0.50 - 0.04;
-      opaque.push(panel(wingW, 0.05, lerp(0.24, 0.40, speed), 0, wingY, wingZ, 0.16, accent));
-      for (const side of [-1, 1]) {
-        opaque.push(box(0.07, Math.max(0.1, wingY - (rideH + bodyH) + 0.06), 0.22,
-          side * wingW * 0.43, (wingY + rideH + bodyH) * 0.5, wingZ, DARK));
-        opaque.push(panel(0.22, 0.03, 0.14,
-          side * W * 0.44, rideH + bodyH * 0.34, L * 0.44, 0.22, accent));
-      }
-      opaque.push(loft([
-        { z: -L * 0.04, w: W * 0.22, h: 0.12, y: cabY + 0.30 },
-        { z: -L * 0.20, w: W * 0.30, h: 0.20, y: cabY + 0.32 },
-      ], DARK));
-    }
-
-    // --- surface detail -----------------------------------------------------
-    // The body loft gives a silhouette; this is what makes it read as a car up
-    // close. Every piece is positioned by querying `bodyHalfWidth`, so nothing
-    // here can float the way the hand-placed trim used to.
-    {
-      // No arch lips here on purpose: the loft already flares at the wheelbase
-      // and there is a single tight lip per wheel further down. A second
-      // multi-segment arch on top of that reads as a black clump standing proud
-      // of the bodywork, which is the artifact that lip replaced.
-
-      // Door shut lines and a shoulder crease, laid on the flank.
-      for (const side of [-1, 1]) {
-        for (const [fz, len] of [[0.16, 0.03], [-0.06, 0.03], [-0.24, 0.03]]) {
-          const yy = rideH + bodyH * 0.55;
-          opaque.push(box(0.02, bodyH * 0.44, len * L,
-            side * (bodyHalfWidth(fz, yy) - 0.01), yy, L * fz, DARK));
-        }
-        // Cooling gills behind the front arch.
-        for (let i = 0; i < 4; i++) {
-          const fz = 0.20 - i * 0.035;
-          const yy = rideH + bodyH * 0.46;
-          opaque.push(panel(0.05, 0.11, 0.03,
-            side * (bodyHalfWidth(fz, yy) - 0.02), yy, L * fz, 0.35, DARK));
-        }
-        // Mirror: stalk plus housing.
-        const my = rideH + bodyH * 0.92;
-        const mx = bodyHalfWidth(0.02, my) + 0.10;
-        opaque.push(cylinder(0.025, 0.20, side * (mx - 0.08), my, L * 0.02, DARK, 8, 'x'));
-        opaque.push(box(0.09, 0.11, 0.16, side * mx, my + 0.04, L * 0.02, accent));
-        // Exhaust tip, tucked under the rear valance where the body actually is.
-        opaque.push(cylinder(0.075, 0.26,
-          side * bodyHalfWidth(-0.46, rideH + bodyH * 0.20) * 0.62,
-          rideH + bodyH * 0.16, -L * 0.485, 0x44494f, 14, 'z'));
-      }
-
-      // Bonnet louvres.
-      for (let i = 0; i < 5; i++) {
-        const fz = 0.30 - i * 0.045;
-        opaque.push(panel(W * 0.34, 0.055, 0.035, 0,
-          rideH + bodyH * 0.90, L * fz, 0.42, DARK));
-      }
-
-      // Roll cage, seen through the glass.
-      const cageY = rideH + bodyH + 0.30;
-      // Kept below the roofline: the hoop was at cageY + 0.28 with the cabin
-      // topping out at cageY + 0.285, so it broke the surface and read as bars
-      // stuck through the roof rather than a cage inside the car.
-      for (const side of [-1, 1]) {
-        opaque.push(cylinder(0.036, 0.50, side * W * 0.30, cageY - 0.06, -L * 0.15, 0x8a9098, 10, 'y'));
-        opaque.push(cylinder(0.036, W * 0.58, 0, cageY + 0.17, -L * 0.15, 0x8a9098, 10, 'x'));
-        opaque.push(cylinder(0.032, 0.42, side * W * 0.28, cageY - 0.02, L * 0.02, 0x8a9098, 10, 'y'));
-      }
-
-      // Front splitter and rear diffuser fins, sized so they sit *under* the
-      // overhangs rather than hanging out past them. At 0.42 deep centred on
-      // -0.47L the fins reached almost a metre behind the tail, which from
-      // behind the car is a row of slabs trailing in mid air.
-      opaque.push(panel(W * 0.92, 0.05, 0.22, 0, rideH + 0.05, L * 0.455, 0.10, DARK));
-      for (let i = -2; i <= 2; i++) {
-        opaque.push(box(0.05, 0.15, 0.26, i * W * 0.17, rideH + 0.09, -L * 0.42, DARK));
-      }
-
-      // Headlight housings, sunk into the nose rather than stuck on it.
-      for (const side of [-1, 1]) {
-        const hy = rideH + bodyH * 0.72;
-        opaque.push(cylinder(0.13, 0.10,
-          side * bodyHalfWidth(0.44, hy) * 0.66, hy, L * 0.455, 0x1b1e22, 14, 'z'));
-      }
-
-      // Suspension, visible up inside the arches.
-      //
-      // An arch with nothing behind it is a hole in the car, and it is the
-      // first thing the eye finds when the wheels are this detailed. Five
-      // members per corner is enough to fill it convincingly.
-      const axles = [[L * 0.32, 1], [-L * 0.30, -1]];
-      for (const [zc] of axles) {
-        for (const side of [-1, 1]) {
-          // Terminate at the wheel centre, not outside it. `W * 0.5 + 0.06` put
-          // every arm, upright and coilover *beyond* the wheels — which are
-          // tucked in at `trackW` — so the suspension stood proud of the
-          // bodywork as a row of grey blocks along the flank. Exactly the
-          // floating-slab artifact this pass was meant to remove.
-          const hubX = side * trackW;
-          const inX = side * W * 0.16;
-          const armY = rideH + 0.16;
-          const topY = rideH + bodyH * 0.44;
-          // Lower and upper wishbones, as pairs of angled tubes.
-          for (const dz of [-0.26, 0.26]) {
-            opaque.push(tube(inX, armY, zc + dz * 0.4, hubX, armY + 0.04, zc + dz, 0.035, 0x24282d));
-            opaque.push(tube(inX, topY, zc + dz * 0.4, hubX, topY - 0.06, zc + dz, 0.028, 0x24282d));
-          }
-          // Coilover.
-          opaque.push(tube(inX + side * 0.05, topY + 0.10, zc, hubX - side * 0.10, armY, zc, 0.055, 0xb5462f));
-          // Upright.
-          opaque.push(box(0.07, 0.34, 0.12, hubX - side * 0.02, (armY + topY) * 0.5, zc, 0x2b3037));
-          // Driveshaft.
-          opaque.push(tube(inX, armY + 0.16, zc, hubX, armY + 0.16, zc, 0.032, 0x33383e));
-        }
-      }
-
-      // Underfloor tray, so the car is not hollow when it leaves the ground.
-      opaque.push(box(W * 0.86, 0.05, L * 0.82, 0, rideH + 0.03, -L * 0.02, 0x1a1d21));
-
-      // Radiator grille, as an actual lattice.
-      {
-        const gy = rideH + bodyH * 0.46;
-        const ghw = bodyHalfWidth(0.46, gy) * 0.82;
-        for (let i = 0; i < 11; i++) {
-          const t = (i / 10) * 2 - 1;
-          opaque.push(box(0.035, bodyH * 0.30, 0.05, t * ghw, gy, L * 0.470, 0x15181c));
-        }
-        for (let i = 0; i < 4; i++) {
-          opaque.push(box(ghw * 2, 0.03, 0.05, 0,
-            gy - bodyH * 0.12 + i * bodyH * 0.08, L * 0.468, 0x15181c));
-        }
-      }
-
-      // Tow hooks, jacking points, aerial — the small hard things that tell the
-      // eye how big the car is.
-      for (const side of [-1, 1]) {
-        opaque.push(cylinder(0.04, 0.10,
-          side * (bodyHalfWidth(-0.20, rideH + bodyH * 0.08) - 0.05),
-          rideH + bodyH * 0.08, -L * 0.20, 0x3a4046, 8, 'x'));
-      }
-      opaque.push(cylinder(0.05, 0.14, bodyHalfWidth(0.42, rideH + bodyH * 0.30) * 0.5,
-        rideH + bodyH * 0.30, L * 0.46, accent, 10, 'z'));
-      opaque.push(tube(-W * 0.22, rideH + bodyH + 0.34, -L * 0.30,
-        -W * 0.24, rideH + bodyH + 0.66, -L * 0.34, 0.014, 0x2a2e33, 6));
-    }
-
-    // --- emissive trim ------------------------------------------------------
-    // Placed *on* the body, by asking the profile where the body actually is.
+    // Everything from here to the assembly is the car this project draws when
+    // it has no real one to go on, and a body type with a hull does not need a
+    // line of it.
     //
-    // These were positioned with hand-guessed constants — the sill strip at
-    // `rideH * 0.52`, which is below the floor, and `W * 0.5` wide, which is
-    // wider than the tapered flank. The result was a lit slab hovering in mid
-    // air beside and under the car, and a tail bar floating above the deck.
-    // Constants cannot track a profile that changes; a query can.
-    for (const side of [-1, 1]) {
-      const sillY = rideH + bodyH * 0.16;
-      emissive.push(box(0.03, 0.025, L * 0.40,
-        side * (bodyHalfWidth(-0.02, sillY) - 0.015), sillY, -L * 0.02, 0xffffff));
-    }
-    {
-      const fz = -0.455;
-      emissive.push(box(bodyHalfWidth(fz, rideH + bodyH * 0.62) * 1.05, 0.05, 0.05,
-        0, rideH + bodyH * 0.62, L * fz - 0.02, 0xffffff));
+    // It used to run anyway and be thrown away at assembly — a deliberate trade
+    // when the alternative was threading a condition through four hundred lines
+    // that all declare things each other depend on. The bill came to ten
+    // milliseconds a car and seventy across a grid, spent building geometry
+    // nobody ever sees, in the one frame where every car is created at once.
+    // The four wheel scalars are the only things past here that the rest of the
+    // build needs, so they are hoisted above it and this becomes one condition
+    // after all.
+    if (!hull) {
+      // --- lower body ---------------------------------------------------------
+      const y = rideH + bodyH * 0.5;
+      // Sixteen rings rather than seven, and sixteen sides rather than four. The
+      // silhouette is where a car is recognised, so this is the one place extra
+      // geometry is unambiguously worth spending.
+      const BODY_PROFILE = BT.profile ?? [
+        [0.500, 0.56, 0.38, -0.18],
+        [0.455, 0.70, 0.50, -0.13],
+        [0.410, 0.82, 0.62, -0.08],
+        [0.350, 0.90, 0.72, -0.04],
+        [0.280, 0.95, 0.82, -0.01],
+        [0.200, 0.97, 0.88, 0.00],
+        [0.110, 0.99, 0.96, 0.01],
+        [0.020, 1.00, 1.00, 0.02],
+        [-0.070, 1.00, 1.00, 0.02],
+        [-0.150, 1.00, 1.00, 0.02],
+        [-0.230, 0.99, 0.98, 0.02],
+        [-0.310, 0.97, 0.90, 0.01],
+        [-0.380, 0.95, 0.82, 0.00],
+        [-0.440, 0.88, 0.70, -0.03],
+        [-0.480, 0.78, 0.60, -0.06],
+        [-0.500, 0.68, 0.52, -0.08],
+      ];
+      // Resample the profile to a finer ring spacing. Catmull-like smoothing on
+      // an already-hand-shaped curve would drift; plain interpolation adds rings
+      // without moving the silhouette the profile describes.
+      const BODY_RINGS = 72;
+      const sampleProfile = (u) => {
+        const x = u * (BODY_PROFILE.length - 1);
+        const i = Math.min(BODY_PROFILE.length - 2, Math.floor(x));
+        const t = x - i;
+        const a = BODY_PROFILE[i], b = BODY_PROFILE[i + 1];
+        return [lerp(a[0], b[0], t), lerp(a[1], b[1], t),
+          lerp(a[2], b[2], t), lerp(a[3], b[3], t)];
+      };
+      const bodySections = [];
+      for (let i = 0; i < BODY_RINGS; i++) {
+        const [fz, fw, fh, fy] = sampleProfile(i / (BODY_RINGS - 1));
+        bodySections.push({ z: L * fz, w: W * fw, h: bodyH * fh, y: y + bodyH * fy });
+      }
+      opaque.push(loft(bodySections, body, { sides: 44, roundness: 3.6 }));
+
+      /**
+       * Half-width of the bodywork at a length fraction and a world height.
+       *
+       * Anything meant to sit *on* the car asks this rather than assuming the
+       * body is a full-width box: the profile tapers toward both ends and the
+       * cross-section is a squircle, so a flank at `W / 2` is in mid air
+       * everywhere except the widest ring's waistline.
+       */
+      const bodyHalfWidth = (fz, worldY) => {
+        let a = BODY_PROFILE[0];
+        let b = BODY_PROFILE[BODY_PROFILE.length - 1];
+        for (let i = 0; i < BODY_PROFILE.length - 1; i++) {
+          if (fz <= BODY_PROFILE[i][0] && fz >= BODY_PROFILE[i + 1][0]) {
+            a = BODY_PROFILE[i]; b = BODY_PROFILE[i + 1];
+            break;
+          }
+        }
+        const span = a[0] - b[0];
+        const t = span === 0 ? 0 : clamp01((a[0] - fz) / span);
+        const w = lerp(a[1], b[1], t) * W;
+        const h = lerp(a[2], b[2], t) * bodyH;
+        const cy = y + lerp(a[3], b[3], t) * bodyH;
+        // Invert the squircle |x|^n + |v|^n = 1 used by `sectionPoints`.
+        const v = Math.min(0.999, Math.abs((worldY - cy) / (h * 0.5 || 1)));
+        const n = 3.6;
+        return (w * 0.5) * Math.pow(Math.max(0, 1 - Math.pow(v, n)), 1 / n);
+      };
+
+      // --- cabin --------------------------------------------------------------
+      const cabY = rideH + bodyH + 0.30 * BT.cabin.rise;
+      if (BT.cabin.roof) opaque.push(loft([
+        { z: L * 0.115, w: W * 0.52, h: 0.08, y: cabY - 0.26 },
+        { z: L * 0.060, w: W * 0.58, h: 0.24, y: cabY - 0.16 },
+        { z: L * 0.010, w: W * 0.63, h: 0.42, y: cabY - 0.04 },
+        { z: -L * 0.050, w: W * 0.66, h: 0.52, y: cabY },
+        { z: -L * 0.130, w: W * 0.66, h: 0.53, y: cabY + 0.02 },
+        { z: -L * 0.210, w: W * 0.65, h: 0.52, y: cabY + 0.02 },
+        { z: -L * 0.275, w: W * 0.60, h: 0.38, y: cabY - 0.06 },
+        { z: -L * 0.330, w: W * 0.52, h: 0.18, y: cabY - 0.19 },
+      ].map((r) => ({
+        ...r,
+        z: r.z + L * BT.cabin.shift,
+        w: r.w * BT.cabin.width,
+        h: r.h * BT.cabin.tall,
+        y: cabY + (r.y - cabY) * BT.cabin.tall,
+      })), roofCol, { sides: 24, roundness: 4.0 }));
+      else {
+        // Open-topped: a windscreen frame, a roll hoop behind the driver, and the
+        // rear deck closed off so you are not looking into a hollow shell.
+        opaque.push(box(W * 0.60, 0.06, L * 0.20, 0, cabY - 0.24, -L * 0.16, roofCol));
+        for (const side of [-1, 1]) {
+          const a = box(0.07, 0.46, 0.07, side * W * 0.28, cabY - 0.05, L * 0.075, roofCol);
+          a.rotateX(0);
+          opaque.push(a);
+        }
+        opaque.push(box(W * 0.60, 0.07, 0.08, 0, cabY + 0.16, L * 0.075, roofCol));
+        for (const side of [-1, 1]) {
+          opaque.push(box(0.10, 0.34, 0.14, side * W * 0.24, cabY - 0.10, -L * 0.20, 0x2b3037));
+        }
+      }
+
+      // --- interior, visible through the glass -----------------------------
+      // Cheap, and it is the whole difference between a cockpit and a tinted void.
+      const iy = rideH + bodyH * 0.55;
+      for (const side of [-1, 1]) {
+        opaque.push(box(0.44, 0.10, 0.46, side * W * 0.17, iy + 0.16, -L * 0.10, 0x1e2126));
+        opaque.push(panel(0.44, 0.10, 0.52, side * W * 0.17, iy + 0.42, -L * 0.17, 0.22, 0x24282e));
+        opaque.push(box(0.30, 0.16, 0.10, side * W * 0.17, iy + 0.66, -L * 0.20, 0x2a2f35));
+      }
+      opaque.push(panel(W * 0.52, 0.12, 0.30, 0, iy + 0.34, L * 0.030, -0.35, 0x191c20));
+      opaque.push(cylinder(0.16, 0.05, -W * 0.17, iy + 0.44, -L * 0.005, 0x14171a, 12, 'z'));
+      opaque.push(box(0.05, 0.14, 0.05, -W * 0.17, iy + 0.36, -L * 0.01, 0x14171a));
+      // A driver as three blocks. At racing distance that is all it needs to be.
+      opaque.push(box(0.30, 0.36, 0.24, -W * 0.17, iy + 0.44, -L * 0.10, 0x2f3a4a));
+      opaque.push(box(0.22, 0.22, 0.22, -W * 0.17, iy + 0.74, -L * 0.11, 0xc9a07a));
+      opaque.push(box(0.26, 0.12, 0.26, -W * 0.17, iy + 0.85, -L * 0.11, 0x1c1f24));
+      // Harness straps, gearshift, pedals, and a gauge cluster. All small, all
+      // behind glass, and together they are the difference between a cockpit and
+      // a dark box with a head in it.
+      for (const sx of [-1, 1]) {
+        opaque.push(tube(-W * 0.17 + sx * 0.11, iy + 0.72, -L * 0.135,
+          -W * 0.17 + sx * 0.05, iy + 0.30, -L * 0.085, 0.022, 0xc23b2b, 6));
+      }
+      opaque.push(tube(-W * 0.17, iy + 0.30, -L * 0.08, -W * 0.17, iy + 0.18, -L * 0.05, 0.02, 0xc23b2b, 6));
+      opaque.push(cylinder(0.028, 0.20, -W * 0.02, iy + 0.30, -L * 0.06, 0x15181c, 8));
+      opaque.push(cylinder(0.05, 0.05, -W * 0.02, iy + 0.41, -L * 0.06, 0xd8d2c6, 8));
+      for (let i = 0; i < 3; i++) {
+        opaque.push(cylinder(0.045, 0.03, -W * 0.17 + (i - 1) * 0.09, iy + 0.50,
+          L * 0.005, i === 1 ? 0xd8d2c6 : 0x2a2e33, 10, 'z'));
+      }
+      for (let i = 0; i < 3; i++) {
+        opaque.push(box(0.05, 0.11, 0.03, -W * 0.24 + i * 0.07, iy + 0.14, L * 0.02, 0x4a5058));
+      }
+
+      glass.push(panel(W * 0.52, 0.05, 0.52, 0, cabY - 0.05, L * 0.055, -0.60, 0x0d1520));
+      glass.push(panel(W * 0.50, 0.05, 0.38, 0, cabY - 0.04, -L * 0.295, 0.68, 0x0d1520));
+      // Quarter lights, and the frames between the panes. Splitting the glazing
+      // is what stops the cabin reading as one dark lozenge.
+      for (const side of [-1, 1]) {
+        glass.push(box(0.035, 0.26, L * 0.075, side * W * 0.332, cabY + 0.06, L * 0.005, 0x0d1520));
+        glass.push(box(0.035, 0.22, L * 0.06, side * W * 0.322, cabY + 0.02, -L * 0.255, 0x0d1520));
+      }
+      for (const side of [-1, 1]) {
+        glass.push(box(0.04, 0.32, L * 0.19, side * W * 0.325, cabY + 0.03, -L * 0.11, 0x0d1520));
+        // Window frame and door mirror stalk root, in body colour.
+        opaque.push(box(0.05, 0.045, L * 0.20, side * W * 0.330, cabY - 0.14, -L * 0.11, DARK));
+        opaque.push(box(0.05, 0.045, L * 0.20, side * W * 0.330, cabY + 0.20, -L * 0.11, DARK));
+        opaque.push(box(0.05, 0.30, 0.05, side * W * 0.330, cabY + 0.03, -L * 0.205, DARK));
+      }
+      // Wipers and washer jets.
+      for (const side of [-1, 1]) {
+        opaque.push(tube(side * W * 0.05, cabY - 0.27, L * 0.145,
+          side * W * 0.28, cabY - 0.20, L * 0.115, 0.016, 0x15181c, 6));
+        opaque.push(box(0.035, 0.03, 0.035, side * W * 0.14, cabY - 0.30, L * 0.16, 0x15181c));
+      }
+
+      // --- wheel arches -------------------------------------------------------
+      // Wheels are rebuilt, never traced: one radius per angle cannot describe an
+      // arch that curls under itself, so `lowpoly.mjs` measures them instead and
+      // the numbers land here. Scaled with the car, so a build that stretches the
+      // body does not leave its wheels behind.
+
+      // A single tight lip per wheel. Separate multi-segment arches read as black
+      // clumps proud of the bodywork, and the loft already flares at the
+      // wheelbase, so the lip only has to suggest the edge.
+      for (const iz of [1, -1]) {
+        for (const ix of [-1, 1]) {
+          opaque.push(box(wheelT + 0.10, 0.09, wheelR * 1.55,
+            ix * (trackW + 0.02), rideH + bodyH * 0.30 + wheelR * 0.62,
+            iz * wheelbase, roofCol));
+        }
+      }
+
+      // --- nose ---------------------------------------------------------------
+      opaque.push(box(W * 0.52, bodyH * 0.32, 0.10, 0, rideH + bodyH * 0.30, L * 0.503, DARK));
+      for (let i = 0; i < 4; i++) {
+        opaque.push(box(W * 0.47, 0.032, 0.13,
+          0, rideH + bodyH * 0.18 + i * 0.072, L * 0.507, METAL));
+      }
+      opaque.push(box(W * 0.86, 0.06, 0.26, 0, rideH * 0.55, L * 0.455, DARK));
+      for (const side of [-1, 1]) {
+        emissive.push(box(0.26, 0.11, 0.06,
+          side * W * 0.30, rideH + bodyH * 0.64, L * 0.49, 0xfff2d0));
+      }
+
+      // --- tail ---------------------------------------------------------------
+      for (const side of [-1, 1]) {
+        emissive.push(box(W * 0.22, 0.09, 0.05,
+          side * W * 0.24, rideH + bodyH * 0.60, -L * 0.503, 0xff3b30));
+      }
+      opaque.push(panel(W * 0.70, 0.06, 0.30, 0, rideH * 0.70, -L * 0.465, 0.35, DARK));
+      for (const side of [-1, 1]) {
+        opaque.push(cylinder(0.085, 0.26, side * W * 0.24, rideH * 0.92, -L * 0.50, METAL, 8, 'z'));
+      }
+
+      // --- sides --------------------------------------------------------------
+      for (const side of [-1, 1]) {
+        opaque.push(box(0.07, 0.14, L * 0.42, side * (W * 0.5 + 0.01), rideH * 0.78, -L * 0.04, DARK));
+        for (let i = 0; i < 3; i++) {
+          opaque.push(box(0.05, 0.032, 0.20,
+            side * (W * 0.5 + 0.015), rideH + bodyH * 0.58 + i * 0.052, L * 0.06, DARK));
+        }
+        opaque.push(box(0.05, 0.04, 0.12, side * W * 0.40, cabY - 0.16, L * 0.05, DARK));
+        opaque.push(box(0.14, 0.10, 0.05, side * W * 0.47, cabY - 0.14, L * 0.042, roofCol));
+      }
+
+      opaque.push(box(W * 0.16, 0.02, L * 0.34, 0, rideH + bodyH + 0.005, L * 0.24, accent));
+
+      // --- Impact -------------------------------------------------------------
+      if (ram > 0.12) {
+        const barW = W * lerp(0.92, 1.16, ram);
+        const barH = lerp(0.18, 0.40, ram);
+        opaque.push(box(barW, barH, lerp(0.20, 0.42, ram),
+          0, rideH + barH * 0.55, L * 0.50 + 0.16, METAL));
+        for (const side of [-1, 1]) {
+          opaque.push(box(0.10, barH * 0.8, 0.34,
+            side * barW * 0.44, rideH + barH * 0.55, L * 0.44, METAL));
+        }
+        if (ram > 0.5) {
+          const teeth = 5;
+          for (let i = 0; i < teeth; i++) {
+            const tx = lerp(-barW * 0.40, barW * 0.40, i / (teeth - 1));
+            opaque.push(box(0.11, barH * 0.85, 0.34,
+              tx, rideH + barH * 0.62, L * 0.50 + 0.34, 0x9aa1a9));
+          }
+        }
+      }
+
+      // --- Armor --------------------------------------------------------------
+      if (armor > 0.15) {
+        const th = lerp(0.06, 0.19, armor);
+        for (const side of [-1, 1]) {
+          opaque.push(box(th, lerp(0.26, 0.46, armor), L * 0.66,
+            side * (W * 0.5 + th * 0.5), rideH + bodyH * 0.60, -L * 0.03, 0x596068));
+          for (let i = 0; i < 4; i++) {
+            opaque.push(box(th * 0.6, 0.05, 0.05,
+              side * (W * 0.5 + th), rideH + bodyH * 0.60,
+              lerp(-L * 0.30, L * 0.24, i / 3), METAL));
+          }
+        }
+        if (armor > 0.5) {
+          for (const side of [-1, 1]) {
+            opaque.push(box(0.06, 0.50, 0.06, side * W * 0.30, cabY + 0.02, -L * 0.02, METAL));
+            opaque.push(box(0.06, 0.50, 0.06, side * W * 0.30, cabY + 0.02, -L * 0.28, METAL));
+          }
+          opaque.push(box(W * 0.62, 0.06, 0.06, 0, cabY + 0.27, -L * 0.02, METAL));
+          opaque.push(box(W * 0.62, 0.06, 0.06, 0, cabY + 0.27, -L * 0.28, METAL));
+          opaque.push(box(0.06, 0.06, L * 0.28, 0, cabY + 0.27, -L * 0.15, METAL));
+        }
+      }
+
+      // --- Top Speed ----------------------------------------------------------
+      if (speed > 0.22) {
+        const wingW = W * lerp(0.86, 1.02, speed);
+        const wingY = rideH + bodyH + lerp(0.26, 0.52, speed);
+        const wingZ = -L * 0.50 - 0.04;
+        opaque.push(panel(wingW, 0.05, lerp(0.24, 0.40, speed), 0, wingY, wingZ, 0.16, accent));
+        for (const side of [-1, 1]) {
+          opaque.push(box(0.07, Math.max(0.1, wingY - (rideH + bodyH) + 0.06), 0.22,
+            side * wingW * 0.43, (wingY + rideH + bodyH) * 0.5, wingZ, DARK));
+          opaque.push(panel(0.22, 0.03, 0.14,
+            side * W * 0.44, rideH + bodyH * 0.34, L * 0.44, 0.22, accent));
+        }
+        opaque.push(loft([
+          { z: -L * 0.04, w: W * 0.22, h: 0.12, y: cabY + 0.30 },
+          { z: -L * 0.20, w: W * 0.30, h: 0.20, y: cabY + 0.32 },
+        ], DARK));
+      }
+
+      // --- surface detail -----------------------------------------------------
+      // The body loft gives a silhouette; this is what makes it read as a car up
+      // close. Every piece is positioned by querying `bodyHalfWidth`, so nothing
+      // here can float the way the hand-placed trim used to.
+      {
+        // No arch lips here on purpose: the loft already flares at the wheelbase
+        // and there is a single tight lip per wheel further down. A second
+        // multi-segment arch on top of that reads as a black clump standing proud
+        // of the bodywork, which is the artifact that lip replaced.
+
+        // Door shut lines and a shoulder crease, laid on the flank.
+        for (const side of [-1, 1]) {
+          for (const [fz, len] of [[0.16, 0.03], [-0.06, 0.03], [-0.24, 0.03]]) {
+            const yy = rideH + bodyH * 0.55;
+            opaque.push(box(0.02, bodyH * 0.44, len * L,
+              side * (bodyHalfWidth(fz, yy) - 0.01), yy, L * fz, DARK));
+          }
+          // Cooling gills behind the front arch.
+          for (let i = 0; i < 4; i++) {
+            const fz = 0.20 - i * 0.035;
+            const yy = rideH + bodyH * 0.46;
+            opaque.push(panel(0.05, 0.11, 0.03,
+              side * (bodyHalfWidth(fz, yy) - 0.02), yy, L * fz, 0.35, DARK));
+          }
+          // Mirror: stalk plus housing.
+          const my = rideH + bodyH * 0.92;
+          const mx = bodyHalfWidth(0.02, my) + 0.10;
+          opaque.push(cylinder(0.025, 0.20, side * (mx - 0.08), my, L * 0.02, DARK, 8, 'x'));
+          opaque.push(box(0.09, 0.11, 0.16, side * mx, my + 0.04, L * 0.02, accent));
+          // Exhaust tip, tucked under the rear valance where the body actually is.
+          opaque.push(cylinder(0.075, 0.26,
+            side * bodyHalfWidth(-0.46, rideH + bodyH * 0.20) * 0.62,
+            rideH + bodyH * 0.16, -L * 0.485, 0x44494f, 14, 'z'));
+        }
+
+        // Bonnet louvres.
+        for (let i = 0; i < 5; i++) {
+          const fz = 0.30 - i * 0.045;
+          opaque.push(panel(W * 0.34, 0.055, 0.035, 0,
+            rideH + bodyH * 0.90, L * fz, 0.42, DARK));
+        }
+
+        // Roll cage, seen through the glass.
+        const cageY = rideH + bodyH + 0.30;
+        // Kept below the roofline: the hoop was at cageY + 0.28 with the cabin
+        // topping out at cageY + 0.285, so it broke the surface and read as bars
+        // stuck through the roof rather than a cage inside the car.
+        for (const side of [-1, 1]) {
+          opaque.push(cylinder(0.036, 0.50, side * W * 0.30, cageY - 0.06, -L * 0.15, 0x8a9098, 10, 'y'));
+          opaque.push(cylinder(0.036, W * 0.58, 0, cageY + 0.17, -L * 0.15, 0x8a9098, 10, 'x'));
+          opaque.push(cylinder(0.032, 0.42, side * W * 0.28, cageY - 0.02, L * 0.02, 0x8a9098, 10, 'y'));
+        }
+
+        // Front splitter and rear diffuser fins, sized so they sit *under* the
+        // overhangs rather than hanging out past them. At 0.42 deep centred on
+        // -0.47L the fins reached almost a metre behind the tail, which from
+        // behind the car is a row of slabs trailing in mid air.
+        opaque.push(panel(W * 0.92, 0.05, 0.22, 0, rideH + 0.05, L * 0.455, 0.10, DARK));
+        for (let i = -2; i <= 2; i++) {
+          opaque.push(box(0.05, 0.15, 0.26, i * W * 0.17, rideH + 0.09, -L * 0.42, DARK));
+        }
+
+        // Headlight housings, sunk into the nose rather than stuck on it.
+        for (const side of [-1, 1]) {
+          const hy = rideH + bodyH * 0.72;
+          opaque.push(cylinder(0.13, 0.10,
+            side * bodyHalfWidth(0.44, hy) * 0.66, hy, L * 0.455, 0x1b1e22, 14, 'z'));
+        }
+
+        // Suspension, visible up inside the arches.
+        //
+        // An arch with nothing behind it is a hole in the car, and it is the
+        // first thing the eye finds when the wheels are this detailed. Five
+        // members per corner is enough to fill it convincingly.
+        const axles = [[L * 0.32, 1], [-L * 0.30, -1]];
+        for (const [zc] of axles) {
+          for (const side of [-1, 1]) {
+            // Terminate at the wheel centre, not outside it. `W * 0.5 + 0.06` put
+            // every arm, upright and coilover *beyond* the wheels — which are
+            // tucked in at `trackW` — so the suspension stood proud of the
+            // bodywork as a row of grey blocks along the flank. Exactly the
+            // floating-slab artifact this pass was meant to remove.
+            const hubX = side * trackW;
+            const inX = side * W * 0.16;
+            const armY = rideH + 0.16;
+            const topY = rideH + bodyH * 0.44;
+            // Lower and upper wishbones, as pairs of angled tubes.
+            for (const dz of [-0.26, 0.26]) {
+              opaque.push(tube(inX, armY, zc + dz * 0.4, hubX, armY + 0.04, zc + dz, 0.035, 0x24282d));
+              opaque.push(tube(inX, topY, zc + dz * 0.4, hubX, topY - 0.06, zc + dz, 0.028, 0x24282d));
+            }
+            // Coilover.
+            opaque.push(tube(inX + side * 0.05, topY + 0.10, zc, hubX - side * 0.10, armY, zc, 0.055, 0xb5462f));
+            // Upright.
+            opaque.push(box(0.07, 0.34, 0.12, hubX - side * 0.02, (armY + topY) * 0.5, zc, 0x2b3037));
+            // Driveshaft.
+            opaque.push(tube(inX, armY + 0.16, zc, hubX, armY + 0.16, zc, 0.032, 0x33383e));
+          }
+        }
+
+        // Underfloor tray, so the car is not hollow when it leaves the ground.
+        opaque.push(box(W * 0.86, 0.05, L * 0.82, 0, rideH + 0.03, -L * 0.02, 0x1a1d21));
+
+        // Radiator grille, as an actual lattice.
+        {
+          const gy = rideH + bodyH * 0.46;
+          const ghw = bodyHalfWidth(0.46, gy) * 0.82;
+          for (let i = 0; i < 11; i++) {
+            const t = (i / 10) * 2 - 1;
+            opaque.push(box(0.035, bodyH * 0.30, 0.05, t * ghw, gy, L * 0.470, 0x15181c));
+          }
+          for (let i = 0; i < 4; i++) {
+            opaque.push(box(ghw * 2, 0.03, 0.05, 0,
+              gy - bodyH * 0.12 + i * bodyH * 0.08, L * 0.468, 0x15181c));
+          }
+        }
+
+        // Tow hooks, jacking points, aerial — the small hard things that tell the
+        // eye how big the car is.
+        for (const side of [-1, 1]) {
+          opaque.push(cylinder(0.04, 0.10,
+            side * (bodyHalfWidth(-0.20, rideH + bodyH * 0.08) - 0.05),
+            rideH + bodyH * 0.08, -L * 0.20, 0x3a4046, 8, 'x'));
+        }
+        opaque.push(cylinder(0.05, 0.14, bodyHalfWidth(0.42, rideH + bodyH * 0.30) * 0.5,
+          rideH + bodyH * 0.30, L * 0.46, accent, 10, 'z'));
+        opaque.push(tube(-W * 0.22, rideH + bodyH + 0.34, -L * 0.30,
+          -W * 0.24, rideH + bodyH + 0.66, -L * 0.34, 0.014, 0x2a2e33, 6));
+      }
+
+      // --- emissive trim ------------------------------------------------------
+      // Placed *on* the body, by asking the profile where the body actually is.
+      //
+      // These were positioned with hand-guessed constants — the sill strip at
+      // `rideH * 0.52`, which is below the floor, and `W * 0.5` wide, which is
+      // wider than the tapered flank. The result was a lit slab hovering in mid
+      // air beside and under the car, and a tail bar floating above the deck.
+      // Constants cannot track a profile that changes; a query can.
+      for (const side of [-1, 1]) {
+        const sillY = rideH + bodyH * 0.16;
+        emissive.push(box(0.03, 0.025, L * 0.40,
+          side * (bodyHalfWidth(-0.02, sillY) - 0.015), sillY, -L * 0.02, 0xffffff));
+      }
+      {
+        const fz = -0.455;
+        emissive.push(box(bodyHalfWidth(fz, rideH + bodyH * 0.62) * 1.05, 0.05, 0.05,
+          0, rideH + bodyH * 0.62, L * fz - 0.02, 0xffffff));
+      }
+
     }
 
     // --- assemble -----------------------------------------------------------
@@ -1180,11 +1280,16 @@ export class VehicleMesh {
       hullLampGeo = built;
     }
 
-    this.bodyGeo = mergeGeometries(opaque);
+    this.bodyGeo = hull ? hullLampGeo.body : mergeGeometries(opaque);
     // Authored with y = 0 on the road, and now hanging off a node raised to the
     // axle line — so everything inside it drops by exactly that, leaving the car
     // where it was and the pivot where it belongs.
-    this.bodyGeo?.translate(0, -wheelR, 0);
+    //
+    // Only the generated route can be moved this way: a hull's buffers are
+    // shared with every other car of the same shape, so translating them would
+    // move all of them. Those are carried on a node instead, which is also
+    // where their size comes from.
+    if (!hull) this.bodyGeo?.translate(0, -wheelR, 0);
     this.bodyMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
       // A car built out of boxes is watertight and can be culled from behind. A
@@ -1213,9 +1318,24 @@ export class VehicleMesh {
     this.chassis.position.y = wheelR;
     this.group.add(this.chassis);
 
+    // Hull geometry hangs off its own node, which carries the size and undoes
+    // the axle-line lift. Nothing here may be baked into the vertices: they
+    // belong to every car built from the same reference.
+    this.hullRoot = null;
+    if (hull) {
+      this.hullRoot = new THREE.Group();
+      this.hullRoot.scale.set(...hullLampGeo.scale);
+      this.hullRoot.position.y = -wheelR;
+      this.chassis.add(this.hullRoot);
+    }
+    const attach = (m) => {
+      if (!m) return;
+      (this.hullRoot ?? this.chassis).add(m);
+    };
+
     this.bodyMesh = new THREE.Mesh(this.bodyGeo, this.bodyMat);
     this.bodyMesh.castShadow = !!quality?.shadows;
-    this.chassis.add(this.bodyMesh);
+    attach(this.bodyMesh);
 
     this.glassGeo = mergeGeometries(glass);
     this.glassGeo?.translate(0, -wheelR, 0);
@@ -1226,7 +1346,7 @@ export class VehicleMesh {
     // A traced hull carries no separate glass or lamp geometry yet, so this can
     // legitimately be empty — `mergeGeometries` answers null for an empty list.
     this.glassMesh = this.glassGeo ? new THREE.Mesh(this.glassGeo, this.glassMat) : null;
-    if (this.glassMesh) this.chassis.add(this.glassMesh);
+    if (this.glassMesh) attach(this.glassMesh);
 
     // Emissive parts carry their hue in vertex colours — white headlights, red
     // tail lights, element-coloured trim — and the material tints all of them,
@@ -1239,7 +1359,7 @@ export class VehicleMesh {
     // A traced hull carries no separate glass or lamp geometry yet, so this can
     // legitimately be empty — `mergeGeometries` answers null for an empty list.
     this.trimMesh = this.trimGeo ? new THREE.Mesh(this.trimGeo, this.trimMat) : null;
-    if (this.trimMesh) this.chassis.add(this.trimMesh);
+    if (this.trimMesh) attach(this.trimMesh);
 
     // --- lamps --------------------------------------------------------------
     //
@@ -1257,8 +1377,8 @@ export class VehicleMesh {
       ? new THREE.Mesh(hullLampGeo.lampRear, this.lampRearMat) : null;
     for (const m of [this.lampFront, this.lampRear]) {
       if (!m) continue;
-      m.geometry.translate(0, -wheelR, 0);
-      this.chassis.add(m);
+      if (!this.hullRoot) m.geometry.translate(0, -wheelR, 0);
+      attach(m);
     }
 
     // --- wheels -------------------------------------------------------------
@@ -1514,12 +1634,30 @@ export class VehicleMesh {
   }
 
   dispose() {
-    this.lampFront?.geometry.dispose();
-    this.lampRear?.geometry.dispose();
     this.lampFrontMat?.dispose();
     this.lampRearMat?.dispose();
-    for (const geo of [this.bodyGeo, this.glassGeo, this.trimGeo,
-      this.wheelGeo, this.treadGeo, this.hubGeo, this.underglow.geometry]) {
+
+    // Hull geometry outlives the car.
+    //
+    // Positions, normals and lamps are cut once per reference and every car of
+    // that shape points at the same buffers, so disposing them here would take
+    // the shape away from every other car on the grid — and from the next race,
+    // since the cache is keyed on the body itself. Only what this car owns is
+    // released: its colour attribute goes with `bodyGeo`, which is its own
+    // object even when its positions are not.
+    const shared = !!this.hullRoot;
+    const own = [this.glassGeo, this.trimGeo, this.wheelGeo, this.treadGeo,
+      this.hubGeo, this.underglow.geometry];
+    if (!shared) {
+      own.push(this.bodyGeo, this.lampFront?.geometry, this.lampRear?.geometry);
+    } else {
+      // Its own container, holding borrowed attributes: disposing the container
+      // is right and does not touch them.
+      this.bodyGeo?.deleteAttribute('position');
+      this.bodyGeo?.deleteAttribute('normal');
+      own.push(this.bodyGeo);
+    }
+    for (const geo of own) {
       geo?.dispose();
     }
     for (const mat of [this.bodyMat, this.glassMat, this.trimMat,

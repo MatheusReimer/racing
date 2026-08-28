@@ -379,6 +379,30 @@ export class Renderer {
     this._blit(this.compositeMat, null);
   }
 
+  /**
+   * Compile the scene's programs before anything is timed.
+   *
+   * Three compiles a material's program the first time it draws with it, so an
+   * entire scene's worth arrives in whichever frame first shows it — which for
+   * a race is the frame the countdown ends. Asking for them up front costs the
+   * same total and spends it where a pause is already expected.
+   *
+   * A camera is wanted but not required: `compile` uses it to work out which
+   * lights each material will see, and without one the lit variants are still
+   * built, just against the scene's lights alone.
+   */
+  precompile(scene, camera) {
+    if (!scene) return this;
+    const cam = camera ?? new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+    try {
+      this.gl.compile(scene, cam);
+    } catch {
+      // A driver that will not precompile is not a reason to fail to start a
+      // race; it just means the hitch stays where it was.
+    }
+    return this;
+  }
+
   get aspect() {
     return window.innerWidth / Math.max(1, window.innerHeight);
   }

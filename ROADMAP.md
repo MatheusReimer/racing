@@ -33,21 +33,19 @@ Checked against the commits before the bodies, the scale change and the
 collision rewrite — it predates all of them. Worth a look before the roster is
 tuned around anything else.
 
-**`tools/realtime-probe.mjs` still fails at every tier**, though it is a third
-of the way better than it was and the two things it was blamed for turned out to
-be something else each time. The cars appearing to teleport was the renderer
-ignoring the interpolation fraction the loop had always handed it. The p99 of
-four to five seconds was largely the HDR target being disposed and reallocated
-every time the quality governor moved a tier; the composite runs on every tier
-now and p99 is around 1.7 s.
+**`tools/realtime-probe.mjs` still fails at every tier, and the number is not
+what it looks like.** Its p99 is `workMs`, the loop's own timer, which starts at
+the frame's rAF timestamp — so on a GPU-bound machine it counts the wait for the
+*previous* frame's rasterisation as this frame's CPU work. Profiling the frames
+directly says our code costs 1–7 ms in the frames the probe calls two seconds
+long, and that during racing the worst whole frame is 253 ms with a 117 ms
+median. It is software rasterisation of 1280x720, which is what the probe's own
+note warns about, and it will not be improved by making the game do less.
 
-What is left is still a stall rather than slow rendering — 6–8 ms p50 against a
-1.7 s p99 — and it wants a profile rather than another guess. One measured
-contributor is certain: `VehicleMesh` builds the entire generated car, ten
-thousand triangles of boxes and lofts, and throws it away when the body type has
-a hull. Ten milliseconds a car, seventy across a grid of seven, on geometry
-nobody sees. That was a deliberate trade when the alternative was threading a
-condition through four hundred lines, and it has come due.
+What that probe would need to be useful is a signal that separates CPU work from
+present-wait — the loop already tracks `pacing` for exactly that and the verdict
+does not use it. Worth doing before anyone chases this number again: three
+separate sessions have now blamed real bugs on it and found something else.
 
 ---
 

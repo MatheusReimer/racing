@@ -12,7 +12,8 @@ import { BIOMES } from './data/biomes.js';
 import { randomSeedString } from './core/rng.js';
 import { Audio } from './audio/audio.js';
 import { Showroom } from './vehicle/showroom.js';
-import { loadHulls } from './data/bodies/index.js';
+import { loadHulls, HULLS } from './data/bodies/index.js';
+import { warmHulls } from './vehicle/chassis.js';
 
 // Bootstrap and the top-level state machine.
 //
@@ -229,6 +230,16 @@ class Game {
     this.activeModifiers = cfg.modifiers || [];
     for (const m of this.activeModifiers) m.apply?.(this.scene);
 
+    // Build every shader the scene will need, here, before the first frame.
+    //
+    // WebGL compiles a program the first time something is drawn with it, and
+    // "the first time" for most of this scene is the moment the lights go out:
+    // seventeen programs in one frame, which the profiler catches as a single
+    // frame four hundred and forty-five milliseconds long, right when the
+    // player has just been told to go. Doing it now moves that cost into the
+    // load rather than into the start, and the load is already a pause.
+    this.renderer.precompile(this.scene.scene, this.scene.camera?.camera ?? null);
+
     this.hud.setSkills(this.run.build.skills);
     this.hud.setLapTotal(cfg.laps);
     this.hud.show();
@@ -361,6 +372,8 @@ class Game {
 // Bodies before the first car. `VehicleMesh` is built mid-race when a rival
 // spawns, so it has to stay synchronous; fetching here means it always is.
 await loadHulls();
+// And cut them, so the first race does not pay for it on the grid.
+warmHulls(HULLS);
 
 const game = new Game();
 game.start();

@@ -115,9 +115,11 @@ export function showGarage(game, mode = 'vehicles', aspect = 1400 / 620, opts = 
     scene.add(mesh.group);
     meshes.push(mesh);
 
-    const tris = ((mesh.bodyGeo?.index.count ?? 0)
-      + (mesh.glassGeo?.index.count ?? 0)
-      + (mesh.trimGeo?.index.count ?? 0)) / 3;
+    // Indexed or not: a generated body is merged and indexed, a hull is
+    // de-indexed by construction and shares its buffers with every other car of
+    // that shape.
+    const count = (g) => (g ? (g.index?.count ?? g.attributes.position.count) : 0);
+    const tris = (count(mesh.bodyGeo) + count(mesh.glassGeo) + count(mesh.trimGeo)) / 3;
     rows.push({
       label: spec.label,
       tris,
