@@ -46,6 +46,10 @@ const MAX_IMPACT_SPIN = 4.5;
 // settle, which is long enough that being spun is a thing that happened to you
 // and short enough that it is not the end of the race.
 const IMPACT_SPIN_DECAY = 2.4;
+// How firmly a barrier contact hands the car back pointing where it is going.
+// Firm on purpose: a wall costing you time and paint is a mistake, a wall
+// spinning you is the end of the race, and only one of those is interesting.
+const WALL_STRAIGHTEN = 5.0;
 // The jolt spring, in radians per second. Fast: a car body settles after a hit
 // in a couple of tenths, not in a lazy wallow.
 const JOLT_FREQ = 22;
@@ -111,6 +115,11 @@ export class VehicleBody {
 
     /** Seconds of asking the car to move while it does not. */
     this.stuckFor = 0;
+
+    /** Seconds left of a barrier contact straightening the car out. */
+    this.wallSteady = 0;
+    /** The line of the rail last touched, which is what it straightens to. */
+    this.wallYaw = null;
 
     // Last frame's pose, for drawing between two simulation steps.
     this.px = 0;
@@ -406,6 +415,34 @@ export class VehicleBody {
 
     this.x += this.vx * dt;
     this.z += this.vz * dt;
+
+    // Coming off a wall pointed where you are going.
+    //
+    // The barrier response reflects the component going into the rail and
+    // scrubs what runs along it, which is right — but it leaves the car with an
+    // enormous slip angle, and the tyre model spends the next second turning
+    // that into rotation. So a scrape at speed ended with the car swapping ends
+    // a full second after it had stopped touching anything, which is not what
+    // the wall did and not what any of the games this one is chasing do with a
+    // wall: there you lose time and paint, you get straightened out, and you go.
+    //
+    // Pulled toward the wall's own line, remembered from the contact, not
+    // toward the direction of travel. Travel is deflected a little more on each
+    // step still in contact, so chasing it compounds: a five-degree brush came
+    // out twenty degrees rotated, which is worse than what it replaced. The
+    // wall's line does not move, and ending up parallel to the thing you
+    // scraped is what scraping is.
+    if (this.wallSteady > 0) {
+      this.wallSteady -= dt;
+      if (this.wallYaw != null) {
+        let d = this.wallYaw - this.yaw;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        this.yaw = wrapAngle(this.yaw + d * (1 - Math.exp(-WALL_STRAIGHTEN * dt)));
+      }
+      this.yawRate *= Math.exp(-WALL_STRAIGHTEN * dt);
+      this.impactSpin *= Math.exp(-WALL_STRAIGHTEN * dt);
+    }
 
     // Genuinely stuck: asking the car to go and it is not going.
     //

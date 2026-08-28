@@ -10,7 +10,7 @@ import { triCount } from '../src/world/shapes.js';
 import { BIOMES } from '../src/data/biomes.js';
 import { RNG } from '../src/core/rng.js';
 import { generateProps, collidableProps } from '../src/world/scatter.js';
-import { generateTrack } from '../src/track/track.js';
+import { generateTrack, BARRIER_RAIL_OFFSET } from '../src/track/track.js';
 
 let problems = 0;
 
@@ -130,7 +130,7 @@ for (const [name, def] of Object.entries(PROP_TYPES)) {
 // too — they are put at the kerb facing the street on purpose and their bulk
 // runs away from it, so their radius is not a reach into the road.
 {
-  console.log('\nNothing standing in the road:\n');
+  console.log('\nNothing standing in the road, which ends at the rail:\n');
   const scratch = {};
   for (const biome of BIOMES) {
     const track = generateTrack(new RNG(`ROAD-${biome.id}`), biome, {});
@@ -154,7 +154,7 @@ for (const [name, def] of Object.entries(PROP_TYPES)) {
             const lz = v * def.frontage.width * (p.scale ?? 1);
             const sm = track.sample(p.x + c * lx + sn * lz, p.z - sn * lx + c * lz, scratch);
             if (sm.halfWidth == null) continue;
-            into = Math.max(into, sm.halfWidth - Math.abs(sm.side));
+            into = Math.max(into, sm.halfWidth + BARRIER_RAIL_OFFSET - Math.abs(sm.side));
           }
         }
       } else {
@@ -162,7 +162,7 @@ for (const [name, def] of Object.entries(PROP_TYPES)) {
         if (!reach) continue;
         const sm = track.sample(p.x, p.z, scratch);
         if (sm.halfWidth == null) continue;
-        into = (sm.halfWidth + reach * (p.scale ?? 1)) - Math.abs(sm.side);
+        into = (sm.halfWidth + BARRIER_RAIL_OFFSET + reach * (p.scale ?? 1)) - Math.abs(sm.side);
       }
       if (into > 0) {
         count++;

@@ -98,7 +98,15 @@ export function generateProps(rng, track, biome, opts = {}) {
   const landsOnRoad = (x, z, clearance) => {
     const sm = track.sample(x, z, scratch);
     if (sm.halfWidth == null || sm.side == null) return false;
-    return Math.abs(sm.side) < sm.halfWidth + clearance;
+    // The road ends at the rail, not at the tarmac.
+    //
+    // This measured against `halfWidth`, which is the painted surface, and the
+    // red-and-white barrier stands 2.3 m outside that — so a prop could clear
+    // the asphalt by its whole footprint and still be planted in, or through,
+    // the wall. Anything sharing space with the barrier reads as being on the
+    // track, because from the driver's seat the barrier *is* where the track
+    // ends.
+    return Math.abs(sm.side) < sm.halfWidth + BARRIER_RAIL_OFFSET + clearance;
   };
 
   const place = (type, s, lateral, extra = {}) => {

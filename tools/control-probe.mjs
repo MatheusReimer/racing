@@ -21,6 +21,7 @@ import { RaceSim } from '../src/race/sim.js';
 import { Build } from '../src/build/build.js';
 import { BIOMES } from '../src/data/biomes.js';
 import { instantiateSkill } from '../src/data/skills.js';
+import { VEHICLES } from '../src/data/vehicles.js';
 
 const DT = 1 / 60;
 const SEEDS = Number(process.argv[2] || 12);
@@ -262,6 +263,62 @@ if (problems.length) {
       worst = Math.max(worst, Math.hypot(r.body.x - start[j].x, r.body.z - start[j].z));
     });
   }
+// --- a wall costs you time, not the race -----------------------------------
+//
+// Hitting the rail at an angle used to hand the car back facing the wrong way:
+// a 25-degree strike at 160 finished 138 degrees off the road and a 45-degree
+// one finished 164, which is backwards. The barrier never applied any rotation
+// — it reflected the component going into the rail and left the car with a huge
+// slip angle, and the tyre model spent the next second turning that into a
+// spin, arriving well after the contact was over. A wall is meant to cost time
+// and paint.
+{
+  const wrapPi = (a) => {
+    let v = a;
+    while (v > Math.PI) v -= Math.PI * 2;
+    while (v < -Math.PI) v += Math.PI * 2;
+    return v;
+  };
+  let worst = 0;
+  let worstAt = '';
+  for (const deg of [5, 12, 25, 45]) {
+    for (const kmh of [80, 160]) {
+      const sim = new RaceSim({
+        seed: 'RAIL', biome: BIOMES[0], playerBuild: new Build(VEHICLES[1].id),
+        config: { laps: 1, rivals: 0, difficulty: 1, countdown: 0 },
+      });
+      sim.state = 'racing';
+      const r = sim.player;
+      const b = r.body;
+      const s0 = sim.track.startS + 200;
+      const hw = sim.track.halfWidthAt(s0);
+      const p = sim.track.path.offsetPoint(s0, hw * 0.7, { x: 0, y: 0, z: 0 });
+      const yaw0 = sim.track.path.yawAt(s0) - (deg * Math.PI) / 180;
+      b.place(p.x, p.z, yaw0);
+      b.vx = Math.sin(yaw0) * (kmh / 3.6);
+      b.vz = Math.cos(yaw0) * (kmh / 3.6);
+      sim.track.sample(b.x, b.z, r.sample);
+      b.y = r.sample.groundY;
+      for (let i = 0; i < 90; i++) {
+        r.input.throttle = 1;
+        r.input.brake = 0;
+        r.input.steer = 0;
+        sim.update(DT);
+      }
+      // Against the road where the car ended up: scraping a curving wall turns
+      // the car because the wall turns, and that is following the track.
+      sim.track.sample(b.x, b.z, r.sample);
+      const off = Math.abs(wrapPi(b.yaw - sim.track.path.yawAt(r.sample.s))) * 180 / Math.PI;
+      if (off > worst) { worst = off; worstAt = `${deg}deg at ${kmh}km/h`; }
+    }
+  }
+  // Forty-five degrees off is very much in trouble and still recoverable.
+  // Ninety is facing the barrier; a hundred and thirty is facing the field.
+  console.log(`\nworst heading error after a rail strike: ${worst.toFixed(0)} deg (${worstAt}) `
+    + (worst > 45 ? '(THE WALL IS SPINNING CARS)' : '(ok)'));
+  if (worst > 45) process.exitCode = 1;
+}
+
   console.log(`
 grid drift during countdown: ${worst.toFixed(3)} m ` +
     (worst < 0.05 ? '(holds)' : '(MOVES BEFORE THE START)'));

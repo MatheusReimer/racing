@@ -854,11 +854,14 @@ export class RaceSim {
       // still smoothed; sitting against one is left entirely to the driver.
       const SCRAPE = 9;
       const along = Math.min(1, Math.abs(vt) / SCRAPE);
+      // And keep straightening it for a moment after the rail is behind it: the
+      // spin a wall produces arrives after the contact, not during it.
+      b.wallSteady = Math.max(b.wallSteady ?? 0, 0.55 * along);
       if (along > 0.01) {
-        b.yawRate *= Math.exp(-6 * along * dt);
         const wallYaw = Math.atan2(tx * Math.sign(vt || 1), tz * Math.sign(vt || 1));
-        const toWall = angleDelta(wallYaw, b.yaw);
-        b.yaw = wrapAngle(b.yaw + toWall * (1 - Math.exp(-4 * along * dt)));
+        b.yawRate *= Math.exp(-6 * along * dt);
+        b.yaw = wrapAngle(b.yaw + angleDelta(wallYaw, b.yaw) * (1 - Math.exp(-4 * along * dt)));
+        b.wallYaw = wallYaw;
       }
 
       this._applySpeedFloor(r, speedBefore);
@@ -994,14 +997,42 @@ export class RaceSim {
         this._applySpeedFloor(b, bSpeedBefore);
 
         const approach = -closing;
-        if (approach < 3) continue;
 
+        // Every contact unsettles both cars, whether or not it hurts them.
+        //
+        // Two cars running abreast at the same speed that touch lose almost no
+        // speed, and that is not a bug — there is no sliding between them, so
+        // there is nothing for friction to take. But it left a side-swipe
+        // costing literally nothing: the pair sprang apart, both still at a
+        // hundred and eight, with no sound, no shudder and no consequence, and
+        // that is what "the cars go sideways but it does not feel like a
+        // collision" was. Real sheet metal at that speed puts a car off its
+        // line. So the tyres are upset in proportion to how hard the contact
+        // was, which costs grip and steering for a moment rather than speed
+        // outright — and it is the impulse that decides, not the closing speed,
+        // because a heavy car leaning on a light one is a big impulse at
+        // walking pace.
+        const bite = clamp01(Math.abs(jn) / 9000);
+        for (const [x, other] of [[a, b], [b, a]]) {
+          const upset = 1 - 0.45 * bite * (other.body.p.mass / 1200);
+          x.body.gripPenalty = Math.min(x.body.gripPenalty, clamp(upset, 0.45, 1));
+          x.body.gripPenaltyTimer = Math.max(x.body.gripPenaltyTimer, 0.25 + bite * 0.5);
+        }
+
+        // And it is heard and felt from the first touch, not from the third.
+        // The old floor of three metres a second silenced exactly the contact
+        // that happens most: two cars fighting for the same line.
+        if (approach > 0.6 || bite > 0.08) {
+          this.onCarHit?.(a, b, nx, nz, approach);
+          this.events?.emit('audio:impact', {
+            strength: Math.max(approach, bite * 12), isPlayer: a.isPlayer || b.isPlayer,
+          });
+        }
+
+        // Damage still needs a real hit behind it.
+        if (approach < 3) continue;
         this._applyRamDamage(a, b, nx, nz, approach);
         this._applyRamDamage(b, a, -nx, -nz, approach);
-        this.onCarHit?.(a, b, nx, nz, approach);
-        this.events?.emit('audio:impact', {
-          strength: approach, isPlayer: a.isPlayer || b.isPlayer,
-        });
       }
     }
   }
