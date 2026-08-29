@@ -117,4 +117,57 @@ if (ok && surplus > TARGET) {
   console.log('  Above target: a greedy run still ends holding several times what');
   console.log('  it managed to spend. More to spend it on is the fix, not lower pay.');
 }
-process.exit(ok ? 0 : 1);
+// --- half the money buys half the job --------------------------------------
+//
+// The rule the whole garage rests on: a repair is sold pro rata, so a player
+// who can pay 50% of the price gets 50% of the repair. It is the one place a
+// run can be salvaged when the money is not there, and an all-or-nothing
+// regression here would turn the node that exists to help a broken car into
+// the node that turns it away.
+console.log('\nHalf the money buys half the job:\n');
+let ruleProblems = 0;
+{
+  const probe = (fracOfPrice) => {
+    const run = new Run({ seed: 'prorata', vehicleId: 'hatch' });
+    run.durability = run.maxDurability * 0.3;
+    const quote = run.repairQuote();
+    run.scrap = Math.round(quote.price * fracOfPrice);
+    // Standing in the garage, which a fresh Run is not — it starts on the map,
+    // so without this the "node intact" check was reading the state the run
+    // began in rather than the state the refusal left it in.
+    run.state = 'rest';
+    const before = run.durability;
+    const r = run.restRepair();
+    return {
+      quote,
+      paidFrac: fracOfPrice,
+      healedFrac: (run.durability - before) / quote.amount,
+      ok: r.ok,
+      spentNode: run.state !== 'rest',
+      text: r.text || r.reason,
+    };
+  };
+
+  for (const f of [1, 0.75, 0.5, 0.25]) {
+    const r = probe(f);
+    // A percent of slack for the integer scrap the price is rounded to.
+    const off = Math.abs(r.healedFrac - f);
+    const good = r.ok && off <= 0.02;
+    if (!good) ruleProblems++;
+    console.log(`  paid ${(f * 100).toFixed(0).padStart(3)}% of the price`
+      + `  ->  ${(r.healedFrac * 100).toFixed(0).padStart(3)}% of the repair`
+      + `   ${good ? 'ok' : 'FAIL'}`);
+  }
+
+  // And nothing at all is a refusal, not a transaction: the garage is a whole
+  // map node, and spending it to be handed two points of Durability is worse
+  // for the player than being turned away while they can still go elsewhere.
+  const broke = probe(0);
+  const refused = !broke.ok && !broke.spentNode;
+  if (!refused) ruleProblems++;
+  console.log(`  paid   0% of the price  ->  refused, node intact`
+    + `   ${refused ? 'ok' : 'FAIL'}`);
+}
+if (ruleProblems) console.log(`\n  ${ruleProblems} problem(s) with the pro-rata rule`);
+
+process.exit(ok && !ruleProblems ? 0 : 1);

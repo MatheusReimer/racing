@@ -751,20 +751,34 @@ export class Screens {
     body.appendChild(el('div', 'section-label', 'One job'));
     const list = el('div', 'choice-list');
     const quote = run.repairQuote();
+    // What the money on hand actually covers. A repair is sold pro rata, so
+    // the honest number to show is not the full job's price but the share of
+    // the job this player is about to get — worked out here rather than
+    // discovered in the toast afterwards.
+    const share = quote.price > 0 ? Math.min(1, run.scrap / quote.price) : 1;
+    const partial = share < 1 && share >= 0.05;
+    const broke = quote.amount > 0 && share < 0.05;
+
     const repair = el('button', 'choice');
     repair.appendChild(el('div', 'lbl', 'Repair'));
     repair.appendChild(el('div', 'det', quote.amount <= 0
       ? 'Nothing to put right.'
-      : `Restore ${Math.round(quote.amount)} Durability.`
-        + (run.scrap >= quote.price
-          ? '' : ` Your ${run.scrap} buys what it buys.`)));
+      : broke
+        ? `${quote.price} scrap for the job. You have ${run.scrap}.`
+        : partial
+          ? `${Math.round(share * 100)}% of the job — ${Math.round(quote.amount * share)}`
+            + ` of ${Math.round(quote.amount)} Durability, which is all your`
+            + ` ${run.scrap} covers.`
+          : `Restore ${Math.round(quote.amount)} Durability.`));
     // The price sits with the thing, not in a corner: a garage is a shop and
     // this was the one node in the game that took no money at all.
-    if (quote.amount > 0) {
-      repair.appendChild(el('div', 'price', `${Math.min(quote.price, run.scrap)} scrap`));
+    if (quote.amount > 0 && !broke) {
+      repair.appendChild(el('div', 'price',
+        `${Math.min(quote.price, run.scrap)} scrap`));
       repair.onclick = onRepair;
     } else {
       repair.classList.add('disabled');
+      if (broke) repair.classList.add('unaffordable');
     }
     list.appendChild(repair);
 

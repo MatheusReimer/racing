@@ -360,8 +360,25 @@ export class Run {
     const quote = this.repairQuote();
     if (quote.amount <= 0) return { ok: false, reason: 'Nothing to put right.' };
 
-    // What the money covers, down to nothing.
+    // Pro rata, never all-or-nothing.
+    //
+    // Half the price buys half the repair. A garage that turned away a broken
+    // car because the wallet was short would be the one node in the run that
+    // punishes you for needing it, and the player who most needs it is exactly
+    // the one who cannot pay in full.
     const share = Math.min(1, this.scrap / Math.max(1, quote.price));
+
+    // But nothing at all is a refusal, not a transaction. Below this the stop
+    // is not worth the node it costs — the garage is a whole map node, and
+    // spending it to be told you bought two points of Durability, or none, is
+    // worse for the player than being turned away while they still have the
+    // choice to go somewhere else.
+    if (share < 0.05) {
+      return { ok: false, reason: this.scrap > 0
+        ? `${quote.price} scrap for a repair. You have ${this.scrap}.`
+        : 'No scrap. Nothing anyone can do.' };
+    }
+
     const paid = Math.min(this.scrap, quote.price);
     const healed = this.repairPlayer(quote.amount * share);
     this.scrap -= paid;
@@ -370,7 +387,8 @@ export class Run {
       ok: true,
       text: share >= 1
         ? `Repaired ${Math.round(healed)} Durability for ${paid} scrap.`
-        : `${paid} scrap bought ${Math.round(healed)} Durability — all you could afford.`,
+        : `${paid} scrap bought ${Math.round(healed)} Durability`
+          + ` — ${Math.round(share * 100)}% of the job, which is what it covered.`,
     };
   }
 

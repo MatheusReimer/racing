@@ -182,5 +182,10 @@ export function servePit(service, racer, scrap) {
 
   const paid = Math.min(scrap, Math.ceil(quote.price * (amount / quote.amount)));
   const text = service.apply(racer, amount);
-  return { paid, text: share >= 1 ? text : `${text} — all ${paid} scrap would buy` };
+  // The same phrasing the garage uses, because it is the same rule: the share
+  // of the price you could pay is the share of the job you get.
+  return {
+    paid,
+    text: share >= 1 ? text : `${text} — ${Math.round(share * 100)}%`,
+  };
 }
