@@ -290,9 +290,21 @@ export function damageLevel(healthFrac) {
 }
 const HULL_DARK = 0x15181c;
 const HULL_CHROME = 0xb9bec6;
-// Lamp colours. Headlights are warm rather than white — a cold headlight reads
-// as a highlight on paint, and the whole point of these is that they do not.
-const LAMP_HEAD = 0xfff0cc;
+// Lamp colours.
+//
+// A headlight has to be the brightest thing on the car or it is not a light.
+// These are drawn unlit and `toneMapped: false`, so their value is clamped at
+// one — while the bodywork goes through ACES and a white car lands just under
+// it. That leaves a lamp no headroom at all to be brighter than the paint
+// beside it, and at that point its warmth stops reading as warm light and
+// starts reading as dirt: 0xfff0cc has its blue at eighty per cent, which
+// against white paint is visibly tan, and on the pale cars it looked like
+// masking tape over the lenses.
+//
+// Still warm, because a cold headlight reads as a highlight on paint — but
+// warm by a fifth of what it was, which is the difference between a lamp and
+// a stain.
+const LAMP_HEAD = 0xfff6e8;
 const LAMP_TAIL = 0x5a0f0a;      // running: present, not shouting
 const LAMP_BRAKE = 0xff2a18;
 const LAMP_REVERSE = 0xeef2ff;
@@ -306,12 +318,23 @@ const LAMP_REVERSE = 0xeef2ff;
  * an approximate one — it is the single thing the driver behind you reads — so
  * where the reference is silent a pair is placed from the car's own shape.
  *
- * The patch is put where a lamp goes: outboard, in the band between a third and
- * two thirds of the way up that end, and pushed to whatever depth the bodywork
- * actually reaches across that patch rather than to the tip of the nose, which
- * on a curved front would leave it hanging in the air off the corners.
+ * The patch is a *fitted mesh*, not a rectangle.
+ *
+ * It used to be one flat quad spanning the outboard third of the car's width,
+ * pushed to the depth the bodywork reached anywhere across it. That cannot fit
+ * a car: a nose and a tail are curved across exactly that span, so the quad
+ * touched the panel at its foremost point and stood off it everywhere else —
+ * on the roadster and the rally car the corners hung clear of the bumper and
+ * read as two loose rectangles floating beside it, at both ends.
+ *
+ * So the patch is subdivided and every node is dropped onto the hull's own
+ * surface: one pass over the reference builds the forward-most depth at each
+ * node, and the mesh takes those depths. It follows the curvature because it
+ * is made of the curvature. Nodes the bodywork never reaches have no depth,
+ * and the quads around them are simply not emitted — which is what stops a
+ * lamp wrapping around a corner that is not there.
  */
-function synthLamps(hull, sx, sy, sz, atFront) {
+function synthLamps(hull, atFront) {
   const { positions } = hull;
   const sign = atFront ? 1 : -1;
   const endZ = sign * hull.length * 0.5;
@@ -328,31 +351,96 @@ function synthLamps(hull, sx, sy, sz, atFront) {
   }
   if (!Number.isFinite(y0) || x1 <= 0) return null;
 
+  // Where a lamp goes: outboard, in the band between a third and two thirds of
+  // the way up that end.
   const loY = y0 + (y1 - y0) * 0.34;
   const hiY = y0 + (y1 - y0) * 0.58;
   const inX = x1 * 0.40;
   const outX = x1 * 0.86;
 
+  // Six by four quads. Coarser than it could be on purpose: the reference is
+  // decimated to fifty thousand triangles for the whole car, so a patch this
+  // size holds only a few dozen vertices, and a finer grid simply means more
+  // nodes that catch none of them.
+  const GX = 6;
+  const GY = 4;
+  const NX = GX + 1;
+  const NY = GY + 1;
+  const cw = (outX - inX) / GX;
+  const ch = (hiY - loY) / GY;
+  // A hair proud, no more. What keeps the panel from drawing over the top of
+  // this is the polygon offset on the lamp material, not distance.
+  const LIFT = 0.002;
+
   const out = [];
   for (const side of [-1, 1]) {
-    // How far forward the bodywork reaches across this patch.
-    let depth = -Infinity;
+    const depth = new Float32Array(NX * NY).fill(-Infinity);
     for (let i = 0; i < positions.length; i += 3) {
       const px = positions[i] * side;
       const py = positions[i + 1];
-      if (px < inX || px > outX || py < loY || py > hiY) continue;
+      if (px < inX - cw || px > outX + cw) continue;
+      if (py < loY - ch || py > hiY + ch) continue;
+      const gx = Math.round((px - inX) / cw);
+      const gy = Math.round((py - loY) / ch);
+      if (gx < 0 || gx >= NX || gy < 0 || gy >= NY) continue;
       const pz = positions[i + 2] * sign;
-      if (pz > depth) depth = pz;
+      const k = gy * NX + gx;
+      if (pz > depth[k]) depth[k] = pz;
     }
-    if (!Number.isFinite(depth)) continue;
-    const z = (depth - 0.01) * sign;
-    const a = [side * inX, loY, z];
-    const b = [side * outX, loY, z];
-    const c = [side * outX, hiY, z];
-    const d = [side * inX, hiY, z];
-    // Wound so the lamp faces out of the end it is on.
-    const quad = (side * sign > 0) ? [a, b, c, a, c, d] : [a, c, b, a, d, c];
-    for (const q of quad) out.push(q[0] * sx, (q[1] - hull.ground) * sy, q[2] * sz);
+
+    // Close the gaps the decimation left.
+    //
+    // A node with no sample means the reference was coarse there, not that the
+    // car has a hole in it — but the first version dropped every quad touching
+    // one, so a lamp came out as a grid of scattered rectangles with the
+    // grille showing between them. Filling from filled neighbours rebuilds a
+    // continuous lens. Two passes only: that reaches across the gaps the
+    // decimation makes and stops well short of inventing bodywork where the
+    // patch genuinely runs off the corner of the car.
+    for (let pass = 0; pass < 2; pass++) {
+      const before = depth.slice();
+      for (let gy = 0; gy < NY; gy++) {
+        for (let gx = 0; gx < NX; gx++) {
+          const k = gy * NX + gx;
+          if (Number.isFinite(before[k])) continue;
+          let sum = 0;
+          let n = 0;
+          for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+            const nx = gx + dx;
+            const ny = gy + dy;
+            if (nx < 0 || nx >= NX || ny < 0 || ny >= NY) continue;
+            const j = ny * NX + nx;
+            if (Number.isFinite(before[j])) { sum += before[j]; n++; }
+          }
+          if (n) depth[k] = sum / n;
+        }
+      }
+    }
+
+    const vx = (gx) => side * (inX + gx * cw);
+    const vy = (gy) => loY + gy * ch;
+    const vz = (k) => (depth[k] + LIFT) * sign;
+
+    for (let gy = 0; gy < GY; gy++) {
+      for (let gx = 0; gx < GX; gx++) {
+        const k00 = gy * NX + gx;
+        const k10 = k00 + 1;
+        const k01 = k00 + NX;
+        const k11 = k01 + 1;
+        // A quad is emitted only where the reference put bodywork under all
+        // four of its corners.
+        if (!Number.isFinite(depth[k00]) || !Number.isFinite(depth[k10])
+          || !Number.isFinite(depth[k01]) || !Number.isFinite(depth[k11])) continue;
+
+        const a = [vx(gx), vy(gy), vz(k00)];
+        const b = [vx(gx + 1), vy(gy), vz(k10)];
+        const c = [vx(gx + 1), vy(gy + 1), vz(k11)];
+        const d = [vx(gx), vy(gy + 1), vz(k01)];
+        // Wound so the lamp faces out of the end it is on.
+        const quad = (side * sign > 0) ? [a, b, c, a, c, d] : [a, c, b, a, d, c];
+        for (const q of quad) out.push(q[0], q[1] - hull.ground, q[2]);
+      }
+    }
   }
   return out.length ? out : null;
 }
@@ -434,9 +522,8 @@ function hullShared(hull) {
     lampFront: null,
     lampRear: null,
   };
-  // Where the reference marked too few faces to be a lamp, make a pair. Built
-  // at native size like everything else here, because the node carries the
-  // scale now.
+  // How many faces a reference has to mark before they count as a lamp rather
+  // than as a stray transparent trim piece.
   const MIN_FACES = 24;
   const loose = (arr) => {
     if (!arr) return null;
@@ -535,10 +622,13 @@ function hullShared(hull) {
   shared.ao = bakeCavity(shared);
   shared.bounds = hullBounds(shared);
 
+  // Where the reference marked too few faces to be a lamp, fit a pair to the
+  // bodywork. Built at native size like everything else here, because the node
+  // carries the scale now.
   shared.lampFront = front.length / 3 >= MIN_FACES
-    ? cut(front) : loose(synthLamps(hull, 1, 1, 1, true));
+    ? cut(front) : loose(synthLamps(hull, true));
   shared.lampRear = rear.length / 3 >= MIN_FACES
-    ? cut(rear) : loose(synthLamps(hull, 1, 1, 1, false));
+    ? cut(rear) : loose(synthLamps(hull, false));
   hullCache.set(hull, shared);
   return shared;
 }
@@ -2072,8 +2162,22 @@ export class VehicleMesh {
       }
     }
 
-    this.lampFrontMat = new THREE.MeshBasicMaterial({ color: LAMP_HEAD, toneMapped: false });
-    this.lampRearMat = new THREE.MeshBasicMaterial({ color: LAMP_TAIL, toneMapped: false });
+    // Offset in depth rather than in space.
+    //
+    // A lamp is a patch lying on the bodywork, and the bodywork curves under
+    // it: however finely the patch is fitted, the panel bulges above the flat
+    // of each quad somewhere and punches through, which reads as a lamp with
+    // holes torn in it. Lifting the patch further off the panel trades that
+    // for a lamp visibly standing proud. Polygon offset is the tool meant for
+    // exactly this — the patch keeps its true position and simply wins the
+    // depth test against the surface it is lying on.
+    const decal = { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 };
+    this.lampFrontMat = new THREE.MeshBasicMaterial({
+      color: LAMP_HEAD, toneMapped: false, ...decal,
+    });
+    this.lampRearMat = new THREE.MeshBasicMaterial({
+      color: LAMP_TAIL, toneMapped: false, ...decal,
+    });
     this.lampFront = hullLampGeo?.lampFront
       ? new THREE.Mesh(hullLampGeo.lampFront, this.lampFrontMat) : null;
     this.lampRear = hullLampGeo?.lampRear
