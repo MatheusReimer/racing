@@ -1119,6 +1119,10 @@ export class VehicleMesh {
       ? hull.width * (1 + (bulk - 0.35) * 0.10)
       : lerp(1.95, 2.65, bulk) * BT.width;
     const rideH = (lerp(0.34, 0.46, bulk) - speed * 0.06) * BT.ride;
+    // What this car takes up on the road, for anything that needs to know
+    // without measuring geometry — the group's bounding box includes an
+    // underglow plane wider than the car and answers the wrong question.
+    this.footprint = { length: L, width: W };
     const bodyH = lerp(0.62, 0.78, bulk) * BT.height;
     this.length = L;
     this.width = W;

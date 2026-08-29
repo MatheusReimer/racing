@@ -8,6 +8,8 @@ import { FX } from '../fx/fx.js';
 import { PropsMesh } from '../world/propsmesh.js';
 import { TrafficMesh } from './trafficmesh.js';
 import { StreetLighting } from '../fx/lights.js';
+import { ContactShadows } from '../fx/contact.js';
+import { TRAFFIC_FOOTPRINTS } from './trafficmesh.js';
 
 export { makeDefaultRivalBuild } from './sim.js';
 
@@ -36,6 +38,10 @@ export class Race extends RaceSim {
       : null;
     this.camera = new ChaseCamera(this._aspect());
     this.fx = new FX(this.scene, events, quality.settings);
+    // Racers and civilians both; a civilian without one is the pasted-on
+    // sticker this exists to fix, and there are more of them than of us.
+    this.contact = new ContactShadows(this.scene, 8 + this.traffic.length);
+    this.contact.applyQuality(quality.settings);
     this._groundAt = (x, z) => this.track.groundAt(x, z);
     this.fx.setFog(biome.palette.fogDensity ?? 0.004);
 
@@ -144,13 +150,21 @@ export class Race extends RaceSim {
     this.propsMesh.syncDestroyed();
     this.trafficMesh?.sync(alpha);
     this.lighting?.update(this.racers, this.traffic, this._groundAt);
+    this.contact.update(this.racers, this.traffic,
+      (c) => this.meshes.get(c)?.footprint ?? TRAFFIC_FOOTPRINTS[c.kind ?? 0],
+      this._groundAt, this.sky.material.uniforms.uSunDir.value);
     this.fx.update(dt, this.racers, this.combat, this.camera.camera.position);
     this.sky.update(dt, this.camera.camera.position);
     return this.camera.camera;
   }
 
   postFx() {
-    return this.camera.postFx(this.player.body);
+    // The camera's speed-driven terms, plus the district's grade. The grade is
+    // constant for a race, but it rides here rather than being pushed once so
+    // there is a single path into the composite and no state to keep in step.
+    const fx = this.camera.postFx(this.player.body);
+    fx.grade = this.biome.palette.grade ?? null;
+    return fx;
   }
 
   resize(aspect) {
@@ -160,9 +174,11 @@ export class Race extends RaceSim {
   applyQuality(q) {
     this.sky.configureShadows(q);
     this.fx.applyQuality(q);
+    this.contact.applyQuality(q);
   }
 
   dispose() {
+    this.contact.dispose();
     this.lighting?.dispose();
     this.fx.dispose();
     this.propsMesh.dispose();

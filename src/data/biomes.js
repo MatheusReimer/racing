@@ -42,6 +42,9 @@ export const BIOMES = [
       sun: '#ffd9a0',
       sunAngle: 0.46,
       ambient: '#6b5540',
+          // Bleached and dusty: the blacks lifted a touch so nothing is truly dark
+      // under that haze, and the blue pulled out of the whites.
+      grade: { lift: [0.012, 0.008, 0.000], gamma: [1.02, 1.00, 0.98], gain: [1.03, 1.00, 0.95] },
     },
 
     props: ['wreck', 'barrel', 'sign', 'rock', 'tire_stack'],
@@ -74,6 +77,8 @@ export const BIOMES = [
       sun: '#c9d4e0',
       sunAngle: 0.58,
       ambient: '#3c444e',
+          // Cold and sooty. Green held back so the rust does not turn olive.
+      grade: { lift: [0.000, 0.004, 0.014], gamma: [0.98, 1.00, 1.03], gain: [0.98, 0.99, 1.05] },
     },
 
     props: ['container', 'crane', 'barrier', 'pipe', 'sign'],
@@ -106,6 +111,8 @@ export const BIOMES = [
       sun: '#fff0c9',
       sunAngle: 0.62,
       ambient: '#a8865c',
+          // Hard sun: crushed blacks, warm highlights, no lift at all.
+      grade: { lift: [0.000, 0.000, 0.000], gamma: [1.02, 1.00, 0.96], gain: [1.05, 1.01, 0.92] },
     },
 
     props: ['rock', 'cactus', 'bones', 'sign', 'dune'],
@@ -138,6 +145,9 @@ export const BIOMES = [
       sun: '#eaf6ff',
       sunAngle: 0.40,
       ambient: '#7e97ab',
+          // Overcast: flat contrast, blacks lifted into blue, whites held down so
+      // the snow does not clip to paper.
+      grade: { lift: [0.010, 0.016, 0.028], gamma: [1.05, 1.06, 1.09], gain: [0.98, 0.99, 1.02] },
     },
 
     props: ['pine', 'rock', 'ice_block', 'sign', 'snow_bank'],
@@ -170,6 +180,10 @@ export const BIOMES = [
       sun: '#ff8a4c',
       sunAngle: 0.34,
       ambient: '#5a2018',
+          // Firelight. Everything toward the ember, and the shadows kept black —
+      // a lift here would turn the smoke grey and kill the contrast the
+      // whole district is built on.
+      grade: { lift: [0.006, 0.000, 0.000], gamma: [1.04, 1.00, 0.93], gain: [1.06, 0.99, 0.91] },
     },
 
     props: ['spire', 'brazier', 'bones', 'rock', 'chain'],
@@ -248,6 +262,10 @@ export const BIOMES = [
       // so the towers separate from it without becoming a wall of cut-outs.
       skylineColor: '#1b2740',
       skylineWindow: '#ffd39a',
+          // Sodium and neon on wet asphalt: blacks lifted into blue so the night
+      // has depth rather than holes, midtones pulled down, and just enough
+      // magenta in the whites to read as a city rather than as moonlight.
+      grade: { lift: [0.008, 0.010, 0.026], gamma: [1.00, 1.00, 1.05], gain: [1.02, 0.98, 1.05] },
     },
 
     propDensity: 1.25,

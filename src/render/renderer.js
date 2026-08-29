@@ -62,6 +62,9 @@ uniform float uVignette;
 uniform float uChroma;      // radial chromatic split, driven by speed
 uniform float uSpeedBlur;   // radial smear strength, driven by speed
 uniform vec2  uFocus;       // screen point the smear radiates from
+uniform vec3  uLift;        // grade: added to the blacks
+uniform vec3  uGamma;       // grade: midtone curve
+uniform vec3  uGain;        // grade: multiplied into the whites
 uniform vec2  uTexel;       // 1 / scene render target size
 uniform float uFxaa;        // 0 off, 1 on
 varying vec2 vUv;
@@ -167,6 +170,15 @@ void main() {
   col *= uExposure;
   col = aces(col);
 
+  // Lift, gamma, gain — after the tonemap, in display-referred space, which is
+  // where a colourist grades. Before it, a lift is a change of exposure and the
+  // filmic curve eats it.
+  //
+  // This is what makes six districts feel like six places rather than one
+  // engine with the fog recoloured: the palette sets what is *in* a scene, and
+  // this sets how the film that shot it was developed.
+  col = pow(max(col * uGain + uLift, 0.0), uGamma);
+
   float vig = 1.0 - uVignette * dot(vUv - 0.5, vUv - 0.5) * 2.2;
   col *= clamp(vig, 0.0, 1.0);
 
@@ -249,6 +261,9 @@ export class Renderer {
         uBloomStrength: { value: 0.45 }, uExposure: { value: 1.0 },
         uVignette: { value: 0.22 }, uChroma: { value: 0.0 },
         uSpeedBlur: { value: 0.0 }, uFocus: { value: new THREE.Vector2(0.5, 0.55) },
+        uLift: { value: new THREE.Vector3(0, 0, 0) },
+        uGamma: { value: new THREE.Vector3(1, 1, 1) },
+        uGain: { value: new THREE.Vector3(1, 1, 1) },
         uTexel: { value: new THREE.Vector2(1 / 1280, 1 / 720) },
         uFxaa: { value: 1 },
       },
@@ -437,6 +452,16 @@ export class Renderer {
     // where the geometry edges are.
     u.uTexel.value.set(1 / Math.max(1, this.sceneRT.width), 1 / Math.max(1, this.sceneRT.height));
     u.uFxaa.value = this.quality?.settings?.fxaa === false ? 0 : 1;
+
+    const g = fx.grade;
+    u.uLift.value.set(...(g?.lift ?? [0, 0, 0]));
+    // Stored as the gamma a colourist would name, which the shader wants the
+    // reciprocal of — so **above one brightens that channel's midtones** and
+    // below one darkens them. Worth stating: the first pass at these tables was
+    // written the other way round and every district was graded backwards.
+    const gm = g?.gamma ?? [1, 1, 1];
+    u.uGamma.value.set(1 / gm[0], 1 / gm[1], 1 / gm[2]);
+    u.uGain.value.set(...(g?.gain ?? [1, 1, 1]));
     this._blit(this.compositeMat, null);
   }
 

@@ -63,6 +63,9 @@ const BODIES = [
   { w: 1.74, l: 4.20, h: 0.58, roof: 0.48, c: 0x7d5a4a },   // estate
 ];
 
+/** What each civilian takes up on the road, for anything outside this file. */
+export const TRAFFIC_FOOTPRINTS = BODIES.map((b) => ({ length: b.l, width: b.w }));
+
 function buildBody(spec, rng) {
   const { w, l, h, roof, c } = spec;
   // Bodywork apart from everything bolted to it. The four boxes painted `c`
