@@ -10,6 +10,12 @@
 // that the GC8 declares its own bodywork fully transparent across eight
 // thousand triangles. The names differ per author — Carro_Vidro, NGlassMtl1,
 // Window_Glass — but the vocabulary is small and survives translation.
+//
+// *Which* name, though. This read the material's and not the object's, and the
+// RX-7 names every material `Material.00N` while naming the objects
+// `Glass_front02`, `Glass_door_02`, `Glass_back02`. Fifteen thousand triangles
+// of window were sitting there labelled, unread, and the car shipped with its
+// greenhouse guessed from a bounding box.
 
 export const CLS = { PAINT: 0, GLASS: 1, DARK: 2, CHROME: 3, LAMP: 4, INSIDE: 5 };
 
@@ -49,8 +55,15 @@ function classifyByLook({ rgb, metallic }) {
   return CLS.PAINT;
 }
 
-export function classify(matName, look = null) {
-  const n = (matName ?? '').toLowerCase();
+export function classify(matName, look = null, objName = '') {
+  // Either name. A file that labels one of them usually labels only one, and
+  // which one is the author's habit rather than anything meaningful.
+  const n = `${matName ?? ''} ${objName ?? ''}`.toLowerCase();
+
+  // Seals before glass. `Window_Ruber_back01` is the rubber *around* a window
+  // and belongs with the trim; testing glass first made it a pane. The
+  // misspelling is the file's, and it is the file this has to read.
+  if (/rubber|ruber|borracha|\bseal\b|weatherstrip/.test(n)) return CLS.DARK;
   // A number-plate lamp is not a headlight, and on the GC8 it is the name
   // attached to fifty thousand triangles of car.
   if (/plate|number|placa|licen/.test(n)) return CLS.PAINT;
@@ -59,7 +72,18 @@ export function classify(matName, look = null) {
   if (/glass|vidro|window|janela|screen|glazing|windshield/.test(n)) return CLS.GLASS;
   if (/tire|tyre|pneu|rubber|borracha|plastic|plastico|preto|black|seal|rim|roda|wheel|caliper|disc|grille|grelha|trim|espelho|mirror/.test(n)) return CLS.DARK;
   if (/chrome|crom|alumin|steel|inox|badge|emblem|bumper|parachoque/.test(n)) return CLS.CHROME;
-  if (look && ANONYMOUS.test(n)) return classifyByLook(look);
+  // The look-based fallback, when *neither* name said anything.
+  //
+  // This tested the combined string, and adding the object name to it broke it:
+  // "material.005 tir04" is not an anonymous name by that pattern, so a car
+  // whose materials are all `Material.00N` stopped falling through to its
+  // appearance and defaulted to paint. On the RX-7 that made four tyres —
+  // seventy thousand triangles each, named `Tir04`, sitting on the ground — into
+  // bodywork, and the car's lowest panel went from 143 mm above the road to
+  // nothing. Both names have to be uninformative, and they are tested apart.
+  const anonymous = ANONYMOUS.test((matName ?? '').toLowerCase())
+    && ANONYMOUS.test((objName ?? '').toLowerCase().replace(/[a-z]+(?=\d*$)/, ''));
+  if (look && anonymous) return classifyByLook(look);
   return CLS.PAINT;
 }
 

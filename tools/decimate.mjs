@@ -52,8 +52,42 @@ const meshes = readModel(file);
 const body = [];          // flat xyz per corner, three corners per triangle
 const bodyCls = [];       // one class per triangle
 const wheelPts = [];
+// Where the model's own glass would be, if it declared any.
+//
+// The last resort, for a file that names neither its materials nor its objects
+// — the GC8 calls every object `Object_31` and every material `Meshpart12Mtl`,
+// and its greenhouse was invented from a bounding box at load time as a result.
+// What it *does* have is three small parts that are genuinely translucent and
+// sit in the top third of the car, which is a windscreen and two side windows.
+//
+// Alpha alone is not enough and the classifier says so at length: this file
+// declares its own bodywork fully transparent across eight thousand triangles.
+// Alpha *and* being a small thing high up is enough — bodywork is neither.
+const modelY = { lo: Infinity, hi: -Infinity };
+let modelTris = 0;
+for (const m of meshes) {
+  modelTris += m.tris.length / 9;
+  for (let i = 1; i < m.tris.length; i += 3) {
+    if (m.tris[i] < modelY.lo) modelY.lo = m.tris[i];
+    if (m.tris[i] > modelY.hi) modelY.hi = m.tris[i];
+  }
+}
+const modelH = Math.max(1e-6, modelY.hi - modelY.lo);
+
+function looksGlazed(m) {
+  const a = m.alpha ?? 1;
+  // Above 0.05 because a zero is a broken export, not a window; below 0.95
+  // because anything else is opaque whatever the file claims.
+  if (!(a > 0.05 && a < 0.95)) return false;
+  if (m.tris.length / 9 > modelTris * 0.02) return false;    // not a panel
+  let lo = Infinity;
+  for (let i = 1; i < m.tris.length; i += 3) if (m.tris[i] < lo) lo = m.tris[i];
+  return (lo - modelY.lo) / modelH > 0.55;                   // above the belt
+}
+
 let dropped = 0;
 let inside = 0;
+let glazed = 0;
 for (const m of meshes) {
   const lower = (m.name ?? '').toLowerCase();
   if (exclude.some((t) => lower.includes(t))) { dropped++; continue; }
@@ -61,7 +95,8 @@ for (const m of meshes) {
     for (let i = 0; i < m.tris.length; i++) wheelPts.push(m.tris[i]);
     continue;
   }
-  const c = classify(m.mat, m);
+  let c = classify(m.mat, m, m.name);
+  if (c === CLS.PAINT && looksGlazed(m)) { c = CLS.GLASS; glazed += m.tris.length / 9; }
   if (c === CLS.INSIDE) { inside += m.tris.length / 9; continue; }
   for (let i = 0; i < m.tris.length; i++) body.push(m.tris[i]);
   for (let i = 0; i < m.tris.length; i += 9) bodyCls.push(c);
@@ -148,7 +183,34 @@ const targetIdx = Math.min(triIn, TARGET) * 3;
 // each wing, bumper and lamp its own island — and locking every island's rim
 // leaves a floor the collapse cannot go below: the Beetle stopped dead at a
 // hundred and seven thousand triangles, its own borders being most of them.
-const [outIdx, error] = MeshoptSimplifier.simplify(index, positions, 3, targetIdx, 1);
+// Glass is told to hold its shape, because otherwise it does not.
+//
+// The collapse is blind to what a triangle is, and it spends its budget in
+// proportion to what it is given: the GC8's windows are 522 of 146,000
+// triangles, so they got a third of a per cent of fifty thousand and the frames
+// around them were collapsed into faces that bridged the openings — pale
+// wedges sitting in the middle of black windows.
+//
+// A per-vertex attribute the simplifier is told to preserve makes a collapse
+// across the glass boundary expensive without locking anything, so the aperture
+// keeps its shape and the rest of the car still spends the budget where the
+// error is. One channel, one weight.
+const glassAttr = new Float32Array(positions.length / 3);
+{
+  // A vertex is glass if any triangle wearing it is.
+  let v = 0;
+  for (let f = 0; f < bodyCls.length; f++) {
+    for (let k = 0; k < 3; k++, v++) {
+      if (bodyCls[f] === CLS.GLASS) glassAttr[index[v]] = 1;
+    }
+  }
+}
+const [outIdx, error] = MeshoptSimplifier.simplifyWithAttributes(
+  index, positions, 3,
+  glassAttr, 1, [3],   // one channel, weighted enough to hold a boundary
+  null,                // nothing locked; see the note on LockBorder above
+  targetIdx, 1,
+);
 const triOut = outIdx.length / 3;
 
 // Vertices the collapse orphaned are still in the buffer; drop them so the file

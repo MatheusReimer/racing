@@ -489,10 +489,18 @@ function hullShared(hull) {
         cz += positions[v + 2];
       }
       cx /= 3; cy /= 3; cz /= 3;
+      // 0.36 of the length, not 0.28. A windscreen's base runs further
+      // forward than that, so the tighter band cut across it and left the
+      // bottom of the screen painted.
       const inBand = cy >= loY && cy <= hiY
-        && cx <= bb.x * 0.90 && Math.abs(cz) <= hull.length * 0.28;
+        && cx <= bb.x * 0.90 && Math.abs(cz) <= hull.length * 0.36;
       removed.push(inBand);
-      (inBand ? keep : rest).push(bodyIdx[t], bodyIdx[t + 1], bodyIdx[t + 2]);
+    }
+
+    smoothRegion(bodyIdx, positions, removed);
+
+    for (let t = 0, f = 0; t < bodyIdx.length; t += 3, f++) {
+      (removed[f] ? keep : rest).push(bodyIdx[t], bodyIdx[t + 1], bodyIdx[t + 2]);
     }
     if (keep.length / 3 > 40) {
       shared.glass = cut(keep);
@@ -526,6 +534,67 @@ function hullShared(hull) {
     ? cut(rear) : loose(synthLamps(hull, 1, 1, 1, false));
   hullCache.set(hull, shared);
   return shared;
+}
+
+/**
+ * Tidy a region that was chosen by a plane, so it follows the surface instead.
+ *
+ * The greenhouse is picked by testing whether a face's centre falls inside a
+ * box. A box is not the shape of a window, so the boundary comes out as a row
+ * of teeth: long thin triangles the decimator left along a pillar stab into
+ * the glass, and faces whose centres fell a centimetre outside stay painted in
+ * the middle of a windscreen. Both were plainly visible on the two cars whose
+ * references never named their glass — orange spikes across the screen.
+ *
+ * The fix is not a better box. Each face is made to agree with its neighbours:
+ * a face surrounded by glass becomes glass, a lone piece of glass in the
+ * bodywork goes back to being bodywork. Three passes, which is enough to close
+ * a one- or two-face spike and not enough to eat a real pillar.
+ */
+function smoothRegion(idx, positions, flags) {
+  const faces = flags.length;
+  if (!faces) return;
+
+  // Faces that share an edge, found by welding on position rather than on
+  // index — the buffer is de-indexed, so two faces along a seam do not share a
+  // vertex number even where they share a corner.
+  const key = (i) => {
+    const o = i * 3;
+    return `${Math.round(positions[o] * 400)},${Math.round(positions[o + 1] * 400)},`
+      + `${Math.round(positions[o + 2] * 400)}`;
+  };
+  const edges = new Map();
+  for (let f = 0; f < faces; f++) {
+    const a = key(idx[f * 3]);
+    const b = key(idx[f * 3 + 1]);
+    const c = key(idx[f * 3 + 2]);
+    for (const [u, v] of [[a, b], [b, c], [c, a]]) {
+      const e = u < v ? `${u}|${v}` : `${v}|${u}`;
+      let list = edges.get(e);
+      if (!list) { list = []; edges.set(e, list); }
+      list.push(f);
+    }
+  }
+  const neighbours = Array.from({ length: faces }, () => []);
+  for (const list of edges.values()) {
+    if (list.length !== 2) continue;
+    neighbours[list[0]].push(list[1]);
+    neighbours[list[1]].push(list[0]);
+  }
+
+  for (let pass = 0; pass < 3; pass++) {
+    const next = flags.slice();
+    for (let f = 0; f < faces; f++) {
+      const near = neighbours[f];
+      if (near.length < 2) continue;
+      let same = 0;
+      for (const g of near) if (flags[g] === flags[f]) same++;
+      // Outvoted by its own neighbours: it was on the wrong side of a plane,
+      // not on the wrong side of a window.
+      if (same * 2 < near.length) next[f] = !flags[f];
+    }
+    for (let f = 0; f < faces; f++) flags[f] = next[f];
+  }
 }
 
 /**
@@ -1864,6 +1933,29 @@ export class VehicleMesh {
       // render; real lacquer has been through a car wash.
       clearcoatRoughness: lerp(0.11, 0.26, armor),
     });
+
+    if (hull) {
+      // The inside of a car is not the outside of one.
+      //
+      // A decimated shell has no interior, and it draws double sided because
+      // its winding is inconsistent — so looking through a side window you see
+      // the *back* of the far door skin, lit and painted as though it were
+      // bodywork in the sun. On some cars that is a pale wedge sitting in the
+      // middle of a black window, which is what it was reported as: triangles
+      // the colour of the car where there should be shadow.
+      //
+      // A back face is inside the car by definition, whatever the winding says
+      // about which way round the triangle is. So it is taken down to the dark
+      // the cabin would be. Cheaper and more reliable than authoring an
+      // interior for seven references nobody here modelled.
+      this.bodyMat.onBeforeCompile = (shader) => {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <dithering_fragment>',
+          'if (!gl_FrontFacing) gl_FragColor.rgb *= 0.16;\n#include <dithering_fragment>',
+        );
+      };
+      this.bodyMat.customProgramCacheKey = () => 'hull-body';
+    }
     // Everything that pitches and rolls hangs off `chassis`; the wheels do not.
     //
     // Pitch used to be applied to the whole car about the group's origin, which
