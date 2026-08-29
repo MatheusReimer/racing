@@ -2184,23 +2184,94 @@ export class VehicleMesh {
     // A decimated shell has no interior: through a side window you see the back
     // of the far door skin, lit as though it were bodywork in the sun, and on
     // a car whose glass is sparse you can see straight through the greenhouse
-    // to the scenery. A box of dark sitting inside the cabin costs twelve
-    // triangles and one draw call, and whatever a window shows, it shows this.
+    // to the scenery. So something dark has to sit behind the glass.
+    //
+    // A box was the first answer and it was the wrong shape. Sized to fit
+    // inside the cabin it is smaller than the greenhouse, so its top edge is
+    // visible *through* the windscreen as a hard horizontal band — near-black
+    // against near-black glass, which reads as a ridge on the screen that
+    // nothing on the car explains. Sized to cover the greenhouse it comes out
+    // through the doors instead. There is no box that does both, because a
+    // cabin is not a box.
+    //
+    // So it is the glass itself, moved inward along its own normals. It cannot
+    // poke through the window it is hiding behind — it is that window, eight
+    // centimetres in — and it has no edge to show, because its edge is exactly
+    // where the glass stops and the bodywork starts.
     this.cabin = null;
-    if (hullLampGeo?.bounds) {
-      const b = hullLampGeo.bounds;
-      const h = b.maxY - b.minY;
-      // Sized to sit *inside* the greenhouse, not to fill the car. The first
-      // attempt took 86% of the width — which on a hull measured across its
-      // mirrors is wider than the cabin — and pushed a black slab out through
-      // both doors.
-      const geo = box(
-        (b.maxX - b.minX) * 0.58, h * 0.30, (b.maxZ - b.minZ) * 0.34,
-        0, b.minY + h * 0.68, (b.maxZ + b.minZ) / 2 - (b.maxZ - b.minZ) * 0.05,
-        HULL_CABIN,
-      );
+    // Whichever glass this car has: a hull carries its own (`hullGlass`), and a
+    // procedural body builds boxes (`glassGeo`). Taking only the second one
+    // meant every real car quietly lost its blank altogether — and the ridge
+    // did go away, because there was nothing left in the cabin to show.
+    const glassSrc = this.hullGlass?.geometry ?? this.glassGeo;
+    if (glassSrc) {
+      const src = glassSrc.getAttribute('position');
+      const nrm = glassSrc.getAttribute('normal');
+      const n = src.count;
+      const pos = new Float32Array(n * 3);
+      const col = new Float32Array(n * 3);
+      const c = new THREE.Color(HULL_CABIN);
+
+      // Which way is in.
+      //
+      // The glass is cut from the hull with computed normals, and those point
+      // outward — but not reliably on every reference, so the direction is
+      // measured rather than trusted. Against the greenhouse's own centroid,
+      // not against the car's: a pane near the car's centre line, which a
+      // sunroof is, has almost no signal in `n . p` about the car's origin and
+      // was being pushed *outward* on the strength of rounding.
+      let cx = 0;
+      let cy = 0;
+      let cz = 0;
+      for (let i = 0; i < n; i++) { cx += src.getX(i); cy += src.getY(i); cz += src.getZ(i); }
+      cx /= n; cy /= n; cz /= n;
+
+      const INSET = 0.08;
+      // A floor on the clearance, on every axis.
+      //
+      // The clamp below leaves a vertex standing still wherever the normal
+      // would push it outward, and standing still means sitting *on* the pane
+      // it is meant to be behind, which z-fights. A percentage shrink does not
+      // fix it either: on the two cars whose limiting pane is the roof, the
+      // extreme vertex is barely off the centroid and a percentage of nothing
+      // is nothing.
+      const GAP = 0.02;
+      for (let i = 0; i < n; i++) {
+        const px = src.getX(i);
+        const py = src.getY(i);
+        const pz = src.getZ(i);
+        let nx = nrm.getX(i);
+        let ny = nrm.getY(i);
+        let nz = nrm.getZ(i);
+        if (nx * (px - cx) + ny * (py - cy) + nz * (pz - cz) < 0) {
+          nx = -nx; ny = -ny; nz = -nz;
+        }
+        // Inward along the normal, but never outward on any axis.
+        //
+        // A vertex on the boundary between two panes has a normal averaged
+        // across both, which can point mostly along y while the vertex sits at
+        // the widest point of a side window — and the dot product above, being
+        // dominated by y, then leaves the x component pointing the wrong way
+        // and the shell comes out 4 cm wider than the glass it is hiding
+        // behind. Whatever the normal says, a blank may move toward the middle
+        // of the cabin and not away from it.
+        const toward = (v, cv, nv) => {
+          const moved = v - nv * INSET;
+          const held = Math.abs(moved - cv) > Math.abs(v - cv) ? v : moved;
+          const d = held - cv;
+          return cv + Math.sign(d) * Math.max(0, Math.abs(d) - GAP);
+        };
+        pos[i * 3] = toward(px, cx, nx);
+        pos[i * 3 + 1] = toward(py, cy, ny);
+        pos[i * 3 + 2] = toward(pz, cz, nz);
+        col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      geo.computeVertexNormals();
       this.cabinMat = new THREE.MeshBasicMaterial({
-        vertexColors: true, toneMapped: false,
+        vertexColors: true, toneMapped: false, side: THREE.DoubleSide,
       });
       this.cabin = new THREE.Mesh(geo, this.cabinMat);
       attach(this.cabin);

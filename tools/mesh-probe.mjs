@@ -97,37 +97,58 @@ for (const [label, ids] of [
   cases.push({ label, build: b, def: b.vehicle });
 }
 
-// --- the cabin blank stays inside the car ----------------------------------
+// --- the cabin blank is there, and stays inside the car --------------------
 //
-// A decimated shell has no interior, so a dark box sits inside the greenhouse
-// and is what a window shows. It is sized from the hull's own extents, and a
-// hull is measured across its mirrors and its wing — so a fraction that looks
-// modest can still be wider than the cabin. The first one took 86% of the
-// width and pushed a black slab out through both doors.
+// A decimated shell has no interior, so something dark sits behind the glass
+// and is what a window shows. Two things have to be true of it, and this used
+// to check only half of one.
+//
+// It has to *exist*. The blank was built from the procedural body's glass and
+// not from a hull's, so every real car quietly lost it — and the change looked
+// like an improvement, because the ridge people were complaining about was the
+// blank and removing it removed the ridge.
+//
+// And it has to stay behind the glass. Not merely inside the car: inside the
+// pane it is hiding behind, on every axis. The old bar was 5 cm inside the
+// body, which suited a small box parked deep in the cabin and rejects a shell
+// that hugs the glass — which is the shape that has no visible edge, and
+// therefore the shape that fixed the ridge.
 {
   const THREE = await import('three');
-  console.log('\nThe cabin blank stays inside the bodywork\n');
-  let worst = -Infinity;
-  let worstCar = '';
+  console.log('\nThe cabin blank is there, and stays behind the glass\n');
+  const MARGIN = 0.01;
   for (const v of VEHICLES) {
     const b = new Build(v.id);
     const mesh = new VehicleMesh(visualProfile(b.stats.all(), b.tags, b.vehicle),
       { shadows: false });
-    if (!mesh.cabin) { mesh.dispose(); continue; }
+
+    const glassMesh = mesh.hullGlass ?? mesh.glassMesh;
+    if (!mesh.cabin) {
+      problems++;
+      console.log(`  ${v.bodyType.padEnd(12)} no blank at all`.padEnd(52)
+        + 'FAIL — a window shows straight through the car');
+      mesh.dispose();
+      continue;
+    }
+
     const body = new THREE.Box3().setFromObject(mesh.bodyMesh);
     const cab = new THREE.Box3().setFromObject(mesh.cabin);
-    const out = Math.max(
-      cab.max.x - body.max.x, body.min.x - cab.min.x,
-      cab.max.y - body.max.y, body.min.y - cab.min.y,
-      cab.max.z - body.max.z, body.min.z - cab.min.z,
+    const outside = (box) => Math.max(
+      cab.max.x - box.max.x, box.min.x - cab.min.x,
+      cab.max.y - box.max.y, box.min.y - cab.min.y,
+      cab.max.z - box.max.z, box.min.z - cab.min.z,
     );
-    if (out > worst) { worst = out; worstCar = v.bodyType; }
+    const pastBody = outside(body);
+    const pastGlass = glassMesh
+      ? outside(new THREE.Box3().setFromObject(glassMesh)) : -Infinity;
+    const ok = pastBody < -MARGIN && pastGlass < -MARGIN;
+    if (!ok) problems++;
+    console.log((`  ${v.bodyType.padEnd(12)} `
+      + `${(-pastBody * 100).toFixed(1).padStart(5)} cm inside the body, `
+      + `${(-pastGlass * 100).toFixed(1).padStart(5)} cm inside the glass`).padEnd(72)
+      + (ok ? 'ok' : 'FAIL — the blank is showing'));
     mesh.dispose();
   }
-  const ok = worst < -0.05;
-  if (!ok) problems++;
-  console.log(`  closest approach ${(-worst * 100).toFixed(0)} cm inside (${worstCar})`
-    .padEnd(52) + (ok ? 'ok' : 'FAIL — the blank is showing'));
 }
 
 
