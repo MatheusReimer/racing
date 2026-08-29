@@ -146,6 +146,49 @@ option to weigh.
 
 ---
 
+## The effects are placeholders and read like it
+
+Everything that happens to a car looks like the same thing happening: a burst
+of particles at a point. There are seven presets in the whole game — spark,
+fire, electric, boost, smoke, tireSmoke, debris — and every event picks one and
+throws a handful of them.
+
+What a hit currently is, in full: four to twenty-eight sparks, forty per cent
+as much debris, and five puffs of smoke if it was hard. That is the same recipe
+whether the car clipped a barrier at 40 km/h or was rammed at 200, whether it
+was hit from behind or T-boned, and whether it hit a wall, a barrel or another
+car. Strength scales the *count*, and nothing else.
+
+The ones worth doing, roughly in order of how much each is missing:
+
+- **Impact.** Should differ by what was hit and from where. A wall wants a
+  scrape — sparks dragged along the direction of travel, not a spherical burst
+  — and metal on metal wants a flash the barrier does not get. The direction of
+  the blow is already computed for the physics and thrown away by the effect.
+- **Damage.** The car now has visible states and torn panels, and the moment it
+  crosses one is unmarked. Panels leaving, glass going, a puff from the bay as
+  the threshold is crossed — the state machine already fires at exactly the
+  right instant.
+- **Nitro.** One additive plume at the back at a fixed rate. It should build,
+  it should shake the frame, and it should end — the speed blur and the chroma
+  in the composite already exist and are driven by speed alone; the boost is
+  the one moment worth pushing them past what speed asks for.
+- **Wheels.** Tyre smoke exists and is decent, but nothing throws dirt when a
+  car drops a wheel off the tarmac, and the surfaces already say what they are
+  (`gravel`, `sand`, `ice`).
+- **Skills.** Fifteen of them share three presets between them. An EMP and a
+  Cryo Burst look the same but blue.
+
+Two things worth deciding before building rather than after. The particle
+budget is a quality tier and already tight — 260 on Low — so richer effects
+mean fewer of them rather than more, and the split between the additive and
+alpha clouds is already 70/30. And a lot of what is missing is not particles at
+all: a scrape wants a decal, a boost wants the camera, and an impact wants a
+frame of screen shake, which is the cheapest of the three and the one this
+project has none of.
+
+---
+
 ## Crates: what is in them next
 
 The first slice is in — cosmetics that persist, a crate for finishing a
