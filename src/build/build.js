@@ -104,6 +104,22 @@ export class Build {
     return this;
   }
 
+  /**
+   * Drop a skill, so another can take its place.
+   *
+   * The counterpart `addSkill` never had. Without it a full loadout is final:
+   * three slots, fifteen skills, and from the third pickup onward the run can
+   * only ever level what it is already carrying.
+   */
+  removeSkill(skillId) {
+    const i = this.skills.findIndex((s) => s.id === skillId);
+    if (i < 0) return false;
+    this.skills.splice(i, 1);
+    this._dirty = true;
+    this.recompute();
+    return true;
+  }
+
   upgradeSkill(skillId) {
     const s = this.skills.find((x) => x.id === skillId);
     if (!s) return false;

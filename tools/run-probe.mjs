@@ -222,4 +222,77 @@ if (problems.length) {
   for (const e of [...new Set(errors)].slice(0, 6)) console.log('  ! ' + e.slice(0, 180));
   process.exit(1);
 }
+// --- a full skill loadout is a decision, not a wall -------------------------
+//
+// There was no `removeSkill` and `pickSkill` filtered the catalogue down to
+// skills already held once the slots were full — so from the third pickup on, a
+// run was never shown a new skill again. It failed silently: the offers still
+// arrived, they were just always the same three skills levelling up, and
+// nothing in the game said so.
+{
+  const { SKILLS, SKILL_BY_ID, instantiateSkill } = await import('../src/data/skills.js');
+  const { generateOffer } = await import('../src/run/rewards.js');
+  const bad = [];
+
+  const full = () => {
+    const run = new Run({ seed: 'swap-probe', vehicleId: 'hatch' });
+    const held = SKILLS.filter((s) => !run.build.skills.some((h) => h.id === s.id));
+    while (run.build.canAddSkill()) run.build.addSkill(instantiateSkill(held.shift().id, 1));
+    return run;
+  };
+
+  // With room, taking never asks.
+  {
+    const run = new Run({ seed: 'swap-probe', vehicleId: 'hatch' });
+    const id = SKILLS.find((s) => !run.build.skills.some((h) => h.id === s.id)).id;
+    const res = run.takeOffer({ kind: 'skill', id, skill: SKILL_BY_ID[id], name: SKILL_BY_ID[id].name });
+    if (!res.ok || res.needsSlot) bad.push('asked for a slot when one was free');
+  }
+
+  // Full, and an unheld skill: it asks, and the build is untouched until it is
+  // answered — a question that half-applies is worse than a refusal.
+  {
+    const run = full();
+    const before = run.build.skills.map((s) => s.id).join(',');
+    const id = SKILLS.find((s) => !run.build.skills.some((h) => h.id === s.id)).id;
+    const ask = run.takeOffer({ kind: 'skill', id, skill: SKILL_BY_ID[id], name: SKILL_BY_ID[id].name });
+    if (!ask.needsSlot) bad.push('did not ask which skill to drop');
+    if (run.build.skills.map((s) => s.id).join(',') !== before) bad.push('changed the build before being answered');
+
+    const drop = run.build.skills[1].id;
+    const done = run.takeOffer(
+      { kind: 'skill', id, skill: SKILL_BY_ID[id], name: SKILL_BY_ID[id].name }, { drop });
+    if (!done.ok) bad.push('the swap itself failed');
+    if (run.build.skills.some((s) => s.id === drop)) bad.push('the dropped skill is still fitted');
+    if (!run.build.skills.some((s) => s.id === id)) bad.push('the new skill was not fitted');
+    if (run.build.skills.length !== run.build.skillSlots) bad.push('slot count changed');
+  }
+
+  // Full, but levelling something already held: never asks.
+  {
+    const run = full();
+    const id = run.build.skills[0].id;
+    const res = run.takeOffer({ kind: 'skill', id, skill: SKILL_BY_ID[id], name: SKILL_BY_ID[id].name, upgrade: true });
+    if (res.needsSlot) bad.push('asked for a slot to level a skill already carried');
+  }
+
+  // And the offers keep showing unheld skills when full, which is the bug that
+  // made all of the above unreachable.
+  {
+    const run = full();
+    let sawNew = 0;
+    for (let i = 0; i < 200; i++) {
+      const offer = generateOffer(new RNG(`offer-${i}`), run.build, {});
+      for (const o of offer) {
+        if (o.kind === 'skill' && !run.build.skills.some((h) => h.id === o.id)) sawNew++;
+      }
+    }
+    if (sawNew === 0) bad.push('a full loadout is never offered a new skill');
+  }
+
+  console.log('\nA full skill loadout can still be changed:\n');
+  console.log(`  ${bad.length ? 'FAIL ' + bad.join('; ') : 'ok — asks, waits, swaps, and keeps offering'}`);
+  if (bad.length) process.exit(1);
+}
+
 console.log('\nruns are completable and lossable');

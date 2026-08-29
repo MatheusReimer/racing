@@ -126,7 +126,14 @@ function pickSkill(rng, build, used, luck) {
       const cur = build.skills.find((x) => x.id === s.id);
       return (cur.level ?? 1) < (s.maxLevel ?? 5);
     }
-    return build.canAddSkill();
+    // Unheld skills are offered whether or not there is room for them.
+    //
+    // This used to return only what the build already carried once the slots
+    // were full, which meant a run stopped being shown new skills from its
+    // third pickup on — and the decision the whole genre turns on, whether what
+    // just appeared beats what you are carrying, could never be put. Taking one
+    // with no room now costs a slot, and the screen asks which.
+    return true;
   });
   if (pool.length === 0) return null;
 
@@ -160,7 +167,7 @@ function pickSkill(rng, build, used, luck) {
 }
 
 /** Apply a chosen offer to the build. Returns a short line describing what happened. */
-export function applyOffer(offer, build, run) {
+export function applyOffer(offer, build, run, opts = {}) {
   switch (offer.kind) {
     case 'part': {
       if (!build.canAddPart()) return { ok: false, reason: 'No free part slots.' };
@@ -168,8 +175,23 @@ export function applyOffer(offer, build, run) {
       return { ok: true, text: `Installed ${offer.part.name}.` };
     }
     case 'skill': {
+      const held = build.skills.some((s) => s.id === offer.id);
+      // Levelling something already carried never needs a slot.
+      if (!held && !build.canAddSkill()) {
+        if (!opts.drop) {
+          // Not a failure: a question. The caller shows the loadout and comes
+          // back with an answer.
+          return { ok: false, needsSlot: true, offer, reason: 'No free skill slots.' };
+        }
+        if (!build.removeSkill(opts.drop)) {
+          return { ok: false, reason: 'That skill is not fitted.' };
+        }
+      }
       build.addSkill(instantiateSkill(offer.id, 1));
-      return { ok: true, text: offer.upgrade ? `${offer.skill.name} upgraded.` : `Equipped ${offer.skill.name}.` };
+      return {
+        ok: true,
+        text: offer.upgrade ? `${offer.skill.name} upgraded.` : `Equipped ${offer.skill.name}.`,
+      };
     }
     case 'scrap': {
       run.scrap += offer.amount;

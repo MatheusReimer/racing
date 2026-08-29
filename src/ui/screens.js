@@ -641,6 +641,41 @@ export class Screens {
     return this._show(root);
   }
 
+  /**
+   * Which skill goes, so a new one can come in.
+   *
+   * The screen that makes a full loadout a decision rather than a wall. It only
+   * appears when it has to: taking a skill with a free slot never asks, and
+   * levelling one already carried never asks either.
+   */
+  swapSkill(run, offer, { onSwap, onCancel }) {
+    const { root, body, foot, hint } = frame(
+      `Fit the ${offer.skill?.name ?? offer.name}?`,
+      'Your skill slots are full', run,
+    );
+
+    body.appendChild(el('div', 'machine-identity', esc(offer.text)));
+    body.appendChild(el('div', 'section-label', 'Give up'));
+
+    const list = el('div', 'choice-list');
+    for (const s of run.build.skills) {
+      const b = el('button', 'choice');
+      b.appendChild(el('div', 'lbl', `${s.icon || ''} ${esc(s.name)} — Lv${s.level ?? 1}`));
+      // What it does *now*, at the level it is actually at: the comparison is
+      // against the thing you have, not against its entry in a catalogue.
+      b.appendChild(el('div', 'det', esc(s.desc(s.level ?? 1))));
+      b.onclick = () => onSwap(s.id);
+      list.appendChild(b);
+    }
+    body.appendChild(list);
+
+    hint.textContent = 'Nothing is lost until you choose';
+    const back = el('button', 'btn', 'Keep what I have');
+    back.onclick = onCancel;
+    foot.appendChild(back);
+    return this._show(root);
+  }
+
   // --- shop ----------------------------------------------------------------
 
   shop(run, { onBuy, onLeave }) {

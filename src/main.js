@@ -332,10 +332,27 @@ class Game {
     }, 1400);
   }
 
+  /** Which skill to give up for the one just chosen. */
+  showSwap(outcome, offer) {
+    this.screens.swapSkill(this.run, offer, {
+      onSwap: (dropId) => {
+        const res = this.run.takeOffer(offer, { drop: dropId });
+        if (!res.ok) { this.screens.toast(res.reason); return; }
+        this.screens.toast(res.text);
+        this.afterReward();
+      },
+      // Backing out returns to the same offer, unspent. Nothing was taken and
+      // nothing was rerolled, so the choice is still open.
+      onCancel: () => this.showReward(outcome),
+    });
+  }
+
   showReward(outcome) {
     this.screens.reward(this.run, outcome, {
       onTake: (offer) => {
         const res = this.run.takeOffer(offer);
+        // A full skill loadout is a question, not a refusal.
+        if (res.needsSlot) { this.showSwap(outcome, offer); return; }
         if (!res.ok) { this.screens.toast(res.reason); return; }
         this.screens.toast(res.text);
         this.afterReward();

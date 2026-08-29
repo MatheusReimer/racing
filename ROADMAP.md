@@ -83,29 +83,16 @@ should be a probe.
 Scoped, not started. Three pieces in this order, because each one makes the
 next worth doing.
 
-### 1. Swapping, which is the actual bug
+### 1. Swapping — done
 
-There is no `removeSkill` anywhere. A car has three or four slots and starts
-with one skill, and once those slots are full `pickSkill` filters the catalogue
-down to skills the build *already has* — so from the third pickup onward the
-game stops offering new skills for the rest of the run. The decision the genre
-is built on, "is what just appeared worth more than what I am carrying", cannot
-happen at all.
+`Build.removeSkill`, offers that no longer stop at the slot count, and a screen
+that asks which skill goes. Taking one with a free slot never asks; levelling
+one already carried never asks either. `run-probe` holds all four cases and the
+offer behaviour that made them unreachable.
 
-What it needs:
-
-- `Build.removeSkill(id)`, and `canAddSkill` stops being the gate on what is
-  *offered* — it becomes the gate on whether taking one is free or costs a
-  slot.
-- `pickSkill` offers unheld skills regardless of space. It currently returns
-  null rather than a choice.
-- A screen. Taking a skill with no room has to ask which one goes, and that is
-  the real work here — the reward screen hands off to a "which of these three
-  do you drop" step, and the garage is the natural place to allow it freely.
-- `applyOffer` has to carry the answer back.
-
-Fifteen skills against three slots is the ratio that makes this matter. It is
-not a feature on top; without it, two thirds of the catalogue is decoration.
+Still open here: the garage cannot drop a skill freely, only the reward screen
+can force the question. That is the natural place for "I want this gone" as
+opposed to "I want that instead".
 
 ### 2. Affinity, not fixed pools
 

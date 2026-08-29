@@ -219,8 +219,11 @@ export class Run {
     return { dead: false, scrap, challengeMet, place: result.place };
   }
 
-  takeOffer(offer) {
-    const res = applyOffer(offer, this.build, this);
+  takeOffer(offer, opts = {}) {
+    const res = applyOffer(offer, this.build, this, opts);
+    // A skill with nowhere to go is a question, not a refusal: the run stays
+    // exactly where it was until the caller comes back with which one goes.
+    if (res.needsSlot) return res;
     if (!res.ok) return res;
     this.syncBuild();
     this.afterReward();
