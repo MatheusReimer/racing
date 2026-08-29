@@ -26,7 +26,7 @@ import { clamp, clamp01, lerp, wrapAngle, angleDelta } from '../core/math.js';
 // added below.
 
 /** Convert a build into the handful of numbers this file draws from. */
-export function visualProfile(stats, tags = new Set(), vehicleDef = {}) {
+export function visualProfile(stats, tags = new Set(), vehicleDef = {}, look = null) {
   const norm = (v, lo, hi) => clamp01((v - lo) / (hi - lo));
   return {
     bulk: norm(stats.weight, 60, 260),
@@ -34,8 +34,12 @@ export function visualProfile(stats, tags = new Set(), vehicleDef = {}) {
     armor: norm(stats.armor, 80, 300),
     ram: norm(stats.impact, 80, 280),
     tags,
-    baseColor: vehicleDef.color ?? '#c8452e',
-    accentColor: vehicleDef.accent ?? '#ffb238',
+    // The player's kit, where they have one. Overrides rather than defaults:
+    // "factory" is a real choice, and it has to stay distinguishable from a
+    // paint that happens to match the car it is on.
+    baseColor: look?.baseColor ?? vehicleDef.color ?? '#c8452e',
+    accentColor: look?.accentColor ?? vehicleDef.accent ?? '#ffb238',
+    rimTint: look?.rimTint ?? null,
     bodyType: vehicleDef.bodyType ?? 'coupe',
   };
 }
@@ -2199,6 +2203,11 @@ export class VehicleMesh {
     this.hubMat = new THREE.MeshStandardMaterial({
       vertexColors: true, roughness: 0.35, metalness: 0.75, flatShading: true,
     });
+    // A rim finish is a tint, not new geometry. The hub's own colours are in
+    // its vertex buffer and this material multiplies them, so one colour turns
+    // a whole wheel bronze — and a wheel is small enough on screen that a
+    // change of metal reads where a change of spoke count does not.
+    if (profile.rimTint) this.hubMat.color.set(profile.rimTint);
 
     const contactR = Math.max(wheelR,
       wheelReach(this.treadGeo), wheelReach(this.hubGeo), wheelReach(this.wheelGeo));

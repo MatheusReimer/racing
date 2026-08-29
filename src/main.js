@@ -7,6 +7,9 @@ import { Race } from './race/race.js';
 import { HUD } from './ui/hud.js';
 import { Screens } from './ui/screens.js';
 import { VEHICLES } from './data/vehicles.js';
+import { Profile } from './run/profile.js';
+import { rollCrate } from './data/cosmetics.js';
+import { RNG } from './core/rng.js';
 import { Run } from './run/run.js';
 import { Build } from './build/build.js';
 import { BIOMES } from './data/biomes.js';
@@ -42,6 +45,9 @@ class Game {
     this.input = new Input(window);
     this.hud = new HUD(this.uiRoot);
     this.screens = new Screens(this.uiRoot);
+    // What the player keeps between runs. Cosmetics only — see cosmetics.js
+    // for why that boundary is the point rather than a limitation.
+    this.profile = new Profile();
     this.hud.setQualityName(this.quality.name);
     this.hud.hide();
     this.audio = new Audio(this.events);
@@ -137,12 +143,40 @@ class Game {
     this.loop.setMode('menu');
     this.input.enabled = false;
     this.showroom = this.showroom || new Showroom();
-    this.showroom.setVehicle(vehicleId);
+    this.showroom.setVehicle(vehicleId, this.profile.look());
+    // A crate owed is opened before anything else. It is the reward for the run
+    // that just ended, and burying it behind a menu is the surest way to make
+    // finishing a run feel like nothing happened.
+    if (this.profile.crates > 0) { this.openCrate(vehicleId); return; }
+
     this.screens.title({
       vehicleId,
       lastSummary: this.lastSummary,
+      profile: this.profile,
       onStart: (id) => this.startRun(id),
       onSwitch: (id) => this.showMachine(id),
+      onEquip: (key) => {
+        this.profile.equip(key);
+        // Straight back to the same screen, so the car on the turntable is
+        // wearing the thing that was just clicked.
+        this.showMachine(vehicleId);
+      },
+    });
+  }
+
+  /** Open one owed crate, then come back for the next. */
+  openCrate(vehicleId) {
+    if (!this.profile.take()) { this.showMachine(vehicleId); return; }
+    const seed = `crate:${this.profile.runsWon}:${this.profile.owned.size}`;
+    const item = rollCrate(new RNG(seed), [...this.profile.owned]);
+    if (!item) { this.showMachine(vehicleId); return; }
+    this.profile.grant(item.key);
+    // Worn immediately. A cosmetic you have to go and find in a locker to see
+    // is a line in a list, not a reward.
+    this.profile.equip(item.key);
+    this.screens.crate(item, {
+      remaining: this.profile.crates,
+      onClose: () => this.showMachine(vehicleId),
     });
   }
 
@@ -235,6 +269,7 @@ class Game {
       events: this.events,
       // The sky bakes itself into an environment map, which needs a GL context.
       renderer: this.renderer,
+      look: this.profile.look(),
       config: {
         laps: cfg.laps,
         rivals: cfg.rivals,
@@ -326,6 +361,12 @@ class Game {
     this.hud.hide();
     this.loop.setMode('menu');
     this.lastSummary = this.run.summary();
+    // Finishing the tournament is the only thing that pays a crate. Losing pays
+    // nothing, which is what stops a crate being an attendance prize.
+    if (this.lastSummary.outcome === 'victory') {
+      this.profile.wonRun();
+      this.profile.award(1);
+    }
     this.screens.gameOver(this.lastSummary, { onRestart: () => this.showTitle() });
   }
 

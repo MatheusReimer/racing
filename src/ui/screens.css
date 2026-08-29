@@ -942,3 +942,75 @@
 .map-key-item .tx { min-width: 0; }
 .map-key-item .nm { font-size: 12px; font-weight: 600; }
 .map-key-item .ds { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
+
+/* ------------------------------------------------------------- locker --- */
+
+/* What the player owns, and what is on the car. Everything is listed, owned or
+   not: a locker that hides what you have not found is a list of what you have,
+   and knowing what is still out there is the reason to open the next crate. */
+.locker { margin-top: var(--s3); }
+
+.locker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 30px);
+  gap: var(--s1);
+  margin-bottom: var(--s3);
+}
+
+.swatch {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: var(--radius);
+  border: 1px solid var(--edge);
+  /* Base and accent in one chip, split on the diagonal — a paint is two
+     colours here and showing one of them is showing half the item. */
+  background: linear-gradient(135deg, var(--a) 0 55%, var(--b) 55% 100%);
+  cursor: pointer;
+  transition: transform 90ms ease, box-shadow 110ms ease, border-color 110ms ease;
+}
+
+.swatch:hover { transform: translateY(-2px); border-color: var(--edge-bright); }
+
+/* Equipped: ringed in its own rarity, so the locker reads at a glance as
+   "this is what is on the car" rather than "this one is highlighted". */
+.swatch.on {
+  border-color: var(--rarity);
+  box-shadow: 0 0 0 2px var(--rarity), 0 0 14px color-mix(in srgb, var(--rarity) 55%, transparent);
+}
+
+/* Not found yet. Dimmed and flattened rather than hidden or blanked: the
+   shape of what is missing is the point. */
+.swatch.locked {
+  opacity: 0.16;
+  filter: grayscale(1);
+  cursor: default;
+}
+
+.swatch.locked:hover { transform: none; border-color: var(--edge); }
+
+.locker-count {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* -------------------------------------------------------------- crate --- */
+
+.crate-name { color: var(--rarity, var(--text)); }
+
+.crate-swatch {
+  display: flex;
+  justify-content: center;
+  gap: var(--s3);
+  margin: var(--s5) 0;
+}
+
+.crate-swatch .chip {
+  width: 74px;
+  height: 74px;
+  border-radius: var(--radius);
+  border: 1px solid var(--edge-bright);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}

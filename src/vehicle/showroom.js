@@ -90,15 +90,20 @@ export class Showroom {
    * Show a vehicle, building it exactly the way a run would start it — with
    * its starting skill fitted, since that is the car the player gets.
    */
-  setVehicle(id) {
-    if (id === this.vehicleId) return;
+  setVehicle(id, look = null) {
+    // The look is part of the identity here, not a tweak on top: changing a
+    // paint has to rebuild the car, and the early return was keyed on the id
+    // alone — so equipping something while looking at it changed nothing.
+    const key = `${id}|${look?.baseColor ?? ''}|${look?.accentColor ?? ''}|${look?.rimTint ?? ''}`;
+    if (key === this.lookKey) return;
+    this.lookKey = key;
     const def = VEHICLE_BY_ID[id] ?? VEHICLES[0];
     this.vehicleId = def.id;
 
     this._disposeMesh();
     const build = new Build(def.id);
     if (def.startingSkill) build.addSkill(instantiateSkill(def.startingSkill, 1));
-    const profile = visualProfile(build.stats.all(), build.tags, def);
+    const profile = visualProfile(build.stats.all(), build.tags, def, look);
     this.mesh = new VehicleMesh(profile, { shadows: false });
     this.mesh.addTo(this.scene);
 

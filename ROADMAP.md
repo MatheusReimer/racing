@@ -78,6 +78,35 @@ should be a probe.
 
 ---
 
+## Crates: what is in them next
+
+The first slice is in — cosmetics that persist, a crate for finishing a
+tournament, and a locker to wear them from. What it does not have yet, in the
+order it was asked for:
+
+- **Wheels and rims as shapes**, not only as a tint. The hub is generated
+  geometry, so a different spoke count is a different builder rather than a
+  different colour — real work, and the most visible of what is left.
+- **Spoilers and wings.** The chassis already reshapes from stats (Top Speed
+  adds a wing), so the vocabulary exists; a cosmetic wing means separating that
+  from the stat that currently drives it.
+- **Glass tints.** `hullGlassMat` is one unlit near-black material per car, so
+  this one is nearly free — the reason it is not done is that a tint bright
+  enough to see fights the "windows must be black" the roster was just fixed to.
+- **Whole cars.** `STARTER_VEHICLE_IDS` has sat in `vehicles.js` since the
+  roster was written and nothing gates on it. Turning it on means *removing*
+  access to three cars the player has today, so it wants deciding rather than
+  doing.
+- **Multiplayer**, which is what the crates were asked for in service of, and
+  which nothing here has been built against.
+
+One thing to hold on to: crates pay only for finishing a tournament, and only
+cosmetics. Both halves matter. Paying for a loss makes it an attendance prize,
+and anything in a crate that changes how a car drives makes run twenty start
+stronger than run one — which is the thing a roguelike cannot survive.
+
+---
+
 ## The frame timer measures the wrong thing
 
 **The 85% Kanzen is gone, and it was not this that fixed it.** The entry that

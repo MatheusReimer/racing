@@ -109,6 +109,15 @@ const state = () => page.evaluate(() => ({
 }
 
 await page.goto('http://127.0.0.1:5173/', { waitUntil: 'load', timeout: 30000 });
+// A clean profile, every run.
+//
+// Cosmetics persist in `localStorage`, and a crate owed from a previous walk is
+// opened before the title screen — so without this the harness sees a crate
+// where it expects a machine, and only on the second run of the day.
+await page.evaluate(() => {
+  try { localStorage.removeItem('rogue-racer:profile:v1'); } catch { /* fine */ }
+});
+await page.reload({ waitUntil: 'load' });
 await page.waitForFunction(() => window.__game, { timeout: 20000 });
 
 // --- title ---

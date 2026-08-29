@@ -5,6 +5,7 @@ import { VEHICLES, VEHICLE_BY_ID } from '../data/vehicles.js';
 import { SKILL_BY_ID } from '../data/skills.js';
 import { Build } from '../build/build.js';
 import { previewTrack } from '../track/preview.js';
+import { COSMETICS, CRATE_RARITY } from '../data/cosmetics.js';
 import { clamp01 } from '../core/math.js';
 
 // Every screen that is not the in-race HUD.
@@ -241,6 +242,38 @@ function runBar(run) {
  * `foot.actions` is where buttons go; appending straight to `foot` still works
  * and lands them on the right, which is where they were.
  */
+/**
+ * What the player owns, and what is on the car.
+ *
+ * Everything in the catalogue is listed, owned or not: a locker that hides what
+ * you have not got is a list of what you have, and the reason to open a crate
+ * is knowing what is still in there.
+ */
+function lockerPanel(profile, onEquip) {
+  const box = el('div', 'locker');
+  for (const [slot, label] of [['paint', 'Paint'], ['rim', 'Wheels']]) {
+    box.appendChild(el('div', 'section-label', label));
+    const grid = el('div', 'locker-grid');
+    for (const item of COSMETICS.filter((c) => c.slot === slot)) {
+      const key = `${slot}:${item.id}`;
+      const owned = profile.has(key);
+      const on = profile.equipped[slot] === key;
+      const chip = el('button', `swatch${owned ? '' : ' locked'}${on ? ' on' : ''}`);
+      chip.title = owned ? item.name : `${item.name} — not found yet`;
+      chip.style.setProperty('--a', item.base ?? item.tint ?? '#6b7078');
+      chip.style.setProperty('--b', item.accent ?? item.tint ?? '#39404a');
+      chip.style.setProperty('--rarity', (CRATE_RARITY[item.rarity] ?? {}).color ?? '#9aa5b1');
+      if (owned) chip.onclick = () => onEquip?.(key);
+      grid.appendChild(chip);
+    }
+    box.appendChild(grid);
+  }
+  const total = COSMETICS.length;
+  const have = COSMETICS.filter((c) => profile.has(`${c.slot}:${c.id}`)).length;
+  box.appendChild(el('div', 'locker-count', `${have} of ${total} found`));
+  return box;
+}
+
 function frame(title, sub, run, { withPanel = false, centred = false } = {}) {
   const s = el('div', 'screen');
   if (withPanel && run) s.classList.add('has-panel');
@@ -320,8 +353,8 @@ export class Screens {
 
   // --- title / vehicle select ----------------------------------------------
 
-  title({ vehicleId, onStart, onSwitch, lastSummary }) {
-    return this.machine(vehicleId, { onStart, onSwitch, lastSummary });
+  title({ vehicleId, onStart, onSwitch, lastSummary, profile, onEquip }) {
+    return this.machine(vehicleId, { onStart, onSwitch, lastSummary, profile, onEquip });
   }
 
   // --- one machine, in detail ----------------------------------------------
@@ -336,7 +369,42 @@ export class Screens {
    * so. The arrows either side of it move along the roster, so comparing two
    * machines does not mean going back and forth through a menu.
    */
-  machine(vehicleId, { onStart, onSwitch, lastSummary }) {
+  /**
+   * A crate, opened.
+   *
+   * One screen, one item, one button. A crate that has to be clicked through a
+   * sequence of animations is a slot machine's ceremony, and there is nothing
+   * being sold here to justify it — the reward is the thing, so the screen
+   * shows the thing.
+   */
+  crate(item, { onClose, remaining = 0 }) {
+    const { root, body, foot, hint } = frame(null, null, null, { centred: true });
+
+    const rar = CRATE_RARITY[item.rarity] ?? CRATE_RARITY.common;
+    const hero = el('div', 'result-hero');
+    hero.appendChild(el('div', 'sub', esc(rar.name)));
+    hero.appendChild(el('div', 'big crate-name', esc(item.name)));
+    hero.appendChild(el('div', 'sub', item.slot === 'paint' ? 'Paint' : 'Wheels'));
+    hero.style.setProperty('--rarity', rar.color);
+    body.appendChild(hero);
+
+    const swatch = el('div', 'crate-swatch');
+    for (const c of [item.base, item.accent, item.tint].filter(Boolean)) {
+      const chip = el('div', 'chip');
+      chip.style.background = c;
+      swatch.appendChild(chip);
+    }
+    body.appendChild(swatch);
+
+    hint.textContent = remaining > 0
+      ? `${remaining} more to open` : 'Yours, on every car, from now on';
+    const go = el('button', 'btn primary', remaining > 0 ? 'Open the next' : 'Good');
+    go.onclick = onClose;
+    foot.appendChild(go);
+    return this._show(root);
+  }
+
+  machine(vehicleId, { onStart, onSwitch, lastSummary, profile, onEquip }) {
     const v = VEHICLE_BY_ID[vehicleId];
     const { root, body, foot, hint } = frame(v.name, v.tagline, null);
     root.classList.add('screen--machine');
@@ -365,6 +433,11 @@ export class Screens {
     info.appendChild(el('div', 'section-label', 'What it is'));
     info.appendChild(el('div', 'machine-identity', esc(v.identity)));
     if (v.rule) info.appendChild(el('div', 'rule', esc(v.rule.text)));
+
+    // Above the specification, not below it. The locker is the thing a player
+    // came here to touch; the numbers are reference, and reference belongs
+    // under the controls rather than in front of them.
+    if (profile) info.appendChild(lockerPanel(profile, onEquip));
 
     // The whole specification, in absolutes, computed by the same StatBlock
     // the race will run on — not the deltas the card shows, which only say

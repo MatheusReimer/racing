@@ -23,10 +23,12 @@ export { makeDefaultRivalBuild } from './sim.js';
 // and `onWreck`, and this turns those into camera shoves and effects.
 
 export class Race extends RaceSim {
-  constructor({ seed, biome, playerBuild, config = {}, quality, events, renderer }) {
+  constructor({ seed, biome, playerBuild, config = {}, quality, events, renderer, look }) {
     super({ seed, biome, playerBuild, config, events });
 
     this.quality = quality;
+    // The player's cosmetics; rivals keep their own colours.
+    this.playerLook = look ?? null;
 
     this.scene = new THREE.Scene();
     this.sky = new Sky(this.scene, renderer?.gl ?? null);
@@ -115,6 +117,7 @@ export class Race extends RaceSim {
         ...racer.build.vehicle,
         color: racer.archetype?.color || racer.build.vehicle.color,
       },
+      racer.isPlayer ? this.playerLook : null,
     );
     const mesh = new VehicleMesh(profile, this.quality.settings).addTo(this.scene);
     // The collision footprint comes from the mesh, so the visual and physical
