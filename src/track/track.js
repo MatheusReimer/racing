@@ -60,11 +60,18 @@ export const BARRIER_OFFSET = 1.1;
  * Widening the visual corridor rather than insetting the collision line keeps
  * the driving identical: the boundary a player feels has not moved.
  */
-// Sized to the *widest* car in the roster (the Truck, 2.42 m across), not the
-// average. Under-sizing it puts that one car's flank back inside the rail,
-// which is the whole artifact; over-sizing it by a few centimetres just leaves
-// a hair of daylight next to a narrow car, which nobody can see.
-export const BARRIER_CAR_CLEARANCE = 1.22;
+// Sized to the *widest* car the roster can build, not the average: under-sizing
+// puts that car's flank back inside the rail, which is the whole artifact.
+//
+// 1.05, not 1.22. The old number was sized to a Truck 2.42 m across, and there
+// is no Truck — the roster is six tuners, and the widest thing any of them
+// becomes with every widening stat pushed to its limit is the coupe at 2.036 m.
+// So the rail was drawn twenty centimetres further out than the widest flank
+// could reach, and a player stopped by the collision line saw that much
+// daylight between the car and the wall it had supposedly hit. Measured with
+// every stat maxed, plus a few millimetres, so a wide build still rests against
+// the rail rather than inside it.
+export const BARRIER_CAR_CLEARANCE = 1.05;
 export const BARRIER_RAIL_OFFSET = BARRIER_OFFSET + BARRIER_CAR_CLEARANCE;
 
 /** Where a shortcut sits relative to the racing line. */
