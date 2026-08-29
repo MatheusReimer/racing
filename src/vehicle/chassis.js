@@ -401,14 +401,21 @@ function synthLamps(hull) {
   // the way up the tail. Measured against the tail panel now, not against the
   // whole rear of the car — the old bound reached forward to the wheel arches,
   // so the outboard edge was past the corner and the patch ran off into air.
-  // 0.40 to 0.62, which is where a tail light is and, measured, where the tail
-  // panel is flattest: across the two references that need this the plane fits
-  // to 16-23 mm rms there, against 26-29 mm a band lower and 84 mm a band
-  // higher, where it starts climbing the boot lid.
-  const loY = y0 + (y1 - y0) * 0.40;
-  const hiY = y0 + (y1 - y0) * 0.62;
-  const inX = x1 * 0.42;
-  const outX = x1 * 0.88;
+  // Where a tail light is, and how big one is.
+  //
+  // The first fit ran from 0.42 to 0.88 of the tail's half-width and stood
+  // 0.22 of its height: 1.31 m from one outer edge to the other on a car 1.86 m
+  // wide, which is 70% of the back of the car in red. It did not read as a
+  // lamp, it read as a red slab, because it was one.
+  //
+  // The height band is still where the panel is flattest — measured, the plane
+  // fits to 16-23 mm rms between 0.40 and 0.62 of the tail's height, against
+  // 84 mm a band higher where it starts climbing the boot lid — but the lamp
+  // now occupies the outer part of that band rather than all of it.
+  const loY = y0 + (y1 - y0) * 0.44;
+  const hiY = y0 + (y1 - y0) * 0.56;
+  const inX = x1 * 0.56;
+  const outX = x1 * 0.90;
 
   // A hair proud, no more. What keeps the panel from drawing over the top of
   // this is the polygon offset on the lamp material, not distance.
