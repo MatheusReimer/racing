@@ -222,6 +222,7 @@ class Game {
     this.screens.shop(this.run, {
       onBuy: (item) => {
         const res = this.run.buy(item);
+        if (res.needsSlot) { this.showShopSwap(item); return; }
         this.screens.toast(res.ok ? res.text : res.reason);
         if (res.ok) this.showShop();
       },
@@ -330,6 +331,18 @@ class Game {
       this.loop.setMode('menu');
       this.showReward(outcome);
     }, 1400);
+  }
+
+  /** The same question, asked by the shop. */
+  showShopSwap(item) {
+    this.screens.swapSkill(this.run, item, {
+      onSwap: (dropId) => {
+        const res = this.run.buy(item, { drop: dropId });
+        this.screens.toast(res.ok ? res.text : res.reason);
+        this.showShop();
+      },
+      onCancel: () => this.showShop(),
+    });
   }
 
   /** Which skill to give up for the one just chosen. */

@@ -268,7 +268,7 @@ export class Run {
 
   // --- shop ----------------------------------------------------------------
 
-  buy(item) {
+  buy(item, opts = {}) {
     if (item.disabled) return { ok: false, reason: 'Nothing to buy.' };
     if (this.scrap < item.price) return { ok: false, reason: 'Not enough scrap.' };
     if (item.kind === 'part' && !this.build.canAddPart()) {
@@ -276,9 +276,12 @@ export class Run {
     }
 
     this.scrap -= item.price;
-    const res = applyOffer(item, this.build, this);
+    const res = applyOffer(item, this.build, this, opts);
     if (!res.ok) {
       this.scrap += item.price;   // refund a purchase we could not apply
+      // A full skill loadout is the same question here as on the reward
+      // screen, and asking it is not a failure. Without this the shop simply
+      // refused to sell skills once the slots were full, refunding in silence.
       return res;
     }
     this.syncBuild();

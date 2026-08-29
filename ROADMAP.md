@@ -167,6 +167,36 @@ option to weigh.
 
 ---
 
+## One currency, and the surplus that says it needs more sinks
+
+Scrap pays for everything — parts, skills, pits, garage work. The tension is
+supposed to be that the same pool serves needs on different clocks: spend it on
+a pit now to save this race, or hold it for an upgrade later, and you cannot
+hoard because losing the race loses the reward that refills it.
+
+That argument only works if scrap is scarce, and **measured, it is not**.
+`tools/economy-probe.mjs` drives a greedy shopper — every node, every shop,
+buying everything affordable cheapest-first until it cannot. It spends 447 over
+a run and ends holding 1,603. A player buying literally everything on offer
+finishes with three and a half times what they managed to spend.
+
+So the currency is roughly three to four times more abundant than there is
+anything to spend it on, and the conclusion runs the other way from the usual
+one: **the fix is more to buy, not smaller payouts.** Paid pits and paid garage
+work will be absorbed by a surplus that already exists rather than making the
+game mean.
+
+Two sinks the game is missing outright:
+
+- **The garage is free.** Repair and a skill upgrade both cost nothing today,
+  which makes the one node that exists purely to spend money the one node that
+  does not take any.
+- **Pits**, below.
+
+The probe holds this as a ratchet at 4.2 rather than failing at the target of
+3, because a suite that always fails is a suite nobody reads. The number to
+watch is the one it prints.
+
 ## Pits: pay time and money, mid-race
 
 A garage, a fuel stop, an armourer — sitting on the circuit rather than between
