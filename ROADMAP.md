@@ -5,44 +5,31 @@ and what it will touch, so picking one up does not start from scratch.
 
 ---
 
-## Make the street a street
+## Make the street a street — lane markings done
 
-**Next.** The road is a ribbon of asphalt with a red-and-white barrier down
-each side and nothing else on it. No centre line, no lane markings, no arrows,
-no crossings, no stop lines, no signs, no traffic lights. Every real street has
-all of it, and their absence is most of why the city reads as a track dressed
-as a city rather than as a city being raced through.
+The road paints its own markings in its fragment shader: a double yellow centre
+line, broken lane divides at every 3.6 m out from it, solid edge lines, chevron
+hatching along a branch's shoulders, and warning chevrons for the last forty
+metres before a split. All of it from `aLane` — where a vertex is across the
+road and how far along — so it follows the curvature for free, stays 140 mm
+wide at any distance, and costs no geometry and no draw call.
 
-What it needs, roughly in order of how much each one buys:
+What is left, and why it was not done here:
 
-- **Lane markings.** A centre line — yellow where the district wants it — and
-  white lane divides, dashed on the straights and solid through the corners the
-  way a real road marks where you may not cross. The road mesh is already built
-  ring by ring with a width profile, so markings are a second strip of geometry
-  generated from the same rings, or a texture channel on the road material.
-  Either way they follow the curvature for free.
-- **Edge lines and hatching.** A solid white line inboard of the barrier, and
-  chevron hatching where the road widens or a branch splits off. The branches
-  are the one place the player has to make a decision at speed and the road
-  currently gives no warning that a split is coming.
-- **Stop lines and crossings** at the city's intersections. `city.js` lays the
-  centreline out on a block grid, so it already knows where the junctions are.
-- **Signs and traffic lights.** `traffic_light` and `streetlight` already exist
-  as prop types with `faceRoad`, so the placement machinery is there; what is
-  missing is signage that means something — direction signs at the branches,
-  speed plates, warning triangles before the tight corners the track probe
-  already identifies.
-
-Two things to decide before building rather than after:
-
-1. **Painted or geometry.** Painted into the road texture is free to draw and
-   awkward to lay out along a curve; a separate strip is easy to place and adds
-   draw calls and z-fighting risk. The barrier rails are already generated
-   geometry following the rings, so there is a pattern to copy.
-2. **Do the lights work?** A traffic light that is always green is set
-   dressing; one that changes is a rule, and the traffic simulation would have
-   to respect it or the whole thing reads as broken. Set dressing is the
-   honest first version.
+- **Crossings and stop lines** at the city's junctions. `city.js` lays the
+  centreline out on a block grid and so knows where they are, but that
+  information does not survive into the track the renderer is given. Getting
+  it there is the work, not the painting.
+- **Arrows and words** — turn arrows in a lane, BUS, SLOW. These want a glyph,
+  which means either a texture (the first texture in the project's road path)
+  or signed-distance shapes written out by hand.
+- **Signs that mean something.** `traffic_light`, `streetlight` and `neon_sign`
+  already place and glow — seventeen traffic lights on a two-kilometre city
+  lap — but there is no direction signage at a branch and no warning plate
+  before the corners `tools/track-probe.mjs` already identifies as sharp.
+- **Lights that change.** Still the open question from before: a light that is
+  always green is set dressing, and one that changes is a rule the traffic
+  simulation would have to respect or the whole thing reads as broken.
 
 ---
 

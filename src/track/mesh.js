@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { paintMarkings } from './markings.js';
 import { asphaltTexture, groundTexture, roadNormal } from '../materials/noise.js';
 import { BARRIER_RAIL_OFFSET, ROAD_LIFT, BRANCH_LIFT } from './track.js';
 import { clamp, clamp01, lerp, wrap } from '../core/math.js';
@@ -28,17 +29,16 @@ const BARRIER_HEIGHT = 1.35;
  * so, which is exactly where the player is looking.
  */
 /** Where lane paint sits, as a fraction of half-width from the centre. */
-function laneColorAt(u, s, isBranch) {
-  // u is -1 (left edge) .. +1 (right edge)
-  const a = Math.abs(u);
-  if (isBranch) {
-    // Branches get a warning-striped edge instead of lane markings.
-    return a > 0.86 ? (Math.floor(s / 2.2) % 2 === 0 ? 1.9 : 0.55) : 1.0;
-  }
-  if (a > 0.90) return 1.75;                       // solid edge line
-  if (a < 0.055) return Math.floor(s / 9) % 2 === 0 ? 1.7 : 1.0; // centre dashes
-  return 1.0;
-}
+// Road markings are drawn by the road's own shader, from where a fragment is
+// across the road and how far along it — see `paintMarkings`.
+//
+// They used to be a brightness multiplier on the vertex colours. There are nine
+// vertices across a road twenty-four metres wide, so a "line" was a three-metre
+// gradient that read as a vague pale band, could only ever be brighter-than-
+// asphalt rather than yellow, and could not be a dash, an arrow or a stop line
+// at all. Computing them per fragment costs no geometry, no draw call, and is
+// crisp at any distance because the width is set in metres rather than in
+// vertices.
 
 function buildRibbon(path, lengthOf, halfWidthAt, opts = {}) {
   const { isBranch = false, closed = true, lift = ROAD_LIFT } = opts;
@@ -51,6 +51,7 @@ function buildRibbon(path, lengthOf, halfWidthAt, opts = {}) {
   const nor = new Float32Array(vertCount * 3);
   const uv = new Float32Array(vertCount * 2);
   const col = new Float32Array(vertCount * 3);
+  const lane = new Float32Array(vertCount * 4);
 
   const p = { x: 0, y: 0, z: 0 };
   const t = { x: 0, z: 0 };
@@ -75,8 +76,12 @@ function buildRibbon(path, lengthOf, halfWidthAt, opts = {}) {
       // repeat every ~2.2 m, which is the scale asphalt actually has.
       uv[k * 2] = u * hw * 0.45;
       uv[k * 2 + 1] = s * 0.45;
-      const c = laneColorAt(u, s, isBranch);
-      col[k * 3] = c; col[k * 3 + 1] = c; col[k * 3 + 2] = c;
+      // Where this vertex is on the road, in metres, for the marking shader.
+      lane[k * 4] = u;
+      lane[k * 4 + 1] = s;
+      lane[k * 4 + 2] = hw;
+      lane[k * 4 + 3] = isBranch ? 1 : 0;
+      col[k * 3] = 1; col[k * 3 + 1] = 1; col[k * 3 + 2] = 1;
     }
   }
 
@@ -98,6 +103,7 @@ function buildRibbon(path, lengthOf, halfWidthAt, opts = {}) {
   geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('aLane', new THREE.BufferAttribute(lane, 4));
   geo.setIndex(new THREE.BufferAttribute(idx, 1));
   geo.computeBoundingSphere();
   return geo;
@@ -472,6 +478,7 @@ export class TrackMesh {
       roughness: pal.wet ? 0.30 : 0.9,
       metalness: pal.wet ? 0.45 : 0.02,
     });
+    paintMarkings(this.roadMat, pal, track);
     this.materials.push(this.roadMat);
 
     const roadGeo = buildRibbon(track.path, track.length, (s) => track.halfWidthAt(s), {});
