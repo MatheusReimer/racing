@@ -688,8 +688,12 @@ function hullShared(hull) {
   // bodywork. Built at native size like everything else here, because the node
   // carries the scale now.
   shared.lampFront = front.length / 3 >= MIN_FACES ? cut(front) : null;
-  shared.lampRear = rear.length / 3 >= MIN_FACES
-    ? cut(rear) : loose(synthLamps(hull));
+  const markedRear = rear.length / 3 >= MIN_FACES;
+  shared.lampRear = markedRear ? cut(rear) : loose(synthLamps(hull));
+  // Which of them is a decal lying on the paint rather than geometry the
+  // reference put where it belongs. Only a decal needs the depth bias, and the
+  // bias is what made the reference lamps ragged.
+  shared.lampRearFitted = !markedRear;
   hullCache.set(hull, shared);
   return shared;
 }
@@ -1143,6 +1147,7 @@ function hullGeometry(hull, L, W, color, accent) {
     glass: shared.glass,
     lampFront: shared.lampFront,
     lampRear: shared.lampRear,
+    lampRearFitted: shared.lampRearFitted,
     // What `setDamage` needs to repaint this car without rebuilding it.
     repaint: (damage) => {
       paintHull(shared, byClass, col, damage);
@@ -2303,12 +2308,20 @@ export class VehicleMesh {
     // for a lamp visibly standing proud. Polygon offset is the tool meant for
     // exactly this — the patch keeps its true position and simply wins the
     // depth test against the surface it is lying on.
+    // The depth bias belongs to the fitted patch and to nothing else.
+    //
+    // A lamp fitted to the tail panel lies four millimetres off the paint and
+    // needs a nudge or the panel draws over it. A lamp the reference modelled
+    // is already where it goes, and biasing it pulls its rim in front of the
+    // bodywork around it — per pixel, so the light came out with a ragged
+    // cream fringe all the way round, which is the thing on the screenshots.
     const decal = { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 };
     this.lampFrontMat = new THREE.MeshBasicMaterial({
-      color: LAMP_HEAD, toneMapped: false, ...decal,
+      color: LAMP_HEAD, toneMapped: false,
     });
     this.lampRearMat = new THREE.MeshBasicMaterial({
-      color: LAMP_TAIL, toneMapped: false, ...decal,
+      color: LAMP_TAIL, toneMapped: false,
+      ...(hullLampGeo?.lampRearFitted ? decal : {}),
     });
     this.lampFront = hullLampGeo?.lampFront
       ? new THREE.Mesh(hullLampGeo.lampFront, this.lampFrontMat) : null;
