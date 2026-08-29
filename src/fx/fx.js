@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ParticleSystem, TireMarks, PRESETS } from './particles.js';
 import { clamp01, lerp } from '../core/math.js';
+import { DAMAGE_STATES, damageLevel } from '../vehicle/chassis.js';
 
 // The effects layer.
 //
@@ -173,7 +174,7 @@ export class FX {
       // per-frame probability emits twice as much at 120 fps as at 60, and at
       // any rate a chase camera sits close enough that a few extra puffs are
       // the difference between an effect and an opaque wall.
-      const rates = (r._fxRates ||= { smoke: 0, boost: 0, heat: 0, dust: 0 });
+      const rates = (r._fxRates ||= { smoke: 0, boost: 0, heat: 0, dust: 0, damage: 0 });
       const isPlayer = r.isPlayer;
 
       // Five rivals at a third of the player's rate is still 1.7x the player's
@@ -182,7 +183,10 @@ export class FX {
       let share = isPlayer ? 1 : 0.14;
       if (!isPlayer && cameraPos) {
         const d = Math.hypot(b.x - cameraPos.x, b.z - cameraPos.z);
-        if (d > 70) { rates.smoke = rates.boost = rates.heat = rates.dust = 0; continue; }
+        if (d > 70) {
+          rates.smoke = rates.boost = rates.heat = rates.dust = rates.damage = 0;
+          continue;
+        }
         share *= 1 - Math.min(0.8, d / 90);
       }
 
@@ -219,6 +223,29 @@ export class FX {
           });
         }
       } else rates.boost = 0;
+
+      // Damage: a car in trouble smokes from the engine bay, and the rate comes
+      // from the same table the mesh takes its states from — so the smoke starts
+      // in the frame the bonnet lifts rather than at some threshold of its own.
+      //
+      // The wrecked state's rate is never reached from here: durability hitting
+      // zero clears `alive`, and this loop skips a car that is not. That entry
+      // is what a wreck should smoke like if one is ever left on the road, and
+      // it is what the garage renders.
+      const health = r.maxDurability > 0 ? r.durability / r.maxDurability : 1;
+      const smokeRate = DAMAGE_STATES[damageLevel(health)].smoke;
+      if (smokeRate > 0) {
+        rates.damage += dt * smokeRate * 9 * share;
+        const n = Math.floor(rates.damage);
+        rates.damage -= n;
+        if (n > 0) {
+          // Out of the bonnet, and carried back over the car by its own speed.
+          this.particles.emit('smoke',
+            b.x + b.forwardX * 1.25, b.y + 0.78, b.z + b.forwardZ * 1.25, n, {
+              speed: 1.1, dirX: -b.forwardX * 0.5, dirZ: -b.forwardZ * 0.5,
+            });
+        }
+      } else rates.damage = 0;
 
       // Heat: a car near meltdown should look like it.
       if (r.heat > 70) {

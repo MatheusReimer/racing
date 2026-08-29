@@ -22,7 +22,9 @@ const CASES = {
     const v = VEHICLES.find((x) => x.id === opts.vehicle) || VEHICLES[0];
     const build = new Build(v.id);
     const def = opts.bodyType ? { ...v, bodyType: opts.bodyType } : v;
-    return [{ label: def.name, build, def }];
+    // `HEALTH` puts the car in a damage state, so one can be inspected close up
+    // rather than only compared at four-across size.
+    return [{ label: def.name, build, def, health: opts.health }];
   },
 
   // One car in each damage state, side by side.
@@ -132,7 +134,9 @@ export function showGarage(game, mode = 'vehicles', aspect = 1400 / 620, opts = 
       if (opts.hideUnderglow) mesh.underglow.visible = false;
     } else {
       mesh.group.position.set((col - (cols - 1) / 2) * spacing, 0, row * -11.0);
-      mesh.group.rotation.set(0, Math.PI * 0.82, 0);
+      // `YAW` turns the whole row. A comparison of front-end damage seen from
+      // behind the cars is not a comparison.
+      mesh.group.rotation.set(0, opts.yaw ?? Math.PI * 0.82, 0);
     }
     scene.add(mesh.group);
     meshes.push(mesh);

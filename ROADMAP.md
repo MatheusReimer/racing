@@ -5,63 +5,27 @@ and what it will touch, so picking one up does not start from scratch.
 
 ---
 
-## Damage you can see, at three quarters, a half, and wrecked
+## Damage you can see — done
 
-**Started.** The paint half is in: four states, the fraction plumbed from
-`Racer` to the mesh, and `tools/damage-probe.mjs` holding them apart. What is
-left is the geometry half — the hanging bumper, the lifted bonnet, the smoke —
-which is the additive-pieces job described below and has not been touched.
+Four states — untouched, hit at three quarters, in trouble at a half, wrecked
+— shown as scuffed paint, dimmed and then dead headlights, a bumper hanging
+off the nose, a lifted bonnet, and smoke out of the engine bay. `DAMAGE_STATES`
+in `src/vehicle/chassis.js` is the one table all of it reads, so the mesh and
+the effects layer cannot drift apart on where a threshold is.
 
-A car takes damage all race and looks exactly the same doing it. The
-number is in the HUD and in the run bar; the machine in front of you is not
-part of the conversation, so a run that is going badly reads as a number going
-down rather than as a car falling apart.
+`tools/damage-probe.mjs` holds ten things about it, and `node tools/garage.mjs
+damage` renders the four side by side, which is how the numbers were set.
 
-Three states, not a continuous smear — a threshold you can name is a threshold
-you can feel:
+Two things left where this touched:
 
-- **75%** — the car has been hit. Panel damage: a dented wing, a cracked lamp
-  lens that stops emitting, a lost mirror, the paint scuffed to primer along
-  one flank. Nothing that changes the silhouette.
-- **50%** — the car is in trouble. A bumper hanging, a bonnet lifted at one
-  corner, one headlight dark, glass crazed. Smoke from the engine bay at low
-  opacity. The silhouette starts to break.
-- **0%** — wrecked. Steam, stopped, the shape collapsed at whichever end took
-  the hits.
-
-What it touches, and why it is cheaper than it sounds:
-
-- `src/race/racer.js` already owns `durability` and `maxDurability` and is the
-  only thing that moves them (`takeDamage`, `repair`). The fraction is there;
-  nothing reads it for anything but the HUD.
-- `src/race/race.js:122` hands `VehicleMesh.update` a state object every frame —
-  `heatPct`, `energyFrac`, `boosting`, `steer`, `brake`. `damageFrac` belongs in
-  that object and costs nothing to add.
-- `src/vehicle/chassis.js` is where the states have to be built. The body is a
-  decimated hull with per-triangle classes (PAINT, GLASS, DARK, CHROME, LAMP),
-  and colours are per-car while positions are shared — see `hullShared`. So
-  scuffing paint to primer is a colour change on a class, which is free. Moving
-  geometry is not: displacing vertices means the car can no longer share the
-  reference's buffers with every other car built from it, which is the thing
-  that got a build from 24 ms to 7. So dents want to be *added* pieces — a
-  hanging bumper is a separate small mesh, hidden until it is not — rather than
-  a deformation of the hull.
-- Lamps are already separate unlit meshes (`lampFront`, `lampRear`,
-  `hullGlassMat`), so a dead headlight is one mesh going invisible.
-- `src/fx/particles.js` has the smoke; it needs an emitter that follows a car
-  and a reason to start.
-
-Two things to be careful about:
-
-1. **Rivals and traffic.** Rivals are `Racer`s with meshes and should show it.
-   Civilians are one instanced draw per body type with a per-instance colour —
-   damage states there would mean either a second geometry or a mask attribute
-   like the paint one. Worth deciding before building, not after.
-2. **The state has to survive the race.** A run carries durability between
-   races (`src/run/run.js`), so the car that starts race four already looks
-   beaten. That means the machine screen and the showroom show it too, which is
-   arguably the best part of the feature and is where it should be checked
-   first — it is a still image, and `tools/uiflow.mjs` already shoots it.
+- **Civilian cars show nothing.** They are one instanced draw per body type
+  with a per-instance colour, so damage there means a second geometry or a mask
+  attribute like the paint one — see `src/race/trafficmesh.js`. Rivals do show
+  it; they are `Racer`s with meshes.
+- **The wrecked state never smokes in a race.** Durability hitting zero clears
+  `alive`, and the effects loop skips a car that is not alive. The rate in the
+  table is what a wreck should look like if one is ever left on the road, and
+  it is what the garage renders.
 
 ---
 

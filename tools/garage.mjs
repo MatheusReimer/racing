@@ -47,6 +47,7 @@ const info = await page.evaluate(async ({ mode, aspect, opts }) => {
     yaw: process.env.YAW ? Number(process.env.YAW) : undefined,
     vehicle: process.env.VEHICLE || undefined,
     bodyType: process.env.BODY || undefined,
+    health: process.env.HEALTH ? Number(process.env.HEALTH) : undefined,
   },
 });
 

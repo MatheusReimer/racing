@@ -118,6 +118,120 @@ console.log('Damage states are visible, and cost nothing to hold\n');
   mesh.dispose();
 }
 
+// --- the panels come off, and only after the paint has gone -----------------
+//
+// A grey panel hanging off a car that has merely been scraped reads as a part
+// somebody bolted on, so nothing detaches at three quarters. And a panel that
+// is hidden is not just invisible: it must also cost nothing, which is what
+// `visible = false` buys and what a zero rotation would not.
+{
+  const mesh = build('rotary');
+  const seen = [];
+  for (let level = 0; level < DAMAGE_STATES.length; level++) {
+    mesh.setDamage(level === 0 ? 1 : DAMAGE_STATES[level].at - 0.001);
+    seen.push({
+      bonnet: mesh.torn.bonnet.visible,
+      bumper: mesh.torn.bumper.visible,
+      lift: mesh.torn.bonnet.rotation.x,
+      smoke: mesh.damageSmoke,
+    });
+  }
+  check('nothing has come off a car that has only been scraped',
+    !seen[0].bonnet && !seen[0].bumper && !seen[1].bonnet && !seen[1].bumper,
+    `untouched ${seen[0].bonnet || seen[0].bumper}, hit ${seen[1].bonnet || seen[1].bumper}`);
+  check('panels are off by half, and further by wrecked',
+    seen[2].bonnet && seen[2].bumper && Math.abs(seen[3].lift) > Math.abs(seen[2].lift),
+    `lift ${Math.abs(seen[2].lift).toFixed(2)} -> ${Math.abs(seen[3].lift).toFixed(2)} rad`);
+  check('smoke starts when the panels do',
+    seen[0].smoke === 0 && seen[1].smoke === 0 && seen[2].smoke > 0 && seen[3].smoke > seen[2].smoke,
+    seen.map((x) => x.smoke).join(' -> '));
+
+  // Back to health: repair has to put the car back together, not leave a
+  // bumper hanging off a fully repaired one.
+  mesh.setDamage(1);
+  check('a repaired car has its panels back',
+    !mesh.torn.bonnet.visible && !mesh.torn.bumper.visible && mesh.damageSmoke === 0,
+    'bonnet and bumper hidden, smoke off');
+  mesh.dispose();
+}
+
+// --- torn panels stay inside the car they came off --------------------------
+//
+// They are positioned from the reference's own extents, and a rotation about a
+// hinge can swing a panel a long way from where it was placed. A bumper that
+// reaches a metre past the nose is not a bumper, and it would collide with
+// nothing — the physics body is unchanged — so it would pass through cars.
+{
+  const THREE = await import('three');
+  const bounds = (obj) => new THREE.Box3().setFromObject(obj);
+  let worst = 0;
+  let worstCar = '';
+  for (const def of VEHICLES) {
+    const mesh = build(def.id);
+    mesh.setDamage(0);
+    // The bodywork, not the group: the group carries an underglow plane wider
+    // than the car, which would make any panel look well behaved.
+    const body = bounds(mesh.bodyMesh);
+    for (const piece of [mesh.torn.bonnet, mesh.torn.bumper]) {
+      const b = bounds(piece);
+      const past = Math.max(b.max.z - body.max.z, body.min.z - b.min.z,
+        b.max.x - body.max.x, body.min.x - b.min.x);
+      if (past > worst) { worst = past; worstCar = def.bodyType; }
+    }
+    mesh.dispose();
+  }
+  // A panel may hang past the bodywork, but by a hand's width. Further and it
+  // is not a panel — and nothing would hit it, since the physics body is
+  // unchanged, so it would pass through other cars.
+  check('a hanging panel stays within reach of the bodywork', worst < 0.30,
+    `worst overhang ${(worst * 100).toFixed(0)} cm (${worstCar})`);
+}
+
+// --- the smoke is wired to the same table the panels are --------------------
+//
+// The mesh and the effects layer read damage independently — one from the state
+// it is told, one from the racer's durability — so they can silently disagree,
+// and a car with its bonnet up and no smoke is the kind of wrong that looks
+// like a missing feature rather than a bug.
+{
+  const THREE = await import('three');
+  const { FX } = await import('../src/fx/fx.js');
+  const { EventBus } = await import('../src/core/events.js');
+
+  const fx = new FX(new THREE.Scene(), new EventBus(),
+    { particleBudget: 600, tireMarkSegments: 100 });
+  const seen = {};
+  const real = fx.particles.emit;
+  fx.particles.emit = (preset, x, y, z, n, opts) => {
+    seen[preset] = (seen[preset] ?? 0) + n;
+    return real(preset, x, y, z, n, opts);
+  };
+
+  // One object across the frames: the emitter accumulates its rate on the racer,
+  // so a fresh one each frame never reaches a whole particle.
+  const car = {
+    alive: true, isPlayer: true, name: 'p', heat: 0,
+    durability: 100, maxDurability: 100, sample: { onTrack: true },
+    body: {
+      x: 0, y: 0, z: 0, forwardX: 0, forwardZ: 1, rightX: 1, rightZ: 0,
+      speed: 40, drifting: false, boostTimer: 0, driftQuality: 0,
+    },
+  };
+  const puffs = (health) => {
+    for (const k of Object.keys(seen)) delete seen[k];
+    car.durability = health;
+    for (let i = 0; i < 60; i++) fx.update(1 / 60, [car], null, null);
+    return seen.smoke ?? 0;
+  };
+
+  const clean = puffs(100);
+  const hit = puffs(80);
+  const trouble = puffs(20);
+  check('a healthy car does not smoke, and one in trouble does',
+    clean === 0 && hit === 0 && trouble > 0,
+    `untouched ${clean}, hit ${hit}, in trouble ${trouble} puffs/s`);
+}
+
 console.log(fails
   ? `\n${fails} problem(s) with damage`
   : '\ndamage reads as damage, and holding it is free');

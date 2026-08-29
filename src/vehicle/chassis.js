@@ -228,16 +228,24 @@ const HULL_GLASS = 0x070a0f;
 // by rendering the four side by side (`node tools/garage.mjs damage`) rather
 // than by picking round numbers: at 0.48 the half-health car was already mostly
 // bare metal, which is what a wreck should look like and not what half is.
+// `paint` is the share of the bodywork that has stopped being paint. `bonnet`
+// and `bumper` are radians: how far the panel has come away from the car, and
+// zero means it has not. `smoke` is a rate the FX layer scales its emitter by.
+// Three quarters is cosmetic — scuffed paint, a dimmed lamp — and nothing has
+// come off yet, because a grey panel hanging off a car that has merely been
+// scraped reads as a part someone bolted on. Panels start leaving at a half.
 export const DAMAGE_STATES = [
-  { at: 1.00, paint: 0.00, lamps: 1.00 },   // untouched
-  { at: 0.75, paint: 0.13, lamps: 0.72 },   // been hit
-  { at: 0.50, paint: 0.31, lamps: 0.34 },   // in trouble
-  { at: 0.00, paint: 0.64, lamps: 0.00 },   // wrecked
+  { at: 1.00, paint: 0.00, lamps: 1.00, bonnet: 0.00, bumper: 0.00, smoke: 0.0 },
+  { at: 0.75, paint: 0.13, lamps: 0.72, bonnet: 0.00, bumper: 0.00, smoke: 0.0 },
+  { at: 0.50, paint: 0.31, lamps: 0.34, bonnet: 0.17, bumper: 0.20, smoke: 0.5 },
+  { at: 0.00, paint: 0.64, lamps: 0.00, bonnet: 0.34, bumper: 0.38, smoke: 1.0 },
 ];
 
 // Bare metal under lost paint, and the scorch around the worst of it.
 const HULL_PRIMER = 0x6b6560;
 const HULL_SCORCH = 0x322d29;
+// A torn panel shows its back, which never saw paint or daylight.
+const HULL_TORN = 0x494440;
 
 /** Which of the four states a remaining-durability fraction is in. */
 export function damageLevel(healthFrac) {
@@ -483,6 +491,7 @@ function hullShared(hull) {
 
   if (!shared.bodyClasses) shared.bodyClasses = Uint8Array.from(bodyCls);
   shared.damageRank = damageRanks(shared, hull);
+  shared.bounds = hullBounds(shared);
 
   shared.lampFront = front.length / 3 >= MIN_FACES
     ? cut(front) : loose(synthLamps(hull, 1, 1, 1, true));
@@ -490,6 +499,63 @@ function hullShared(hull) {
     ? cut(rear) : loose(synthLamps(hull, 1, 1, 1, false));
   hullCache.set(hull, shared);
   return shared;
+}
+
+/**
+ * The two panels that come away from a car, built as separate nodes.
+ *
+ * Added, never displaced. The hull's positions and normals are shared by every
+ * car built from the same reference — that sharing is why a car assembles in
+ * seven milliseconds rather than twenty-four — so bending the bonnet in the
+ * vertex buffer would bend it on every car at once, and giving this car its own
+ * copy of a fifty-thousand-triangle buffer to bend costs more than the whole
+ * feature is worth.
+ *
+ * So these sit slightly proud of the bodywork that is still there and read as
+ * the panel that has torn loose from it. Each is built around its own hinge, so
+ * a state is one rotation rather than a position and a rotation that have to
+ * agree.
+ */
+function tornPanels(bounds) {
+  const w = bounds.maxX - bounds.minX;
+  const h = bounds.maxY - bounds.minY;
+  const len = bounds.maxZ - bounds.minZ;
+
+  // Bonnet: hinged at its rear edge, so it lifts at the nose the way a bonnet
+  // does when its catch has gone. Narrower than the car, because a panel as
+  // wide as the bodywork reads as a slab laid on top of it.
+  const bonnetLen = len * 0.19;
+  const bonnetGeo = box(w * 0.44, 0.035, bonnetLen, 0, 0, bonnetLen / 2, HULL_TORN);
+  const bonnet = new THREE.Mesh(bonnetGeo, null);
+  bonnet.position.set(0, bounds.minY + h * 0.48, bounds.maxZ - bonnetLen * 1.5);
+
+  // Bumper: hinged at one end, so it drops at the other and hangs across the
+  // nose. Kept shallow — swung far it stops being a bumper and becomes a lance.
+  const bumperW = w * 0.72;
+  const bumperGeo = box(bumperW, 0.09, 0.12, -bumperW / 2, 0, 0, HULL_TORN);
+  const bumper = new THREE.Mesh(bumperGeo, null);
+  bumper.position.set(bumperW * 0.44, bounds.minY + h * 0.20, bounds.maxZ - 0.02);
+
+  return { bonnet, bumper };
+}
+
+/** The reference's own extents, so torn panels can be placed against it. */
+function hullBounds(shared) {
+  const p = shared.position.array;
+  const b = {
+    minX: Infinity, maxX: -Infinity,
+    minY: Infinity, maxY: -Infinity,
+    minZ: Infinity, maxZ: -Infinity,
+  };
+  for (let i = 0; i < p.length; i += 3) {
+    if (p[i] < b.minX) b.minX = p[i];
+    if (p[i] > b.maxX) b.maxX = p[i];
+    if (p[i + 1] < b.minY) b.minY = p[i + 1];
+    if (p[i + 1] > b.maxY) b.maxY = p[i + 1];
+    if (p[i + 2] < b.minZ) b.minZ = p[i + 2];
+    if (p[i + 2] > b.maxZ) b.maxZ = p[i + 2];
+  }
+  return b;
 }
 
 /**
@@ -641,6 +707,7 @@ function hullGeometry(hull, L, W, color, accent) {
 
   return {
     body,
+    bounds: shared.bounds,
     glass: shared.glass,
     lampFront: shared.lampFront,
     lampRear: shared.lampRear,
@@ -1642,6 +1709,25 @@ export class VehicleMesh {
     // changes and not per frame — which is three times in a bad race.
     this._repaint = hullLampGeo?.repaint ?? null;
     this._damageLevel = 0;
+    // How hard the engine bay should be smoking, for the FX layer to read.
+    this.damageSmoke = 0;
+
+    this.torn = null;
+    if (hullLampGeo?.bounds) {
+      // One material for both, and both start hidden — Three skips an invisible
+      // mesh entirely, so an undamaged car pays nothing for carrying them.
+      this.tornMat = new THREE.MeshStandardMaterial({
+        vertexColors: true, flatShading: true, roughness: 0.86, metalness: 0.12,
+        side: THREE.DoubleSide,
+      });
+      this.torn = tornPanels(hullLampGeo.bounds);
+      for (const piece of [this.torn.bonnet, this.torn.bumper]) {
+        piece.material = this.tornMat;
+        piece.visible = false;
+        piece.castShadow = !!quality?.shadows;
+        attach(piece);
+      }
+    }
 
     this.lampFrontMat = new THREE.MeshBasicMaterial({ color: LAMP_HEAD, toneMapped: false });
     this.lampRearMat = new THREE.MeshBasicMaterial({ color: LAMP_TAIL, toneMapped: false });
@@ -1858,6 +1944,18 @@ export class VehicleMesh {
     // which writes their colour every frame and would undo anything set here.
     this.lampFrontMat?.color.setHex(LAMP_HEAD).multiplyScalar(st.lamps);
     if (this.lampFront) this.lampFront.visible = st.lamps > 0;
+
+    if (this.torn) {
+      // Negative about X lifts the far edge of a panel hinged at its near one.
+      this.torn.bonnet.visible = st.bonnet > 0;
+      this.torn.bonnet.rotation.x = -st.bonnet;
+      // Rolled about Z, so the free end drops across the nose, and pitched a
+      // little so it is not a bar lying flat in front of an intact car.
+      this.torn.bumper.visible = st.bumper > 0;
+      this.torn.bumper.rotation.set(st.bumper * 0.22, 0, -st.bumper);
+    }
+
+    this.damageSmoke = st.smoke;
   }
 
   update(dt, body, state = {}, alpha = 1) {
@@ -1929,6 +2027,9 @@ export class VehicleMesh {
   }
 
   dispose() {
+    this.tornMat?.dispose();
+    this.torn?.bonnet.geometry.dispose();
+    this.torn?.bumper.geometry.dispose();
     this.lampFrontMat?.dispose();
     this.lampRearMat?.dispose();
     this.hullGlassMat?.dispose();
