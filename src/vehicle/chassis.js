@@ -595,6 +595,95 @@ export function symmetriseClasses(hull) {
 
   const out = Uint8Array.from(classes);
   const tally = new Int32Array(6);
+
+  // --- needles ---------------------------------------------------------
+  //
+  // Quadric edge collapse leaves slivers: triangles so thin they are needles.
+  // On the shape of the car they are invisible, because they lie in the
+  // surface. On the *colour* of it they are not, because a needle that came
+  // out of the decimator holding the chrome class is a grey spike lying on
+  // yellow paint, and there are twelve hundred of those on the MX-5 alone.
+  //
+  // A needle has no opinion worth keeping. Whatever the surface around it is,
+  // it is that — which is safe precisely because it is decided by shape and
+  // not by colour: a car with well-formed triangles is untouched, and the
+  // Quattro, which nobody has complained about, has almost no needles outside
+  // its paint.
+  //
+  // Quality is 1 for an equilateral triangle and falls to 0 as one collapses.
+  const NEEDLE = 0.10;
+  const qualityOf = (t) => {
+    const a = indices[t * 3] * 3;
+    const b = indices[t * 3 + 1] * 3;
+    const c = indices[t * 3 + 2] * 3;
+    const sq = (p, q) => (positions[p] - positions[q]) ** 2
+      + (positions[p + 1] - positions[q + 1]) ** 2
+      + (positions[p + 2] - positions[q + 2]) ** 2;
+    const l2 = sq(a, b) + sq(b, c) + sq(c, a);
+    if (l2 <= 0) return 0;
+    const ux = positions[b] - positions[a];
+    const uy = positions[b + 1] - positions[a + 1];
+    const uz = positions[b + 2] - positions[a + 2];
+    const vx = positions[c] - positions[a];
+    const vy = positions[c + 1] - positions[a + 1];
+    const vz = positions[c + 2] - positions[a + 2];
+    const area = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    return (4 * Math.sqrt(3) * area) / l2;
+  };
+  // Once, not once per neighbour of every needle. Recomputing it inside the
+  // inner loop was most of a two-second pass on the MX-5.
+  const quality = new Float32Array(n);
+  for (let t = 0; t < n; t++) quality[t] = qualityOf(t);
+
+  for (let t = 0; t < n; t++) {
+    if (quality[t] >= NEEDLE) continue;
+    const gx = Math.floor(Math.abs(cx[t]) / PAIR);
+    const gy = Math.floor(cy[t] / PAIR);
+    const gz = Math.floor(cz[t] / PAIR);
+    tally.fill(0);
+    let total = 0;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const list = bins.get(`${gx + dx},${gy + dy},${gz + dz}`);
+          if (!list) continue;
+          for (const u of list) {
+            if (u === t || quality[u] < NEEDLE) continue;
+            const ddx = Math.abs(cx[u]) - Math.abs(cx[t]);
+            const ddy = cy[u] - cy[t];
+            const ddz = cz[u] - cz[t];
+            if (ddx * ddx + ddy * ddy + ddz * ddz > VOTE * VOTE) continue;
+            tally[classes[u]]++; total++;
+          }
+        }
+      }
+    }
+    // Nothing well-formed nearby to take an opinion from, so leave it be.
+    if (total < 4) continue;
+    let win = 0;
+    for (let c = 1; c < 6; c++) if (tally[c] > tally[win]) win = c;
+    out[t] = win;
+  }
+
+  // --- islands: tried, and taken out again -------------------------------
+  //
+  // A pass that absorbed a region of one class enclosed by another looked like
+  // the right generalisation and was not, three times over.
+  //
+  // Enclosure alone rewrote a third of the car, because a windscreen is also
+  // enclosed entirely by paint. Restricting the absorbing class to a lens or a
+  // light fixed that and then took the Impreza's headlights off, because its
+  // entire lamp allocation is twenty-two faces in small islands and a speck is
+  // only a speck relative to what else is there. Guarding *that* let the passes
+  // feed each other — the Impreza's glass went from 169 faces to 2,301, which
+  // is windows where the car has none.
+  //
+  // Each fix was reasonable and each one moved the failure somewhere else, so
+  // it is out. The grey wedges inside the MX-5's indicators are what it was
+  // for, and they are still there. Written down rather than deleted, because
+  // the next person to look at those wedges will have this idea too.
+
+  // --- the two halves ---------------------------------------------------
   for (let t = 0; t < n; t++) {
     if (cx[t] < 0) continue;
     const gx = Math.floor(cx[t] / PAIR);
@@ -613,15 +702,15 @@ export function symmetriseClasses(hull) {
             const ddy = cy[u] - cy[t];
             const ddz = cz[u] - cz[t];
             const d = ddx * ddx + ddy * ddy + ddz * ddz;
-            if (d <= VOTE * VOTE) tally[classes[u]]++;
+            if (d <= VOTE * VOTE) tally[out[u]]++;
             if (cx[u] < 0 && d < bd) { bd = d; best = u; }
           }
         }
       }
     }
     if (best < 0) continue;
-    const a = classes[t];
-    const b = classes[best];
+    const a = out[t];
+    const b = out[best];
     if (a === b) continue;
     // Between a lens and a reflector, the lens wins, whatever the local count
     // says. That is a fact about cars rather than a thumb on the scale: what
