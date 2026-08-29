@@ -299,8 +299,23 @@ export class Renderer {
     this.height = Math.max(1, Math.floor(h * scale));
     this.pixelRatio = scale;
 
+    // The drawing buffer gets the device ratio; the scene's render scale does
+    // not apply to it.
+    //
+    // These are two different dials that were being read as one. `pixelRatio`
+    // is a performance dial on the expensive HDR scene pass — render at 85% and
+    // upscale, and the stylised look survives it. The canvas is the cheap final
+    // surface, and it was pinned to CSS pixels: on a display at device ratio 2
+    // the scene rendered 1920 wide, resolved into a 1280 canvas, and the browser
+    // stretched that back to 2560. The middle number was paid for and thrown
+    // away, and the menu turntable — which draws straight to the canvas and
+    // skips the composite entirely — was left at a third of the resolution the
+    // screen could show.
+    //
+    // Capped by `maxPixelRatio`, which is 1.0 on the lowest tier: the machines
+    // that must hold the frame rate see no change at all.
     this.gl.setPixelRatio(1);              // we manage the buffer size ourselves
-    this.gl.setSize(w, h, false);
+    this.gl.setSize(Math.max(1, Math.floor(w * dpr)), Math.max(1, Math.floor(h * dpr)), false);
     this.canvas.style.width = w + 'px';
     this.canvas.style.height = h + 'px';
 
