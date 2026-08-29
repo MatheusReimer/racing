@@ -527,10 +527,118 @@ function synthLamps(hull) {
  */
 const hullCache = new WeakMap();
 
+/**
+ * Make the two halves of a car agree about what each face is.
+ *
+ * A car is symmetric. Cut it down the middle and the two halves are the same
+ * car — so if a face on the left is a lamp and the face mirroring it is paint,
+ * one of the two is wrong. That is not a guess about a particular reference; it
+ * is true of every car there has ever been, which makes it the one rule strong
+ * enough to clean noise up without knowing what any of it is.
+ *
+ * And measured, that noise is exactly where the complaints are. Mirrored faces
+ * that disagree, per reference: 0.1% on the Quattro and 0.2% on the Impreza,
+ * the two nobody has ever complained about — against 10% on the RX-7, whose
+ * headlight has orange pixels cut through it, and 18% on the Beetle. The
+ * biggest single disagreement on the RX-7 is 811 faces of paint facing lamp,
+ * which *is* the orange in the headlight.
+ *
+ * Only disagreements are touched. A despeckle by neighbourhood was the first
+ * attempt and it reassigned nine hundred faces on the Quattro — a car with
+ * nothing wrong with it — because a local majority does not care whether the
+ * car was already right. Pairing first means a symmetric car comes out
+ * untouched, which is the only safe way to run this over every reference.
+ *
+ * Which side wins is decided by the surface around the pair, counting both
+ * halves: a lone lamp face in the middle of a wing loses to the wing.
+ */
+export function symmetriseClasses(hull) {
+  const { positions, indices, classes } = hull;
+  const n = classes.length;
+
+  // How close a face has to be to its mirror to count as its mirror, and how
+  // far to look for the local opinion. Both in metres, and both a good deal
+  // smaller than any feature on a car.
+  const PAIR = 0.06;
+  const VOTE = 0.05;
+
+  const cx = new Float32Array(n);
+  const cy = new Float32Array(n);
+  const cz = new Float32Array(n);
+  for (let t = 0; t < n; t++) {
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    for (let k = 0; k < 3; k++) {
+      const v = indices[t * 3 + k] * 3;
+      x += positions[v]; y += positions[v + 1]; z += positions[v + 2];
+    }
+    cx[t] = x / 3; cy[t] = y / 3; cz[t] = z / 3;
+  }
+
+  // A grid over the *folded* car — |x| — so a face and its mirror land in the
+  // same cell and the pairing is a local lookup rather than a search.
+  const bins = new Map();
+  for (let t = 0; t < n; t++) {
+    const k = `${Math.floor(Math.abs(cx[t]) / PAIR)},${Math.floor(cy[t] / PAIR)},${Math.floor(cz[t] / PAIR)}`;
+    let a = bins.get(k);
+    if (!a) { a = []; bins.set(k, a); }
+    a.push(t);
+  }
+
+  const out = Uint8Array.from(classes);
+  const tally = new Int32Array(6);
+  for (let t = 0; t < n; t++) {
+    if (cx[t] < 0) continue;
+    const gx = Math.floor(cx[t] / PAIR);
+    const gy = Math.floor(cy[t] / PAIR);
+    const gz = Math.floor(cz[t] / PAIR);
+    let best = -1;
+    let bd = PAIR * PAIR;
+    tally.fill(0);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const list = bins.get(`${gx + dx},${gy + dy},${gz + dz}`);
+          if (!list) continue;
+          for (const u of list) {
+            const ddx = Math.abs(cx[u]) - cx[t];
+            const ddy = cy[u] - cy[t];
+            const ddz = cz[u] - cz[t];
+            const d = ddx * ddx + ddy * ddy + ddz * ddz;
+            if (d <= VOTE * VOTE) tally[classes[u]]++;
+            if (cx[u] < 0 && d < bd) { bd = d; best = u; }
+          }
+        }
+      }
+    }
+    if (best < 0) continue;
+    const a = classes[t];
+    const b = classes[best];
+    if (a === b) continue;
+    // Between a lens and a reflector, the lens wins, whatever the local count
+    // says. That is a fact about cars rather than a thumb on the scale: what
+    // you see of a headlight from outside it is its cover. Letting the vote
+    // decide put the S15's reflector in front of its own lens on both sides at
+    // once — symmetric, and a row of cream teeth in a black light.
+    //
+    // A tie otherwise goes to the lower class id, which is arbitrary but
+    // stable: the same reference has to give the same car every load.
+    const lens = (a === 1 && b === 4) || (a === 4 && b === 1);
+    const win = lens ? 1
+      : (tally[a] === tally[b] ? Math.min(a, b) : (tally[a] > tally[b] ? a : b));
+    out[t] = win;
+    out[best] = win;
+  }
+
+  return out;
+}
+
 function hullShared(hull) {
   const cached = hullCache.get(hull);
   if (cached) return cached;
-  const { positions, indices, classes } = hull;
+  const { positions, indices } = hull;
+  const classes = symmetriseClasses(hull);
   const n = classes.length;
 
   const CENTRE_BIAS = 0.02;
