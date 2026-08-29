@@ -1,3 +1,5 @@
+import { chargesOf } from '../data/skills.js';
+
 // Pit stops: the one place scrap is spent while the race is still running.
 //
 // Everything else in the run spends scrap between races, where the decision is
@@ -39,8 +41,16 @@ const PIT_REPAIR_PER_POINT = 1.15;
 /** Scrap per point of Energy. */
 const PIT_FUEL_PER_POINT = 0.45;
 
-/** Scrap to bring one skill off cooldown. */
-const PIT_RELOAD_PER_SKILL = 26;
+/**
+ * Scrap for one round back in a skill's magazine.
+ *
+ * Set against a race's purse, which is about 55 scrap for a mid-field finish.
+ * At 22 a charge the first version wanted 220 to refill two skills, which is
+ * four races for something that lasts one — a price nobody pays is not a sink,
+ * it is a service that is not there. At 14, buying the three rounds that get
+ * you to the flag costs roughly one race's pay, which is a decision.
+ */
+const PIT_RELOAD_PER_CHARGE = 14;
 
 /** How long a car must be in the lane for the stop to count, seconds. */
 export const PIT_MIN_TIME = 0.7;
@@ -101,30 +111,41 @@ export const PIT_SERVICES = {
     id: 'armory',
     name: 'Armory',
     short: 'RELOAD',
-    blurb: 'clears skill cooldowns, one price each',
+    blurb: 'puts rounds back in your skills',
     icon: '\u{1F6E0}',
     color: '#e0954f',
-    // Discrete rather than scaled: a cooldown is either cleared or it is not,
-    // so this one buys them one at a time and stops when the money does.
+    // Discrete rather than scaled: a charge is a whole use of a skill, so this
+    // one buys them one at a time and stops when the money does.
+    //
+    // It also clears the cooldowns on the way out, free. You have just spent
+    // ten seconds stationary in a lane; a skill still counting down after that
+    // would be the lane charging you twice.
     quote(racer) {
-      const hot = (racer.cooldowns ?? []).filter((c) => (c ?? 0) > 0).length;
-      return { amount: hot, price: hot * PIT_RELOAD_PER_SKILL, unit: 'skills' };
+      const empty = (racer.charges ?? []).reduce((a, c, i) => {
+        const full = chargesOf(racer.build?.skills?.[i], racer.build?.stats);
+        return a + Math.max(0, full - (c ?? full));
+      }, 0);
+      return { amount: empty, price: empty * PIT_RELOAD_PER_CHARGE, unit: 'charges' };
     },
     apply(racer, amount) {
-      let cleared = 0;
-      const cd = racer.cooldowns ?? [];
-      // Coolest first, so a partial reload hands back the skill that was
-      // closest to being usable anyway — which is the one the player is least
-      // annoyed to be given, but also the honest reading of "as much as you
-      // could afford".
-      const order = cd.map((c, i) => [c ?? 0, i]).filter(([c]) => c > 0)
-        .sort((a, b) => a[0] - b[0]);
-      for (const [, i] of order) {
-        if (cleared >= amount) break;
-        cd[i] = 0;
-        cleared++;
+      let loaded = 0;
+      // One round at a time, into the emptiest magazine first: a partial reload
+      // should leave every skill usable rather than one skill full and the
+      // rest dry.
+      for (let k = 0; k < amount; k++) {
+        let worst = -1;
+        let gap = 0;
+        (racer.charges ?? []).forEach((c, i) => {
+          const full = chargesOf(racer.build?.skills?.[i], racer.build?.stats);
+          const missing = full - (c ?? full);
+          if (missing > gap) { gap = missing; worst = i; }
+        });
+        if (worst < 0) break;
+        racer.charges[worst] += 1;
+        loaded++;
       }
-      return cleared === 1 ? '1 skill ready' : `${cleared} skills ready`;
+      if (racer.cooldowns) racer.cooldowns.fill(0);
+      return loaded === 1 ? '1 charge loaded' : `${loaded} charges loaded`;
     },
   },
 };
@@ -176,7 +197,7 @@ export function servePit(service, racer, scrap) {
 
   // Floored for the discrete services: a third of a cooldown is not a thing to
   // hand out, and rounding up would sell what was not paid for.
-  const amount = service.unit === 'skills' || quote.unit === 'skills'
+  const amount = quote.unit === 'charges'
     ? Math.floor(quote.amount * share) : quote.amount * share;
   if (!(amount > 0)) return { paid: 0, text: 'Not enough scrap.' };
 

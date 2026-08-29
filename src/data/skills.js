@@ -543,6 +543,37 @@ export const SKILLS = [
 
 function clampFrac(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 
+/**
+ * How many times a skill can be used in one race.
+ *
+ * Cooldowns pace a skill; they do not limit it. Measured, a car firing whenever
+ * it was allowed to got about ten uses out of a 55-second race and **every**
+ * refusal was the cooldown — the Energy cost never once bit, because Energy
+ * regenerates and a skill's cooldown is always longer than the time it takes
+ * to earn its cost back. So the game had no scarcity in it at all: a Nitro was
+ * something you held down, not something you spent.
+ *
+ * Charges are the scarcity. Rarer is scarcer, which is also how a legendary
+ * stays worth its slot without simply being a bigger number.
+ */
+export const CHARGES_BY_RARITY = {
+  common: 5,
+  rare: 4,
+  epic: 3,
+  legendary: 2,
+};
+
+/**
+ * What this skill's magazine holds, for this build.
+ *
+ * @param skill  the instance, which may name its own `charges`
+ * @param stats  the build's StatBlock, for the `skillCharges` mod
+ */
+export function chargesOf(skill, stats = null) {
+  const base = skill?.charges ?? CHARGES_BY_RARITY[skill?.rarity] ?? 4;
+  return Math.max(1, base + (stats?.mod('skillCharges') ?? 0));
+}
+
 export const SKILL_BY_ID = Object.fromEntries(SKILLS.map((s) => [s.id, s]));
 
 /** The five the MVP section of the design brief calls for. */

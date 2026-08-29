@@ -505,3 +505,23 @@ html, body {
   72% { opacity: 1; }
   100% { opacity: 0; transform: translate(-50%, -62%) scale(1); }
 }
+
+/* Rounds left in a skill. Opposite corner to the key, so the two numbers on a
+   chip never read as one. */
+.skill-slot .ammo {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+/* One left is a warning; none is a fact. Pressing the key on an empty skill
+   does nothing at all, so empty has to be unmistakable at a glance. */
+.skill-slot.last .ammo { color: var(--gold); }
+
+.skill-slot.empty { opacity: 0.42; }
+.skill-slot.empty .ammo { color: var(--danger); }
+.skill-slot.empty .icon { filter: grayscale(1); }

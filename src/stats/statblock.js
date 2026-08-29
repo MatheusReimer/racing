@@ -45,6 +45,7 @@ export const MOD_CHANNELS = {
   rewardChoices: { kind: 'add', desc: 'Extra items offered after a race' },
   rerolls: { kind: 'add', desc: 'Extra reward rerolls per race' },
   skillSlots: { kind: 'add', desc: 'Extra equipped skill slots' },
+  skillCharges: { kind: 'add', desc: 'Extra uses of every skill per race' },
   partSlots: { kind: 'add', desc: 'Extra part slots' },
   pickupRadius: { kind: 'add', desc: 'Metres of pickup magnetism' },
   collisionSpeedFloor: { kind: 'add', desc: 'Minimum fraction of speed kept through an impact' },

@@ -1076,3 +1076,12 @@
   color: var(--gold);
   margin-top: var(--s1);
 }
+
+/* A skill's magazine and its cadence. Under the text, above the tags: it is a
+   fact about the skill, not a stat delta and not a keyword. */
+.card-ammo {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: var(--s1);
+}

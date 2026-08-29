@@ -1,6 +1,7 @@
 import { VehicleBody, SURFACES } from '../vehicle/physics.js';
 import { clamp, clamp01, lerp, wrap } from '../core/math.js';
 import { heatState } from '../stats/attributes.js';
+import { chargesOf } from '../data/skills.js';
 
 // A competitor: physics body + build + the three live resources.
 //
@@ -75,6 +76,9 @@ export class Racer {
 
     // Skill runtime state, one entry per equipped skill.
     this.cooldowns = build.skills.map(() => 0);
+    // The magazine. Cooldowns pace a skill within a race; this is what stops
+    // it being infinite over one — see `chargesOf`.
+    this.charges = build.skills.map((sk) => chargesOf(sk, build.stats));
     this.meltdownTimer = 0;
     this.invulnTimer = 0;
 
@@ -100,6 +104,13 @@ export class Racer {
     this.maxEnergy = p.maxEnergy;
     this.energy = Math.min(this.energy, this.maxEnergy);
     this.cooldowns = this.build.skills.map((_, i) => this.cooldowns[i] ?? 0);
+    // A skill swapped in mid-race arrives loaded; one already carried keeps
+    // whatever it has left. Capped, because a part that grants charges can be
+    // taken off as well as put on.
+    this.charges = this.build.skills.map((sk, i) => {
+      const full = chargesOf(sk, this.build.stats);
+      return this.charges?.[i] === undefined ? full : Math.min(this.charges[i], full);
+    });
   }
 
   placeAt(pose) {
@@ -122,6 +133,27 @@ export class Racer {
   get speedKmh() { return this.body.speed * 3.6; }
 
   // --- resources -----------------------------------------------------------
+
+  /**
+   * Put rounds back in the magazines.
+   *
+   * @param n  how many per skill; omitted refills them completely
+   * @returns how many were actually loaded, across every skill
+   */
+  reloadSkills(n = Infinity) {
+    let loaded = 0;
+    this.charges = this.build.skills.map((sk, i) => {
+      const full = chargesOf(sk, this.build.stats);
+      const has = this.charges?.[i] ?? full;
+      const now = Math.min(full, has + n);
+      loaded += now - has;
+      return now;
+    });
+    return loaded;
+  }
+
+  /** True while any skill still has a use left in it. */
+  get anyCharges() { return (this.charges ?? []).some((c) => c > 0); }
 
   addEnergy(amount) {
     if (amount <= 0) return 0;

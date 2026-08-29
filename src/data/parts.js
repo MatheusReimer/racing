@@ -421,6 +421,17 @@ export const PARTS = [
     mods: { energyRegenFlat: 3.2, skillCooldown: 0.82 },
     text: 'Faster regeneration, shorter cooldowns.',
   },
+  {
+    // The only source of `skillCharges`, and the only part that answers the
+    // question charges create: not "how often can I use this" but "how many
+    // times have I got left". Epic, because one more use of every skill in a
+    // race is worth more than any single cooldown or cost reduction.
+    id: 'deep_magazine', name: 'Deep Magazine', slot: 'battery', rarity: 'epic',
+    tags: ['Energy', 'Weapon'],
+    stats: { energy: 0.10 },
+    mods: { skillCharges: 1, skillCooldown: 1.12 },
+    text: 'One more use of every skill each race. Slower between them.',
+  },
 
   // ======================================================= WEAPON ==========
   {

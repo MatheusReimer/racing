@@ -184,10 +184,11 @@ for (let i = 0; i < 12; i++) {
   // Give the service something to do.
   sim.player.durability = sim.player.maxDurability * 0.35;
   sim.player.energy = 0;
-  // Long, because cooldowns tick down over the seven seconds the lane takes:
-  // at four seconds each they were all cool by the exit and the Armory
-  // correctly had nothing to sell.
-  sim.player.cooldowns = sim.player.cooldowns.map(() => 40);
+  // Empty magazines, which is what the Armory sells rounds for. (It used to
+  // sell cooldowns, and this line had to set them to forty seconds because
+  // they ticked down over the seven the lane takes and were all cool by the
+  // exit. Charges do not tick.)
+  sim.player.charges = sim.player.charges.map(() => 0);
   const before = sim.scrap;
   const r = driveLane(sim, sim.pit.lane.path, 20, 30);
   if (!r.served.length && short.length < 4) short.push(
@@ -243,6 +244,44 @@ console.log(`  stops bought by clipping the lane  ${freebies} of 12`
   + (inconclusive ? `   (${inconclusive} never got into it)` : ''));
 if (freebies) fail(`${freebies} cars were served without driving the lane`);
 else console.log('  ok  a stop has to be driven all the way through');
+
+// --- 4b. the premise the Armory rests on -----------------------------------
+//
+// A skill has to be able to run out, or the reload is a service for a problem
+// nobody has. Before charges existed, a car firing whenever it was allowed got
+// about ten uses out of a race and *every* refusal was the cooldown — the
+// Energy cost never bit once, because Energy regenerates and a cooldown is
+// always longer than the time it takes to earn the cost back.
+console.log('\nSkills run out, which is why there is somewhere to reload:\n');
+{
+  const dryAt = [];
+  const used = [];
+  for (let i = 0; i < 8; i++) {
+    const sim = makeSim(`ammo-${i}`, biomes[i % biomes.length], 0, 2);
+    sim.setAutopilot(true, 1);
+    const p = sim.player;
+    const mag = p.charges[0];
+    let fired = 0;
+    let dry = null;
+    let t = 0;
+    for (; t < 300 && sim.state !== 'finished'; t += DT) {
+      sim.update(DT, null);
+      if (sim.state !== 'racing') continue;
+      if (sim.useSkill(p, 0)) fired++;
+      if (dry === null && p.charges[0] <= 0) dry = t;
+    }
+    used.push(fired);
+    if (dry !== null && t > 0) dryAt.push(dry / t);
+    if (i === 0) console.log(`  a magazine holds ${mag}`);
+  }
+  const spent = q(used, 0.5);
+  const point = dryAt.length ? q(dryAt, 0.5) : null;
+  console.log(`  uses in a race, firing at every chance  p50 ${spent}`);
+  console.log(point == null ? '  never ran dry'
+    : `  ran dry at  ${(point * 100).toFixed(0)}% of the race`);
+  if (point == null) fail('a skill fired at every chance never runs out');
+  else console.log('  ok  spamming a skill empties it, and the lane is the way back');
+}
 
 // --- 5. what a stop costs in seconds ---------------------------------------
 //

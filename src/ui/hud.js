@@ -128,10 +128,14 @@ export class HUD {
         <span class="icon">${sk.icon || '✦'}</span>
         <span class="name">${sk.name}</span>
         <span class="lvl">${(sk.level ?? 1) > 1 ? 'L' + sk.level : ''}</span>
+        <span class="ammo"></span>
         <div class="cd"></div>
       `;
       this.nodes.skills.appendChild(el);
-      return { el, cd: el.querySelector('.cd'), skill: sk, _cd: -1, _poor: null };
+      return {
+        el, cd: el.querySelector('.cd'), ammo: el.querySelector('.ammo'),
+        skill: sk, _cd: -1, _poor: null, _ammo: null,
+      };
     });
   }
 
@@ -309,6 +313,20 @@ export class HUD {
       if (poor !== slot._poor) {
         slot.el.classList.toggle('poor', poor);
         slot._poor = poor;
+      }
+
+      // What is left in the magazine.
+      //
+      // The count, not a bar: with four or five rounds in it the difference
+      // between two and one is the whole decision, and a bar at 40% does not
+      // say "one more". Empty is the state that has to be unmistakable, since
+      // pressing the key then does nothing at all.
+      const left = p.charges?.[i] ?? null;
+      if (left !== slot._ammo) {
+        slot.ammo.textContent = left == null ? '' : String(left);
+        slot.el.classList.toggle('empty', left === 0);
+        slot.el.classList.toggle('last', left === 1);
+        slot._ammo = left;
       }
     }
 

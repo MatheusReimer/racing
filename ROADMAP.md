@@ -80,8 +80,33 @@ should be a probe.
 
 ## Skills: the missing verb, then affinity, then more of them
 
-Scoped, not started. Three pieces in this order, because each one makes the
-next worth doing.
+Three pieces in this order, because each one makes the next worth doing — and
+one that came before all of them, because without it none of them meant much.
+
+### 0. Charges — done, and it was the hole under everything else
+
+Skills were not limited. They were *paced*.
+
+Measured, a car firing whenever it was allowed to got about **ten uses out of a
+55-second race, and every single refusal was the cooldown**. The Energy cost
+never bit once — Energy regenerates passively, and every skill's cooldown is
+longer than the time it takes to earn its cost back, so the Energy economy the
+game is built around was decorative at the point where it was supposed to
+matter most. A Nitro was something you held down, not something you spent.
+
+So every skill now has a magazine: `CHARGES_BY_RARITY`, five for a common down
+to two for a legendary, plus whatever the `skillCharges` mod grants. Cooldowns
+still pace a skill inside a race; charges are what stop it being infinite over
+one. Firing at every chance now empties a skill at **27% of the race**.
+
+Magazines refill on the grid, so the limit is per race rather than per run.
+That is the softer of the two readings and it was chosen deliberately: charges
+that persist across a run risk a death spiral — no money, no ammo, lose, no
+money — and the harsher version can be had later by moving one line. The
+Armory pit is the mid-race way back, at 14 scrap a round, which is about a
+race's purse for the three that get you to the flag.
+
+It cost nothing in balance: win-rate spread stayed at 2%-17%.
 
 ### 1. Swapping — done
 
@@ -280,7 +305,7 @@ The three the game already has the machinery for:
 
   Fuel      refills Energy, which is what skills spend
   Garage    repairs Durability, which today only recovers between races
-  Armourer  clears cooldowns, or refunds skill uses
+  Armoury   puts rounds back in the magazines, and clears cooldowns free
 
 The middle one fixes something real: durability is only recoverable in the
 garage node, so a race that starts badly cannot be salvaged from inside it.

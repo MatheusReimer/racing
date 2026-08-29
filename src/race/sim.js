@@ -558,6 +558,10 @@ export class RaceSim {
     const skill = racer.build.skills[index];
     if (!skill || !skill.fire) return false;
     if ((racer.cooldowns[index] ?? 0) > 0) return false;
+    // The magazine. Checked before the cost and before the skill is asked to
+    // fire, because an empty skill is not a skill that failed — it is one that
+    // is not there this lap.
+    if ((racer.charges?.[index] ?? 0) <= 0) return false;
 
     const cost = (skill.cost ?? 0) * racer.build.stats.mod('energyCost');
     if (racer.energy < cost) return false;
@@ -570,11 +574,11 @@ export class RaceSim {
       // The instance, not just its level: a branched skill needs to know which
       // branches were taken, and only the instance carries that.
       skill,
-      skill,
     };
     const fired = skill.fire(ctx);
     if (fired === false) return false;   // skill declined; charge nothing
 
+    if (racer.charges) racer.charges[index] -= 1;
     racer.energy -= cost;
     racer.cooldowns[index] = (skill.cooldown ?? 1) * racer.build.stats.mod('skillCooldown');
     racer.stats.skillsUsed++;

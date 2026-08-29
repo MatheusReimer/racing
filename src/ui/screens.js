@@ -6,7 +6,7 @@ import { SKILL_BY_ID } from '../data/skills.js';
 import { Build } from '../build/build.js';
 import { previewTrack } from '../track/preview.js';
 import { COSMETICS, CRATE_RARITY } from '../data/cosmetics.js';
-import { branchesOf } from '../data/skills.js';
+import { branchesOf, chargesOf } from '../data/skills.js';
 import { clamp01 } from '../core/math.js';
 
 // Every screen that is not the in-race HUD.
@@ -160,6 +160,14 @@ function offerCard(offer, build, onPick) {
   head.appendChild(el('span', 'card-slot', esc(slotLabel)));
   card.appendChild(head);
   card.appendChild(el('div', 'card-text', esc(offer.text)));
+  // How many times you get to use it in a race. A skill's power means nothing
+  // without its magazine — three uses of a big one and five of a small one is
+  // the whole comparison — and this was the number the player could not see.
+  if (offer.kind === 'skill' && offer.skill) {
+    const mag = chargesOf(offer.skill, build?.stats);
+    card.appendChild(el('div', 'card-ammo',
+      `${mag} use${mag === 1 ? '' : 's'} a race · ${offer.skill.cooldown ?? 1}s between`));
+  }
   if (offer.tags) card.appendChild(tagRow(offer.tags, build));
   const d = deltaRow(offer, build);
   if (d) card.appendChild(d);
