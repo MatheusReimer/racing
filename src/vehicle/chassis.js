@@ -310,13 +310,21 @@ const LAMP_BRAKE = 0xff2a18;
 const LAMP_REVERSE = 0xeef2ff;
 
 /**
- * Lamps for a car whose reference never said where its lamps were.
+ * A *rear* lamp for a car whose reference never said where its lamps were.
  *
- * Four of the seven references do not mark them: the MX-5's headlights are
- * pop-ups and the model has them shut, and the others simply name every
- * material `Material.005`. A car with no brake light is worse than a car with
- * an approximate one — it is the single thing the driver behind you reads — so
- * where the reference is silent a pair is placed from the car's own shape.
+ * Rear only, and that is the whole of the justification. A car with no brake
+ * light is worse than a car with an approximate one — it is the single thing
+ * the driver behind you reads, and `LAMP_BRAKE` is live: a rival lifting off
+ * ahead of you is information the game actually gives.
+ *
+ * There is no such argument at the front, and the front is where this did its
+ * damage. Nobody reads your headlights from behind you, and the references
+ * already draw whatever headlight the car has: the 205's are part of its front
+ * panel, and the MX-5's are pop-ups the model has *raised*. Fitting a second
+ * pair to the nose put two cream rectangles on the paint of a car that already
+ * had headlights, and on a white or a yellow car that patch was the first
+ * thing you saw. So the front is left to the reference, and if the reference
+ * did not mark a lamp there, none is drawn.
  *
  * The patch is a *fitted mesh*, not a rectangle.
  *
@@ -334,108 +342,162 @@ const LAMP_REVERSE = 0xeef2ff;
  * and the quads around them are simply not emitted — which is what stops a
  * lamp wrapping around a corner that is not there.
  */
-function synthLamps(hull, atFront) {
-  const { positions } = hull;
-  const sign = atFront ? 1 : -1;
+function synthLamps(hull) {
+  const { positions, indices } = hull;
+  const sign = -1;
   const endZ = sign * hull.length * 0.5;
   const band = hull.length * 0.14;
+
+  // The tail panel, as faces rather than as points.
+  //
+  // Depth used to be the rearmost point of the *whole car* at each (x, y):
+  // near a corner that is sometimes the tail panel and sometimes something
+  // half a metre further forward, and the quads joined those two answers into
+  // a zigzag that cut through the paint and poked out the other side. A lamp
+  // sits on the panel that faces the way it shines, so only faces that
+  // actually face that way get a say.
+  const faces = [];
+  for (let t = 0; t < indices.length; t += 3) {
+    const a = indices[t] * 3;
+    const b = indices[t + 1] * 3;
+    const c = indices[t + 2] * 3;
+    const cz = (positions[a + 2] + positions[b + 2] + positions[c + 2]) / 3;
+    if (Math.abs(cz - endZ) > band) continue;
+    const ux = positions[b] - positions[a];
+    const uy = positions[b + 1] - positions[a + 1];
+    const uz = positions[b + 2] - positions[a + 2];
+    const vx = positions[c] - positions[a];
+    const vy = positions[c + 1] - positions[a + 1];
+    const vz = positions[c + 2] - positions[a + 2];
+    const nz = ux * vy - uy * vx;
+    const nx = uy * vz - uz * vy;
+    const ny = uz * vx - ux * vz;
+    const len = Math.hypot(nx, ny, nz);
+    if (len < 1e-9) continue;
+    // Facing out of the back. Winding is not reliable across the references, so
+    // the test is on the axis alone and either direction counts.
+    if (Math.abs(nz / len) < 0.55) continue;
+    faces.push([
+      (positions[a] + positions[b] + positions[c]) / 3,
+      (positions[a + 1] + positions[b + 1] + positions[c + 1]) / 3,
+      cz,
+    ]);
+  }
+  // Too little tail panel to sit a lamp on. Better nothing than a decal on the
+  // paint: this is only worth having when it can lie flat.
+  if (faces.length < 40) return null;
 
   let x1 = 0;
   let y0 = Infinity;
   let y1 = -Infinity;
-  for (let i = 0; i < positions.length; i += 3) {
-    if (Math.abs(positions[i + 2] - endZ) > band) continue;
-    x1 = Math.max(x1, Math.abs(positions[i]));
-    y0 = Math.min(y0, positions[i + 1]);
-    y1 = Math.max(y1, positions[i + 1]);
+  for (const f of faces) {
+    x1 = Math.max(x1, Math.abs(f[0]));
+    y0 = Math.min(y0, f[1]);
+    y1 = Math.max(y1, f[1]);
   }
   if (!Number.isFinite(y0) || x1 <= 0) return null;
 
   // Where a lamp goes: outboard, in the band between a third and two thirds of
-  // the way up that end.
-  const loY = y0 + (y1 - y0) * 0.34;
-  const hiY = y0 + (y1 - y0) * 0.58;
-  const inX = x1 * 0.40;
-  const outX = x1 * 0.86;
+  // the way up the tail. Measured against the tail panel now, not against the
+  // whole rear of the car — the old bound reached forward to the wheel arches,
+  // so the outboard edge was past the corner and the patch ran off into air.
+  // 0.40 to 0.62, which is where a tail light is and, measured, where the tail
+  // panel is flattest: across the two references that need this the plane fits
+  // to 16-23 mm rms there, against 26-29 mm a band lower and 84 mm a band
+  // higher, where it starts climbing the boot lid.
+  const loY = y0 + (y1 - y0) * 0.40;
+  const hiY = y0 + (y1 - y0) * 0.62;
+  const inX = x1 * 0.42;
+  const outX = x1 * 0.88;
 
-  // Six by four quads. Coarser than it could be on purpose: the reference is
-  // decimated to fifty thousand triangles for the whole car, so a patch this
-  // size holds only a few dozen vertices, and a finer grid simply means more
-  // nodes that catch none of them.
-  const GX = 6;
-  const GY = 4;
-  const NX = GX + 1;
-  const NY = GY + 1;
-  const cw = (outX - inX) / GX;
-  const ch = (hiY - loY) / GY;
   // A hair proud, no more. What keeps the panel from drawing over the top of
   // this is the polygon offset on the lamp material, not distance.
-  const LIFT = 0.002;
+  const LIFT = 0.004;
+  // How far the panel may depart from flat before it is not a place to put a
+  // lamp — as *rms*, not as the worst sample.
+  //
+  // The worst is the wrong question and gating on it rejected every car: a
+  // panel that fits to 20 mm rms still has half a dozen faces 60 mm out where
+  // it turns the corner into the bumper, and those are not what the lamp sits
+  // on. 30 mm rms passes the two references that need a lamp fitted and would
+  // reject a boot lid.
+  const MAX_RMS = 0.030;
 
   const out = [];
   for (const side of [-1, 1]) {
-    const depth = new Float32Array(NX * NY).fill(-Infinity);
-    for (let i = 0; i < positions.length; i += 3) {
-      const px = positions[i] * side;
-      const py = positions[i + 1];
-      if (px < inX - cw || px > outX + cw) continue;
-      if (py < loY - ch || py > hiY + ch) continue;
-      const gx = Math.round((px - inX) / cw);
-      const gy = Math.round((py - loY) / ch);
-      if (gx < 0 || gx >= NX || gy < 0 || gy >= NY) continue;
-      const pz = positions[i + 2] * sign;
-      const k = gy * NX + gx;
-      if (pz > depth[k]) depth[k] = pz;
+    // The samples under this lamp, in the lamp's own frame.
+    const pick = [];
+    for (const f of faces) {
+      const px = f[0] * side;
+      if (px < inX || px > outX) continue;
+      if (f[1] < loY || f[1] > hiY) continue;
+      pick.push([px, f[1], f[2] * sign]);
     }
+    // A lamp needs a panel under most of it, not a corner of one.
+    if (pick.length < 12) continue;
 
-    // Close the gaps the decimation left.
+    // Least squares z = a + b*x + c*y over those samples.
     //
-    // A node with no sample means the reference was coarse there, not that the
-    // car has a hole in it — but the first version dropped every quad touching
-    // one, so a lamp came out as a grid of scattered rectangles with the
-    // grille showing between them. Filling from filled neighbours rebuilds a
-    // continuous lens. Two passes only: that reaches across the gaps the
-    // decimation makes and stops well short of inventing bodywork where the
-    // patch genuinely runs off the corner of the car.
-    for (let pass = 0; pass < 2; pass++) {
-      const before = depth.slice();
-      for (let gy = 0; gy < NY; gy++) {
-        for (let gx = 0; gx < NX; gx++) {
-          const k = gy * NX + gx;
-          if (Number.isFinite(before[k])) continue;
-          let sum = 0;
-          let n = 0;
-          for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-            const nx = gx + dx;
-            const ny = gy + dy;
-            if (nx < 0 || nx >= NX || ny < 0 || ny >= NY) continue;
-            const j = ny * NX + nx;
-            if (Number.isFinite(before[j])) { sum += before[j]; n++; }
-          }
-          if (n) depth[k] = sum / n;
-        }
-      }
+    // A plane, not a depth per node. Fitting each node its own depth is what
+    // made these come out as blobs: the shape stopped being a lamp and became
+    // a drawing of which grid nodes happened to catch a vertex. A tail light
+    // is a rectangle on a panel, so the panel is what gets measured and the
+    // rectangle is what gets drawn.
+    let n = 0;
+    let sx = 0, sy = 0, sz = 0, sxx = 0, sxy = 0, syy = 0, sxz = 0, syz = 0;
+    for (const [px, py, pz] of pick) {
+      n++; sx += px; sy += py; sz += pz;
+      sxx += px * px; sxy += px * py; syy += py * py;
+      sxz += px * pz; syz += py * pz;
     }
+    // Solve the 3x3 normal equations by Cramer's rule.
+    const m = [[n, sx, sy], [sx, sxx, sxy], [sy, sxy, syy]];
+    const rhs = [sz, sxz, syz];
+    const det3 = (q) => q[0][0] * (q[1][1] * q[2][2] - q[1][2] * q[2][1])
+      - q[0][1] * (q[1][0] * q[2][2] - q[1][2] * q[2][0])
+      + q[0][2] * (q[1][0] * q[2][1] - q[1][1] * q[2][0]);
+    const D = det3(m);
+    if (Math.abs(D) < 1e-12) continue;
+    const sub = (col) => m.map((row, i) => row.map((v, j) => (j === col ? rhs[i] : v)));
+    const A = det3(sub(0)) / D;
+    const B = det3(sub(1)) / D;
+    const C = det3(sub(2)) / D;
 
-    const vx = (gx) => side * (inX + gx * cw);
-    const vy = (gy) => loY + gy * ch;
-    const vz = (k) => (depth[k] + LIFT) * sign;
+    // Does the panel actually lie on that plane?
+    let sq = 0;
+    for (const [px, py, pz] of pick) {
+      const e = pz - (A + B * px + C * py);
+      sq += e * e;
+    }
+    if (Math.sqrt(sq / pick.length) > MAX_RMS) continue;
 
+    // Stand the plane off the panel's high points.
+    //
+    // The mean plane runs *through* the surface by definition, so half the
+    // bodywork under a lamp sitting on it is in front of it — and the panel
+    // drew over the middle of the lens, which came out as a rectangle with a
+    // bite taken out. The lamp is lifted to clear all but the highest few
+    // per cent: clearing the single worst face would stand it off by as much
+    // as the panel's worst fold, which is a lens floating on stalks.
+    const above = pick
+      .map(([px, py, pz]) => pz - (A + B * px + C * py))
+      .sort((u, v) => u - v);
+    const clear = Math.max(0, above[Math.floor(above.length * 0.95)] ?? 0);
+
+    // A rectangle on the plane, two quads across so it still shades.
+    const zAt = (px, py) => (A + B * px + C * py + clear + LIFT) * sign;
+    const GX = 2;
+    const GY = 1;
     for (let gy = 0; gy < GY; gy++) {
       for (let gx = 0; gx < GX; gx++) {
-        const k00 = gy * NX + gx;
-        const k10 = k00 + 1;
-        const k01 = k00 + NX;
-        const k11 = k01 + 1;
-        // A quad is emitted only where the reference put bodywork under all
-        // four of its corners.
-        if (!Number.isFinite(depth[k00]) || !Number.isFinite(depth[k10])
-          || !Number.isFinite(depth[k01]) || !Number.isFinite(depth[k11])) continue;
-
-        const a = [vx(gx), vy(gy), vz(k00)];
-        const b = [vx(gx + 1), vy(gy), vz(k10)];
-        const c = [vx(gx + 1), vy(gy + 1), vz(k11)];
-        const d = [vx(gx), vy(gy + 1), vz(k01)];
+        const px0 = inX + ((outX - inX) * gx) / GX;
+        const px1 = inX + ((outX - inX) * (gx + 1)) / GX;
+        const py0 = loY + ((hiY - loY) * gy) / GY;
+        const py1 = loY + ((hiY - loY) * (gy + 1)) / GY;
+        const a = [side * px0, py0, zAt(px0, py0)];
+        const b = [side * px1, py0, zAt(px1, py0)];
+        const c = [side * px1, py1, zAt(px1, py1)];
+        const d = [side * px0, py1, zAt(px0, py1)];
         // Wound so the lamp faces out of the end it is on.
         const quad = (side * sign > 0) ? [a, b, c, a, c, d] : [a, c, b, a, d, c];
         for (const q of quad) out.push(q[0], q[1] - hull.ground, q[2]);
@@ -625,10 +687,9 @@ function hullShared(hull) {
   // Where the reference marked too few faces to be a lamp, fit a pair to the
   // bodywork. Built at native size like everything else here, because the node
   // carries the scale now.
-  shared.lampFront = front.length / 3 >= MIN_FACES
-    ? cut(front) : loose(synthLamps(hull, true));
+  shared.lampFront = front.length / 3 >= MIN_FACES ? cut(front) : null;
   shared.lampRear = rear.length / 3 >= MIN_FACES
-    ? cut(rear) : loose(synthLamps(hull, false));
+    ? cut(rear) : loose(synthLamps(hull));
   hullCache.set(hull, shared);
   return shared;
 }

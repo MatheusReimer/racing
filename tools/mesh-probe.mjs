@@ -208,13 +208,22 @@ for (const c of cases) {
   }
 }
 
-// --- and each of them has lamps that say something -------------------------
+// --- and each of them has a brake light that says something ----------------
 //
 // A car with no brake light is worse than one with an approximate light: it is
-// the single thing the driver behind you reads. Only three of seven references
-// mark their lamps — the MX-5's headlights are pop-ups and the model has them
-// shut, and several name every material `Material.005` — so the rest are placed
-// from the car's own shape, and this is what says whether that happened.
+// the single thing the driver behind you reads, and `LAMP_BRAKE` is live. Not
+// every reference marks its lamps, so where one is silent a rear pair is fitted
+// to the tail panel, and this is what says whether that happened.
+//
+// The *front* is not required, and that is a decision rather than a gap.
+//
+// This used to demand a front lamp too, and fitting one to a car whose
+// reference did not mark any put two cream rectangles on the paint — on a white
+// or a yellow car it was the first thing you saw. Nobody reads your headlights
+// from behind you, and the references already draw whatever headlight the car
+// has: the 205's is part of its front panel, and the MX-5's are pop-ups the
+// model has raised. So a front lamp is checked when it exists and never
+// invented, which is why three cars legitimately report zero here.
 {
   console.log('');
   for (const c of cases) {
@@ -235,7 +244,7 @@ for (const c of cases) {
     const braking = drive({ state: { brake: 1 } });
     const reversing = drive({ forwardSpeed: -3 });
 
-    const bad = f === 0 || r === 0 || cruise === braking || braking === reversing;
+    const bad = r === 0 || cruise === braking || braking === reversing;
     if (bad) problems++;
     console.log(`  ${c.label.padEnd(13)} lamps ${String(f / 3).padStart(5)} front `
       + `${String(r / 3).padStart(5)} rear   `
