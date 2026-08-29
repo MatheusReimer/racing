@@ -236,6 +236,18 @@ export const BIOMES = [
 
       night: true,
       wet: true,
+
+      // The moon sits where the key light comes from, so the shadows on the
+      // street point away from the thing casting them. Bigger than the real
+      // one — half a degree is a speck, and the point of it is to be seen.
+      // Kept lower than a real moon would be at this hour: a city street is a
+      // canyon, and the band of sky a driver can actually see is a few degrees
+      // wide above the rooflines. Higher and it is a moon nobody sees.
+      moon: { size: 0.038, elevation: 0.36, color: '#e9eefc' },
+      // The matte beyond the fog: a silhouette a shade above the fog colour,
+      // so the towers separate from it without becoming a wall of cut-outs.
+      skylineColor: '#1b2740',
+      skylineWindow: '#ffd39a',
     },
 
     propDensity: 1.25,

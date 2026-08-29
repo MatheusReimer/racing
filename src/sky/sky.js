@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clamp01 } from '../core/math.js';
+import { Skyline } from './skyline.js';
 
 // Sky dome and the lighting rig that goes with it.
 //
@@ -38,8 +39,15 @@ uniform vec3  uZenith;
 uniform vec3  uSunColor;
 uniform vec3  uSunDir;
 uniform float uSunSize;
+uniform float uSunStrength;
 uniform float uHaze;
 uniform float uTime;
+uniform vec3  uMoonDir;
+uniform vec3  uMoonColor;
+// x = cos(outer radius), y = cos(inner radius): the disc's soft edge, as
+// cosines so the fragment never needs an acos.
+uniform vec2  uMoonEdge;
+uniform float uMoonStrength;
 varying vec3 vDir;
 
 // Hash-based value noise, just enough for a drifting haze band.
@@ -65,7 +73,26 @@ void main() {
   float sd = max(dot(normalize(vDir), normalize(uSunDir)), 0.0);
   float disc = pow(sd, 1.0 / max(uSunSize, 1e-3));
   float halo = pow(sd, 6.0) * 0.35;
-  col += uSunColor * (disc * 2.4 + halo);
+  col += uSunColor * (disc * 2.4 + halo) * uSunStrength;
+
+  // Moon. A disc with a soft rim and a wide halo, plus the same value noise
+  // used for the haze mottling its face — a flat white dot reads as a bug.
+  if (uMoonStrength > 0.0) {
+    vec3 d = normalize(vDir);
+    float md = dot(d, uMoonDir);
+    float disc = smoothstep(uMoonEdge.x, uMoonEdge.y, md);
+    if (disc > 0.0) {
+      // Coordinates across the moon's face, for the mare.
+      vec3 up = abs(uMoonDir.y) > 0.9 ? vec3(1, 0, 0) : vec3(0, 1, 0);
+      vec3 rx = normalize(cross(up, uMoonDir));
+      vec3 ry = cross(uMoonDir, rx);
+      vec2 uv = vec2(dot(d, rx), dot(d, ry)) * 46.0;
+      float mare = 0.80 + 0.20 * noise(uv);
+      col = mix(col, uMoonColor * mare, disc * uMoonStrength);
+    }
+    float glow = pow(max(md, 0.0), 340.0) * 0.5 + pow(max(md, 0.0), 24.0) * 0.05;
+    col += uMoonColor * glow * uMoonStrength;
+  }
 
   // Haze band sitting on the horizon, drifting slowly.
   float band = exp(-abs(h) * 5.0);
@@ -98,8 +125,13 @@ export class Sky {
         uSunColor: { value: new THREE.Color('#ffd9a0') },
         uSunDir: { value: new THREE.Vector3(0.4, 0.3, -0.8) },
         uSunSize: { value: 0.0016 },
+        uSunStrength: { value: 1 },
         uHaze: { value: 0.55 },
         uTime: { value: 0 },
+        uMoonDir: { value: new THREE.Vector3(-0.55, 0.42, 0.72).normalize() },
+        uMoonColor: { value: new THREE.Color('#e8eefb') },
+        uMoonEdge: { value: new THREE.Vector2(Math.cos(0.030), Math.cos(0.026)) },
+        uMoonStrength: { value: 0 },
       },
     });
 
@@ -125,8 +157,15 @@ export class Sky {
     this.hemi = new THREE.HemisphereLight(0xffffff, 0x404040, 0.7);
     scene.add(this.hemi);
 
+    // The far matte — distant towers and aircraft — for districts that ask for
+    // one. Built on demand so a desert pays nothing for a skyline.
+    this.skyline = null;
+
     this.time = 0;
   }
+
+  /** Where the sun is, in azimuth, so the moon can be put somewhere else. */
+  static _azimuth(p) { return p.sunAzimuth ?? 2.1; }
 
   /** Point the whole rig at a biome's palette. */
   apply(biome, quality) {
@@ -149,6 +188,30 @@ export class Sky {
     ).normalize();
     u.uSunDir.value.copy(dir);
 
+    // The moon, for districts that say they are at night. It is drawn in the
+    // dome's own shader rather than as a billboard, so it costs no draw call
+    // and cannot end up in front of anything.
+    //
+    // It defaults to where the sun is, because at night the sun *is* the moon:
+    // the palette's own note on the city says "the moon is the key", and a moon
+    // painted anywhere else leaves the shadows pointing at nothing. The sun's
+    // disc is switched off when there is one, so the two do not overlap.
+    const moon = p.moon;
+    u.uMoonStrength.value = moon ? (moon.strength ?? 1) : 0;
+    u.uSunStrength.value = moon ? 0 : 1;
+    if (moon) {
+      const mElev = moon.elevation ?? (elev * Math.PI * 0.5);
+      const mAzim = moon.azimuth ?? Sky._azimuth(p);
+      u.uMoonDir.value.set(
+        Math.cos(mAzim) * Math.cos(mElev),
+        Math.sin(mElev),
+        Math.sin(mAzim) * Math.cos(mElev),
+      ).normalize();
+      u.uMoonColor.value.set(moon.color ?? '#e8eefb');
+      const r = moon.size ?? 0.030;
+      u.uMoonEdge.value.set(Math.cos(r), Math.cos(r * 0.88));
+    }
+
     this.sun.position.copy(dir).multiplyScalar(160);
     this.sun.color.set(p.sun);
     this.sun.intensity = p.sunIntensity ?? 3.1;
@@ -169,6 +232,17 @@ export class Sky {
     this.hemi.color.set(p.hemiColor ?? p.sky[1]);
     this.hemi.groundColor.set(p.ground);
     this.hemi.intensity = p.hemiIntensity ?? 1.45;
+
+    // Distant towers, past anything the scatter can afford to place. On by
+    // default where a district is a city; a palette can say otherwise.
+    const wantsSkyline = p.skyline ?? !!biome.city;
+    if (wantsSkyline && !this.skyline) {
+      this.skyline = new Skyline(this.scene, { seed: `skyline:${biome.id}` });
+    } else if (!wantsSkyline && this.skyline) {
+      this.skyline.dispose();
+      this.skyline = null;
+    }
+    this.skyline?.apply(p);
 
     this.configureShadows(quality);
 
@@ -199,6 +273,7 @@ export class Sky {
     this.material.uniforms.uTime.value = this.time;
     this.mesh.position.copy(cameraPos);
     this.mesh.scale.setScalar(1); // depth trick makes the radius irrelevant
+    this.skyline?.update(dt, cameraPos);
 
     if (this.sun.castShadow) {
       const d = this.material.uniforms.uSunDir.value;
@@ -213,6 +288,8 @@ export class Sky {
   }
 
   dispose() {
+    this.skyline?.dispose();
+    this.skyline = null;
     this.mesh.geometry.dispose();
     this.material.dispose();
     this.scene.remove(this.mesh, this.sun, this.sun.target, this.fill, this.hemi);
