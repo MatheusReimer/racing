@@ -89,6 +89,39 @@ export function showGarage(game, mode = 'vehicles', aspect = 1400 / 620, opts = 
   rim.position.set(-6, 3, -5);
   scene.add(rim);
 
+  // An environment to reflect.
+  //
+  // Since the sky started baking itself into one, every material in the game
+  // has had something to reflect except the ones in here — so this tool has
+  // been quietly misrepresenting the thing it exists to judge: clear coat and
+  // chrome both look like flat paint against a scene with no environment. A
+  // three-stop gradient is enough; the point is that there is a sky above and
+  // ground below rather than a void.
+  {
+    const env = new THREE.Scene();
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 16, 12),
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position);'
+          + ' gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+        fragmentShader: 'varying vec3 vD; void main(){'
+          + ' float h = clamp(vD.y, -1.0, 1.0);'
+          + ' vec3 c = mix(vec3(0.30,0.33,0.38), vec3(0.62,0.72,0.88), clamp(h*2.0,0.0,1.0));'
+          + ' c = mix(vec3(0.10,0.10,0.11), c, clamp(h*4.0+1.0,0.0,1.0));'
+          + ' gl_FragColor = vec4(c, 1.0); }',
+      }),
+    );
+    env.add(dome);
+    const pmrem = new THREE.PMREMGenerator(game.renderer.gl);
+    const rt = pmrem.fromScene(env, 0, 0.1, 100);
+    scene.environment = rt.texture;
+    scene.environmentIntensity = 1.0;
+    dome.geometry.dispose();
+    dome.material.dispose();
+    pmrem.dispose();
+  }
+
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(240, 240),
     new THREE.MeshStandardMaterial({ color: 0x1b2027, roughness: 0.9 }),
@@ -163,7 +196,11 @@ export function showGarage(game, mode = 'vehicles', aspect = 1400 / 620, opts = 
     // Low and close: an artifact under the car is only visible from near the
     // ground plane, which is exactly where a chase camera sits in play.
     const h = opts.eye ?? 0.55;
-    cam.position.set(4.2, h, 5.6);
+    // `DIST` scales the whole rig in, for looking at a crease rather than at a
+    // silhouette. Judging a shading change from four metres away is judging
+    // whether you can see it from four metres away.
+    const d = opts.dist ?? 1;
+    cam.position.set(4.2 * d, h, 5.6 * d);
     cam.lookAt(0, opts.aim ?? 0.55, 0);
   } else {
     // Backed off by however much wider than three the row is, so a four-across

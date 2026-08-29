@@ -48,6 +48,7 @@ const info = await page.evaluate(async ({ mode, aspect, opts }) => {
     vehicle: process.env.VEHICLE || undefined,
     bodyType: process.env.BODY || undefined,
     health: process.env.HEALTH ? Number(process.env.HEALTH) : undefined,
+    dist: process.env.DIST ? Number(process.env.DIST) : undefined,
   },
 });
 

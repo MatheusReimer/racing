@@ -122,15 +122,20 @@ const BODY = /* glsl */`
       d = mod(d + uLapLength * 0.5, uLapLength) - uLapLength * 0.5;
       if (d < 4.0 || d > 46.0) continue;
 
-      // The outer half of the lane the branch leaves from.
+      // One lane wide, centred on the lane the branch leaves from — not the
+      // whole outer half of the road, which is what the first version marked:
+      // chevrons eight metres across every nine metres read as a pattern
+      // somebody painted, not as an arrow pointing anywhere.
       float side = uSplits[i].y;
       float lane = x * side;
-      if (lane < halfW * 0.30 || lane > halfW - EDGE_INSET - 0.2) continue;
+      float centre = min(halfW - EDGE_INSET - LANE_WIDTH * 0.5, LANE_WIDTH * 1.5);
+      float off = lane - centre;
+      if (abs(off) > LANE_WIDTH * 0.5) continue;
 
       // A V pointing the way you are going: the two arms are the same line in
-      // (across, along), mirrored.
-      float v = abs(lane - halfW * 0.62) * 1.5 - d;
-      float arrow = band(mod(v, 9.0) - 4.5, LINE * 3.2);
+      // (across, along), mirrored about the lane's centre.
+      float v = abs(off) * 1.6 - d;
+      float arrow = band(mod(v, 5.0) - 2.5, LINE * 2.4);
       // Fading in rather than starting at full strength, so the last one before
       // the split is the loudest.
       paint = max(paint, arrow * smoothstep(46.0, 22.0, d));

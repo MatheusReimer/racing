@@ -247,6 +247,16 @@ const HULL_SCORCH = 0x322d29;
 // A torn panel shows its back, which never saw paint or daylight.
 const HULL_TORN = 0x494440;
 
+// What paint turns into where the light does not reach it.
+//
+// Not simply darker. A shaded panel is lit by the sky rather than by the sun,
+// so it goes *cooler* and loses saturation — and a car whose shadowed side is
+// the same hue at half brightness is the single clearest tell of a moulded
+// plastic toy. This is the colour the occluded parts are pulled toward, and
+// how far.
+const PAINT_SHADOW = 0x2a3444;
+const PAINT_SHADOW_MIX = 0.55;
+
 /** Which of the four states a remaining-durability fraction is in. */
 export function damageLevel(healthFrac) {
   const h = Number.isFinite(healthFrac) ? healthFrac : 1;
@@ -491,6 +501,7 @@ function hullShared(hull) {
 
   if (!shared.bodyClasses) shared.bodyClasses = Uint8Array.from(bodyCls);
   shared.damageRank = damageRanks(shared, hull);
+  shared.ao = bakeCavity(shared);
   shared.bounds = hullBounds(shared);
 
   shared.lampFront = front.length / 3 >= MIN_FACES
@@ -537,6 +548,142 @@ function tornPanels(bounds) {
   bumper.position.set(bumperW * 0.44, bounds.minY + h * 0.20, bounds.maxZ - 0.02);
 
   return { bonnet, bumper };
+}
+
+/**
+ * Darken the folds. Baked once per reference, into a value per vertex.
+ *
+ * The cars are real ones decimated, so the creases are *in the geometry* — the
+ * swage down a flank, the lip over an arch, the gap either side of a bonnet.
+ * Nothing was darkening them, and a painted surface with no occlusion in its
+ * folds is the thing that reads as moulded plastic rather than as a panel.
+ *
+ * Not ray traced. Cavity: for a vertex, look at the surface around it and ask
+ * which side of its own tangent plane that surface sits on. Neighbours in
+ * front of the plane mean the surface curls toward you — a crease — and a
+ * crease collects less light from the sky than a bulge does. Neighbours behind
+ * it mean a bulge, which is left alone: brightening highlights is a different
+ * effect and a garish one.
+ *
+ * O(vertices x neighbours) with a hash grid, over welded positions rather than
+ * the fifty thousand triangles' worth of duplicates, and shared by every car
+ * built from the reference — the folds belong to the shape, not to the paint.
+ */
+function bakeCavity(shared) {
+  const pos = shared.position.array;
+  const nor = shared.normal.array;
+  const count = pos.length / 3;
+
+  const RADIUS = 0.09;          // metres of surface a vertex asks about
+  // Gently. At 2.6 the response was a step: half the bodywork sat at exactly
+  // 1.0 and everything the test caught went straight to the floor, so creases
+  // read as black lines rather than as shading.
+  const STRENGTH = 1.35;        // how hard a crease is taken down
+  const FLOOR = 0.62;           // and how dark it is allowed to get
+
+  // Weld, then grid, both on integer keys.
+  //
+  // The first version keyed two Maps on strings — `"12,-4,88"` — and took nine
+  // hundred milliseconds per reference, which is six seconds of boot across the
+  // roster for a value that never changes. Same algorithm on packed integers
+  // and a counting sort instead of a Map of arrays.
+  const QUANT = 200;            // weld tolerance: 5 mm
+  const pack = (x, y, z) =>
+    (Math.round(x * QUANT) & 0x1fffff) * 4398046511104
+    + (Math.round(y * QUANT) & 0x1fffff) * 2097152
+    + (Math.round(z * QUANT) & 0x1fffff);
+
+  const welded = new Map();
+  const ofVertex = new Int32Array(count);
+  const px = new Float32Array(count);
+  const py = new Float32Array(count);
+  const pz = new Float32Array(count);
+  const nx = new Float32Array(count);
+  const ny = new Float32Array(count);
+  const nz = new Float32Array(count);
+  let unique = 0;
+  for (let i = 0; i < count; i++) {
+    const o = i * 3;
+    const k = pack(pos[o], pos[o + 1], pos[o + 2]);
+    let id = welded.get(k);
+    if (id === undefined) {
+      id = unique++;
+      welded.set(k, id);
+      px[id] = pos[o]; py[id] = pos[o + 1]; pz[id] = pos[o + 2];
+    }
+    ofVertex[i] = id;
+    nx[id] += nor[o]; ny[id] += nor[o + 1]; nz[id] += nor[o + 2];
+  }
+  for (let i = 0; i < unique; i++) {
+    const l = Math.hypot(nx[i], ny[i], nz[i]) || 1;
+    nx[i] /= l; ny[i] /= l; nz[i] /= l;
+  }
+
+  // A uniform grid over the car's own extents, as a counting sort: `start`
+  // indexes into `items`, so a cell's members are a contiguous run.
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < unique; i++) {
+    if (px[i] < minX) minX = px[i]; if (px[i] > maxX) maxX = px[i];
+    if (py[i] < minY) minY = py[i]; if (py[i] > maxY) maxY = py[i];
+    if (pz[i] < minZ) minZ = pz[i]; if (pz[i] > maxZ) maxZ = pz[i];
+  }
+  const gx = Math.max(1, Math.ceil((maxX - minX) / RADIUS));
+  const gy = Math.max(1, Math.ceil((maxY - minY) / RADIUS));
+  const gz = Math.max(1, Math.ceil((maxZ - minZ) / RADIUS));
+  const cellOf = new Int32Array(unique);
+  const counts = new Int32Array(gx * gy * gz + 1);
+  const clampi = (v, hi) => (v < 0 ? 0 : (v > hi ? hi : v));
+  for (let i = 0; i < unique; i++) {
+    const cx = clampi(Math.floor((px[i] - minX) / RADIUS), gx - 1);
+    const cy = clampi(Math.floor((py[i] - minY) / RADIUS), gy - 1);
+    const cz = clampi(Math.floor((pz[i] - minZ) / RADIUS), gz - 1);
+    const c = (cz * gy + cy) * gx + cx;
+    cellOf[i] = c;
+    counts[c + 1]++;
+  }
+  for (let c = 0; c < counts.length - 1; c++) counts[c + 1] += counts[c];
+  const start = counts;
+  const items = new Int32Array(unique);
+  const cursor = Int32Array.from(start.subarray(0, start.length - 1));
+  for (let i = 0; i < unique; i++) items[cursor[cellOf[i]]++] = i;
+
+  const cavity = new Float32Array(unique);
+  const r2 = RADIUS * RADIUS;
+  for (let i = 0; i < unique; i++) {
+    const cx = clampi(Math.floor((px[i] - minX) / RADIUS), gx - 1);
+    const cy = clampi(Math.floor((py[i] - minY) / RADIUS), gy - 1);
+    const cz = clampi(Math.floor((pz[i] - minZ) / RADIUS), gz - 1);
+    let sum = 0;
+    let seen = 0;
+    for (let a = Math.max(0, cx - 1); a <= Math.min(gx - 1, cx + 1); a++) {
+      for (let b = Math.max(0, cy - 1); b <= Math.min(gy - 1, cy + 1); b++) {
+        for (let c = Math.max(0, cz - 1); c <= Math.min(gz - 1, cz + 1); c++) {
+          const cell = (c * gy + b) * gx + a;
+          for (let m = start[cell]; m < start[cell + 1]; m++) {
+            const j = items[m];
+            if (j === i) continue;
+            const dx = px[j] - px[i];
+            const dy = py[j] - py[i];
+            const dz = pz[j] - pz[i];
+            const d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 > r2 || d2 < 1e-8) continue;
+            // Positive: that neighbour lies on the side the normal points, so
+            // the surface is closing in front of this vertex.
+            sum += (dx * nx[i] + dy * ny[i] + dz * nz[i]) / Math.sqrt(d2);
+            seen++;
+          }
+        }
+      }
+    }
+    cavity[i] = seen ? Math.max(0, sum / seen) : 0;
+  }
+
+  const ao = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    ao[i] = Math.max(FLOOR, 1 - cavity[ofVertex[i]] * STRENGTH);
+  }
+  return ao;
 }
 
 /** The reference's own extents, so torn panels can be placed against it. */
@@ -654,6 +801,9 @@ function damageRanks(shared, hull) {
  */
 function paintHull(shared, byClass, col, damage = 0) {
   const cls = shared.bodyClasses;
+  const ao = shared.ao;
+  const shadow = new THREE.Color(PAINT_SHADOW);
+  const shaded = new THREE.Color();
   const rank = shared.damageRank;
   const primer = new THREE.Color(HULL_PRIMER);
   const scorch = new THREE.Color(HULL_SCORCH);
@@ -668,9 +818,24 @@ function paintHull(shared, byClass, col, damage = 0) {
     }
     for (let k = 0; k < 3; k++) {
       const o = t * 9 + k * 3;
-      col[o] = c.r;
-      col[o + 1] = c.g;
-      col[o + 2] = c.b;
+      // Per vertex, not per face: the whole point is that a crease shades
+      // across a panel rather than switching at its edge.
+      const shade = ao ? ao[t * 3 + k] : 1;
+      // Paint and chrome only. The shade colour is lighter than glass is, so
+      // tinting a window toward it would make the creases in a windscreen
+      // *brighter* — and black glass took two goes to get right already.
+      if (shade < 1 && (cls[t] === 0 || cls[t] === 3)) {
+        // Toward the shade colour first, then down. Doing only the second is
+        // what makes a dark panel read as the same plastic under less light.
+        shaded.copy(c).lerp(shadow, (1 - shade) * PAINT_SHADOW_MIX);
+        col[o] = shaded.r * shade;
+        col[o + 1] = shaded.g * shade;
+        col[o + 2] = shaded.b * shade;
+      } else {
+        col[o] = c.r * shade;
+        col[o + 1] = c.g * shade;
+        col[o + 2] = c.b * shade;
+      }
     }
   }
 }
@@ -1622,7 +1787,7 @@ export class VehicleMesh {
     // move all of them. Those are carried on a node instead, which is also
     // where their size comes from.
     if (!hull) this.bodyGeo?.translate(0, -wheelR, 0);
-    this.bodyMat = new THREE.MeshStandardMaterial({
+    this.bodyMat = new THREE.MeshPhysicalMaterial({
       vertexColors: true,
       // A car built out of boxes is watertight and can be culled from behind. A
       // car decimated off a reference is not: real models are dozens of open
@@ -1635,8 +1800,29 @@ export class VehicleMesh {
       // reads as a soft curve; flat shading puts the panel edges back and is
       // what makes the silhouette legible at speed.
       flatShading: true,
-      roughness: lerp(0.42, 0.78, armor),
-      metalness: lerp(0.30, 0.58, armor),
+      // Car paint is two layers, and modelling it as one is what reads as
+      // plastic.
+      //
+      // Underneath is pigment with a little metallic flake in it: mostly
+      // diffuse, tinted, fairly rough. Over it is clear lacquer: a hard, almost
+      // mirror-smooth dielectric whose highlight is *white* rather than the
+      // colour of the paint, and which goes bright at a grazing angle. A single
+      // MeshStandard layer can be one or the other. It cannot be both, and a
+      // flank lit only by a broad diffuse term is one flat colour from nose to
+      // tail — which is exactly what a moulded toy looks like.
+      //
+      // The base metalness comes down because the lacquer is now supplying the
+      // shine; leaving it where it was made the paint look like foil.
+      roughness: lerp(0.44, 0.80, armor),
+      metalness: lerp(0.22, 0.46, armor),
+      // Not a full coat. At 1.0 against a bright sky the lacquer covered the
+      // whole panel rather than catching its edges, and a saturated blue came
+      // out of it the pale blue of a bathroom fitting. Half a coat still breaks
+      // the flank up and leaves the paint its colour.
+      clearcoat: 0.55,
+      // Not zero either. A perfect mirror on a road car reads as a show-stand
+      // render; real lacquer has been through a car wash.
+      clearcoatRoughness: lerp(0.11, 0.26, armor),
     });
     // Everything that pitches and rolls hangs off `chassis`; the wheels do not.
     //
