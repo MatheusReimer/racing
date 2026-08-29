@@ -289,7 +289,7 @@ export function damageLevel(healthFrac) {
   return 0;
 }
 const HULL_DARK = 0x15181c;
-const HULL_CHROME = 0xb9bec6;
+const HULL_CHROME = 0x545a63;
 // Lamp colours.
 //
 // A headlight has to be the brightest thing on the car or it is not a light.
