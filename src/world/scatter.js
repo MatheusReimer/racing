@@ -459,6 +459,68 @@ export function generateProps(rng, track, biome, opts = {}) {
     });
   }
 
+  // --- the pit lane ---------------------------------------------------------
+  //
+  // A pit stop is a place, not a stretch of tarmac that happens to charge you.
+  // The lane already reads as a lane — limiter, markings, its own barriers —
+  // but with nothing beside it there was nowhere the money was going. So the
+  // lane gets a garage, and the garage gets the dressing of whatever it sells.
+  //
+  // Everything here goes on the *outboard* side, away from the racing line: a
+  // wall of crates between the lane and the road would be a wall between two
+  // roads people drive on at very different speeds.
+  const lane = track.branches?.find((b) => b.isPit);
+  if (lane && PROP_TYPES.workshop) {
+    const dressing = {
+      mechanic: ['tyre_stack', 'tyre_stack', 'barrel'],
+      fuel: ['barrel', 'barrel', 'barrel'],
+      armory: ['crate', 'crate', 'container'],
+    }[opts.pitService] ?? ['crate', 'barrel'];
+
+    // Outboard: the direction the lane left the racing line in. Placing on the
+    // lane's own +normal put the garage back across the road on half the
+    // circuits, fourteen metres into the racing line.
+    //
+    // `footprint` is the half-extent, which is how every other placement here
+    // reads it — as a *half*-width it was set back half far enough.
+    const out = lane.pitSide ?? 1;
+    // Clear of the rail as well as the tarmac. A road ends where its barrier
+    // is, not where its paint is — that is the rule the rest of this file
+    // places to, and the dressing was landing between the two.
+    const back = out * (lane.halfWidth + BARRIER_RAIL_OFFSET
+      + PROP_TYPES.workshop.footprint + 3);
+    const at = lane.path.offsetPoint(lane.path.length * 0.5, back, { x: 0, y: 0, z: 0 });
+    props.push({
+      type: 'workshop', variant: 0, x: at.x, y: at.y, z: at.z,
+      // Facing the lane, which is a quarter turn off the way the lane runs.
+      yaw: lane.path.yawAt(lane.path.length * 0.5) + Math.PI * 0.5,
+      scale: 1, s: lane.entryS, lateral: back,
+      radius: 0, height: PROP_TYPES.workshop.height,
+      destructible: false, toughness: null, alive: true, emissive: null,
+      lod: 0,
+    });
+
+    // And the dressing, along the lane's outboard edge.
+    dressing.forEach((type, i) => {
+      const def = PROP_TYPES[type];
+      if (!def) return;
+      const along = lane.path.length * (0.34 + i * 0.11);
+      const edge = (lane.pitSide ?? 1) * (lane.halfWidth + BARRIER_RAIL_OFFSET
+        + (def.footprint ?? def.radius ?? 1) + 0.8);
+      const p = lane.path.offsetPoint(along, edge, { x: 0, y: 0, z: 0 });
+      props.push({
+        type, variant: rng.int(0, 2), x: p.x, y: p.y, z: p.z,
+        yaw: lane.path.yawAt(along) + rng.spread(0.4),
+        scale: 1, s: lane.entryS, lateral: edge,
+        radius: def.radius ?? 0, height: def.height ?? 1,
+        destructible: def.toughness != null,
+        toughness: def.toughness,
+        alive: true, emissive: def.emissive ?? null,
+        lod: 0,
+      });
+    });
+  }
+
   return props;
 }
 

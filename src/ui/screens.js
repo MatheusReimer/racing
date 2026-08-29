@@ -112,6 +112,18 @@ function circuitMap(preview) {
     }));
   }
 
+  // The pit lane, in its service's colour: it is not a line you might take for
+  // pace, so it must not read like the shortcuts.
+  if (preview.pitLane) {
+    svg.appendChild(svgEl('path', {
+      d: pathOf(preview.pitLane, false), class: 'circuit-branch-road',
+    }));
+    svg.appendChild(svgEl('path', {
+      d: pathOf(preview.pitLane, false), class: 'circuit-pit',
+      style: preview.pitService ? `stroke:${preview.pitService.color}` : '',
+    }));
+  }
+
   svg.appendChild(svgEl('path', { d: pathOf(preview.outline, true), class: 'circuit-road' }));
   svg.appendChild(svgEl('path', { d: pathOf(preview.outline, true), class: 'circuit-line' }));
 
@@ -820,7 +832,11 @@ export class Screens {
     let preview = null;
     try {
       preview = previewTrack(cfg.seed, biome, {
-        difficulty: cfg.difficulty, lengthScale: cfg.lengthScale,
+        difficulty: cfg.difficulty,
+        lengthScale: cfg.lengthScale,
+        // What the pit sells depends on what this car can use, so the briefing
+        // has to ask the same question the race will.
+        racer: { build: run.build },
       });
     } catch {
       // A briefing that cannot draw the circuit is still a briefing. Better a
@@ -832,7 +848,10 @@ export class Screens {
       const legend = el('div', 'circuit-legend');
       legend.innerHTML =
         '<span class="k start">Start / finish</span>'
-        + (preview.branches.length ? '<span class="k branch">Shortcut</span>' : '');
+        + (preview.branches.length ? '<span class="k branch">Shortcut</span>' : '')
+        + (preview.pitService
+          ? `<span class="k pit" style="--pit-color:${preview.pitService.color}">`
+            + `${esc(preview.pitService.name)}</span>` : '');
       left.appendChild(legend);
     }
     wrap.appendChild(left);
@@ -856,6 +875,10 @@ export class Screens {
         ['Corners', `${c.corners}, tightest ${c.tightest} m`],
         ['Shortcuts', c.shortcuts ? `${c.shortcuts} branches off the racing line` : 'none'],
         ['Road', `${c.width} m wide, ${c.climb} m of climb`],
+        // The pit is a decision made at speed with no screen in front of it,
+        // so the last calm chance to know what is down there is here.
+        ...(preview.pitService
+          ? [['Pit lane', `${preview.pitService.name} — ${preview.pitService.blurb}`]] : []),
       ]));
     }
 

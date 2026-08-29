@@ -78,6 +78,7 @@ export const BARRIER_RAIL_OFFSET = BARRIER_OFFSET + BARRIER_CAR_CLEARANCE;
 export const BRANCH_KIND = {
   shortcut: 'shortcut', // cuts the inside of a corner: faster, hazardous
   wide: 'wide',         // outside line: longer, safer, better exit speed
+  pit: 'pit',           // parallel to the racing line: always longer, has a service
 };
 
 export class Track {
@@ -230,6 +231,117 @@ export class Track {
 // ---------------------------------------------------------------------------
 // Generation
 // ---------------------------------------------------------------------------
+
+/**
+ * Where the grid will go, needed before the pit lane is placed so the two do
+ * not land on the same stretch of road.
+ *
+ * The real `startS` below picks the same way; this is that search, hoisted, and
+ * the two must not drift apart.
+ */
+function startSGuess(path) {
+  let startS = 0;
+  let flattest = Infinity;
+  for (let s = 0; s < path.length; s += 20) {
+    const c = Math.abs(path.curvatureAt(s, 30));
+    if (c < flattest) { flattest = c; startS = s; }
+  }
+  return startS;
+}
+
+/**
+ * A pit lane beside the straightest stretch that is free to take one.
+ *
+ * @param usedArcs  arcs already spoken for by branches, so the lane's geometry
+ *                  does not overlap theirs and set the ownership test in
+ *                  `sample` flip-flopping between two roads
+ * @param startS    the grid, which the lane must keep away from
+ * @param widthProfile  the road's *width* around the lap; the lane is set out
+ *                  from the widest point it runs beside, not from the nominal
+ *                  width, because the road swells up to 6% and pinches 22% and
+ *                  a lane placed at the average clips the road where it bulges
+ * @returns a branch record, or null if the circuit has nowhere to put one
+ */
+function buildPitLane(path, usedArcs, startS, baseWidth, widthProfile) {
+  // Long enough that the tapers are gentle. At 150 m every lane's entry pinched
+  // to a 40-50 m radius, which no car can hold at the limiter's speed — so the
+  // corner governed the lane and the limiter was decoration.
+  const SPAN = 190;           // entry to exit, along the racing line
+  const CLEAR = 40;           // from another branch, and from the grid
+
+  // The straightest span available. A pit lane through a corner is one nobody
+  // can enter at the limit, and it would also cross the racing line.
+  //
+  // Two passes: the second gives up half the clearance. A busy circuit can
+  // have no 190 m stretch that is 40 m clear of everything, and a lane a
+  // little close to a shortcut is worth far more than no lane at all — every
+  // circuit having one is what lets the player plan around it.
+  let best = null;
+  for (const clear of [CLEAR, CLEAR * 0.5]) {
+    for (let s0 = 0; s0 + SPAN < path.length; s0 += 12) {
+      const s1 = s0 + SPAN;
+      if (usedArcs.some((u) => s0 < u.s1 + clear && s1 > u.s0 - clear)) continue;
+      // Wrapped, because the grid can sit either side of the seam.
+      const dStart = Math.abs(((startS - (s0 + s1) / 2) + path.length * 1.5)
+        % path.length - path.length * 0.5);
+      if (dStart < SPAN * 0.5 + clear) continue;
+
+      let bend = 0;
+      let signed = 0;
+      for (let t = 0; t <= 8; t++) {
+        const k = path.curvatureAt(s0 + (SPAN * t) / 8, 25);
+        bend += Math.abs(k);
+        signed += k;
+      }
+      if (!best || bend < best.bend) best = { s0, s1, bend, signed };
+    }
+    if (best) break;
+  }
+  if (!best) return null;
+
+  // Far enough out that the lane's tarmac clears the road's, with room between,
+  // measured against the widest the road gets anywhere along the span.
+  const halfWidth = (baseWidth * 0.34) / 2;
+  let widest = baseWidth;
+  for (let t = 0; t <= 12; t++) {
+    const f = ((best.s0 + (SPAN * t) / 12) / path.length) % 1;
+    widest = Math.max(widest, widthProfile[Math.floor(f * widthProfile.length)] ?? baseWidth);
+  }
+  const depth = widest * 0.5 + halfWidth + 9;
+
+  // On the outside of whatever bend the span still has.
+  //
+  // The offset is measured along the road's normal, but the clearance that
+  // matters is the perpendicular distance back to the road — and on the inside
+  // of a bend those are not the same number. Offsetting inward ate three of
+  // the five metres of margin, and on two circuits in sixty ate all of it and
+  // put the lane on the racing line.
+  const side = (best.signed ?? 0) > 0 ? -1 : 1;
+
+  // Tapered in, parallel through the middle, tapered out — the shape that makes
+  // it read as a lane beside the road rather than a bulge in it.
+  const SHAPE = [0, 0.10, 0.38, 0.78, 1, 1, 1, 0.78, 0.38, 0.10, 0];
+  const pts = SHAPE.map((k, i) => path.offsetPoint(
+    best.s0 + (SPAN * i) / (SHAPE.length - 1), side * depth * k, { x: 0, y: 0, z: 0 }));
+
+  const bpath = new Path(pts, false, 8);
+  return {
+    id: 'pit',
+    kind: BRANCH_KIND.pit,
+    path: bpath,
+    entryS: best.s0,
+    exitS: best.s1,
+    halfWidth,
+    // Negative: taking the pit lane always costs distance, before the limiter
+    // costs you the rest.
+    saving: SPAN - bpath.length,
+    risky: false,
+    isPit: true,
+    // Which way the lane left the racing line, so anything placed beside it
+    // can be placed on the far side rather than back across the road.
+    pitSide: side,
+  };
+}
 
 /**
  * @param rng     seeded RNG — the same seed must always give the same circuit
@@ -521,6 +633,20 @@ function finishTrack(rng, biome, opts, controls, extra = {}) {
       risky: kind === BRANCH_KIND.shortcut && isShort,
     });
   }
+
+  // --- Pit lane ------------------------------------------------------------
+  //
+  // Not a branch that happened to come out long. A pit lane is a deliberate
+  // piece of a circuit: it leaves the racing line on a straight, runs beside
+  // it, and rejoins — always slower, because it is not a line, it is a place
+  // you go to have something done to the car.
+  //
+  // It has to be there. Putting pits on whichever branches came out longer than
+  // the line they left covered 44% of circuits, and a service the player cannot
+  // count on is one they never plan a run around. So every circuit gets one,
+  // built here rather than rolled for.
+  const pit = buildPitLane(path, usedArcs, startSGuess(path), baseWidth, widthProfile);
+  if (pit) branches.push(pit);
 
   // --- Start line ----------------------------------------------------------
   // Start on the straightest stretch available, so the grid is not stacked

@@ -174,44 +174,78 @@ supposed to be that the same pool serves needs on different clocks: spend it on
 a pit now to save this race, or hold it for an upgrade later, and you cannot
 hoard because losing the race loses the reward that refills it.
 
-That argument only works if scrap is scarce, and **measured, it is not**.
+That argument only works if scrap is scarce, and **measured, it was not**.
 `tools/economy-probe.mjs` drives a greedy shopper — every node, every shop,
-buying everything affordable cheapest-first until it cannot. It spends 447 over
-a run and ends holding 1,603. A player buying literally everything on offer
-finishes with three and a half times what they managed to spend.
+buying everything affordable cheapest-first until it cannot. It spent 447 over
+a run and ended holding 1,603: a player buying literally everything on offer
+finished with three and a half times what they managed to spend.
 
-So the currency is roughly three to four times more abundant than there is
-anything to spend it on, and the conclusion runs the other way from the usual
-one: **the fix is more to buy, not smaller payouts.** Paid pits and paid garage
-work will be absorbed by a surplus that already exists rather than making the
-game mean.
+So the conclusion ran the other way from the usual one: **the fix is more to
+buy, not smaller payouts.** Both missing sinks are now in.
 
-Two sinks the game is missing outright:
+- **The garage was free.** Repair and a skill upgrade both cost nothing, which
+  made the one node that exists purely to spend money the one node that did not
+  take any. Repair is now 1.4 scrap a point and never refuses — it does what
+  the money on hand covers — and an upgrade is priced from the skill's rarity,
+  rising with each rank down a branch, all-or-nothing.
+- **Pits** are in; see below.
 
-- **The garage is free.** Repair and a skill upgrade both cost nothing today,
-  which makes the one node that exists purely to spend money the one node that
-  does not take any.
-- **Pits**, below.
+Greedy-shopper surplus: **3.6x → 2.7x**, under the target of 3. The probe holds
+a ratchet, now at 3.0, rather than failing at a target it has met — a suite that
+always fails is a suite nobody reads. The number to watch is the one it prints.
 
-The probe holds this as a ratchet at 4.2 rather than failing at the target of
-3, because a suite that always fails is a suite nobody reads. The number to
-watch is the one it prints.
+Two things the measurement itself turned up, both worth remembering:
 
-## Pits: pay time and money, mid-race
+- `finishRace` did `Math.max(0, racer.durability)`, which is NaN for a racer
+  that reports none. It sat quietly inside the car for as long as nothing
+  priced against durability, and the moment the garage did, it ate the wallet.
+- the probe's walker never damaged its car, so the repair sink it was measuring
+  could not open. **A probe that does not exercise the thing it measures
+  reports whatever it likes.**
+
+## Pits: pay time and money, mid-race — built
 
 A garage, a fuel stop, an armourer — sitting on the circuit rather than between
 races, taking scrap in exchange for putting the car back together.
+
+**Built.** `src/race/pits.js`, `tools/pit-probe.mjs`, and a dedicated pit lane
+in `generateTrack`. What follows is the reasoning, and then what was actually
+decided where it differs.
 
 **Not a pause and not a menu.** A race that stops so you can shop is a race
 that stops: you spend, you resume in the same position, and it cost nothing. A
 pit works in racing games because it costs *time*, and the interesting question
 is whether the seconds are worth it.
 
-**The branches are already the right shape.** A shortcut leaves the racing line
-and rejoins it, has geometry, painted chevrons and warning arrows, and — as
-noted elsewhere here — currently costs nothing and gives nothing. A pit is a
-branch with a service on it: longer or slower than the line it left, and paying
-out at the end.
+**The branches looked like the right shape, and were not.** A shortcut leaves
+the racing line and rejoins it, has geometry, painted chevrons and warning
+arrows. But putting pits on whichever branches came out *longer* than the line
+they left covered only **44% of circuits**, and a service the player cannot
+count on is one they never plan a run around.
+
+So the pit lane is generated deliberately, like a real circuit's: the
+straightest 190 m stretch that is clear of the other branches and of the grid,
+offset to the outside of whatever bend remains, tapered in and out around a
+parallel middle. Every circuit has exactly one. Three numbers came out of
+measuring rather than choosing:
+
+- the **outside** of the bend, because the offset is measured along the road's
+  normal but the clearance that matters is the perpendicular distance back — on
+  the inside of a bend those differ, and offsetting inward ate the margin and
+  put two lanes in sixty on the racing line;
+- **190 m** rather than 150, because at 150 every lane's entry pinched to a
+  40-50 m radius, which no car holds at the limiter's speed: the corner
+  governed the lane and the limiter was decoration;
+- **19 m/s** (68 km/h) for the limiter, because the tightest taper any
+  generated lane has will hold about 76.
+
+The limiter itself is `body.speedCap`, which caps `maxSpeedNow()` *and* brakes
+a car that is over it at 14 m/s² — capping the top speed alone only stops the
+car pulling harder, and drag here is deliberately small, so a car arriving at
+220 would have coasted most of the lane.
+
+Measured cost of a stop: **5.1 s** against staying on the line, and that is a
+floor — both cars in the comparison start at the limiter's speed.
 
 Steering into one is the consent. You cannot end up in a pit lane by accident
 the way you can drive over a pickup; you have to aim for it, which is what lets
@@ -228,7 +262,12 @@ The three the game already has the machinery for:
 The middle one fixes something real: durability is only recoverable in the
 garage node, so a race that starts badly cannot be salvaged from inside it.
 
-### The problem to solve first, which is structural
+**What is beside the lane.** A workshop and its dressing — tyres at a mechanic,
+drums at a fuel stop, crates at an armoury — placed outboard, clear of the rail
+as well as the tarmac. Without it the lane was somewhere the money went with
+nothing there to have taken it.
+
+### The structural problem, and what was chosen
 
 **The race does not know the run.** `Race` is constructed with `playerBuild`,
 not with `Run`, and `scrap` lives on `Run` alone. That separation is deliberate
@@ -248,9 +287,23 @@ options, and the trade in each:
 - **Settle after the race.** Simplest, and the decision loses its bite: you
   cannot overspend if the bill arrives later.
 
-The second is probably right and is the most work. Worth deciding before
-building rather than after, because all three are cheap to write and only one
-of them leaves the balance runs still telling the truth.
+**The second was chosen.** `RaceSim` holds `scrap`, seeded from
+`config.scrap` and read back through `Run.spendInRace` in `_onRaceOver`. A
+balance run seeds nothing and therefore has a pit nobody can afford, which is a
+true statement about a car with no money rather than a different set of rules.
+
+### What is left
+
+- **The AI never pits.** `Driver` follows the racing line and has no notion of
+  branches at all, so the lane is a player-only decision and the field never
+  gives up five seconds for a repair. Fine for now; it means a stop always
+  costs places, which is the honest reading, but a rival that pits when it is
+  wrecked would make the field read as racing rather than as pace-setting.
+- **The armoury is only worth taking with a skill on a long cooldown**, which
+  is correct but narrow. It is already excluded from circuits where the build
+  carries no skills at all.
+- **Nothing accounts for pit spending in `tools/economy-probe.mjs`**, which
+  does not race. The surplus figure therefore still ignores the newest sink.
 
 ---
 

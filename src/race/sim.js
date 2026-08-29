@@ -7,6 +7,7 @@ import { clamp, clamp01, angleDelta, wrapAngle } from '../core/math.js';
 import { CombatSystem } from '../combat/combat.js';
 import { generateProps, collidableProps } from '../world/scatter.js';
 import { generateTraffic, stepTraffic } from './traffic.js';
+import { assignPit, servePit, PIT_SPEED_LIMIT, PIT_MIN_TIME } from './pits.js';
 
 // The rules of a race, with no rendering in them at all.
 //
@@ -285,11 +286,19 @@ export class RaceSim {
       lengthScale: config.lengthScale ?? 1,
     });
 
+    // The circuit's pit lane, and what it sells.
+    //
+    // Before the scenery, because the lane is dressed with whatever it sells —
+    // tyres at a mechanic, drums at a fuel stop — and before the field, because
+    // what it sells depends only on the build, which is in hand.
+    this.pit = assignPit(this.rng.fork('pit'), this.track, { build: playerBuild });
+
     // Scenery is generated here rather than inside `generateTrack` so the
     // simulation owns it: destructible props are gameplay, and the balance runs
     // must smash exactly the same barrels the played game does.
     this.props = generateProps(this.rng.fork('props'), this.track, biome, {
       density: this.config.propDensity ?? 1,
+      pitService: this.pit?.service?.id ?? null,
     });
     this.collidable = collidableProps(this.props);
 
@@ -301,6 +310,17 @@ export class RaceSim {
     this.traffic = generateTraffic(this.rng.fork('traffic'), this.track, {
       density: trafficDensity,
     });
+
+    // Scrap, inside the simulation.
+    //
+    // A pit spends the run's money, so the sim has to hold it, and the run
+    // seeds it in and reads it back. Putting the balance here rather than
+    // reaching into the Run keeps `tools/balance.mjs` honest: it can race the
+    // whole field without a Run existing at all, and a race with no scrap
+    // seeded simply has a pit nobody can afford.
+    this.scrap = this.config.scrap ?? 0;
+    this.scrapSpent = 0;
+    this.pitStops = [];
 
     this.racers = [];
     this.drivers = [];
@@ -458,6 +478,8 @@ export class RaceSim {
       }
       this.track.sample(r.body.x, r.body.z, r.sample);
     }
+
+    if (racing) this._resolvePits(dt);
 
     // 4. skills, then collisions. Skills resolve first so a shockwave fired
     //    this step is already pushing cars apart when contacts are evaluated.
@@ -673,6 +695,79 @@ export class RaceSim {
    * thing to do on a public road, and the civilians are the only cars on the
    * circuit slow enough to be caught easily.
    */
+  /**
+   * The pit lane: hold cars in it to the limit, and serve them on the way out.
+   *
+   * Served on the way *out* rather than at a point in the middle, which is
+   * what makes the entry safe to brush: a car that puts a wheel in and thinks
+   * better of it never completes the lane and is never charged. The time in
+   * the lane is checked too, so clipping the exit corner from the road side
+   * does not buy a free stop.
+   *
+   * Only the player is served. Rivals have no scrap and their drivers never
+   * choose the lane; the limiter still applies to anything in it, because a
+   * lane that is slow for one car and quick for another is not a lane.
+   */
+  _resolvePits(dt) {
+    const pit = this.pit;
+    if (!pit) return;
+
+    for (const r of this.racers) {
+      const inLane = r.sample.branch === pit.lane;
+      if (inLane) {
+        r.body.speedCap = PIT_SPEED_LIMIT;
+        r._pitTime = (r._pitTime ?? 0) + dt;
+        continue;
+      }
+
+      r.body.speedCap = Infinity;
+      const spent = r._pitTime ?? 0;
+      r._pitTime = 0;
+      if (spent < PIT_MIN_TIME || r !== this.player) continue;
+
+      const stop = servePit(pit.service, r, this.scrap);
+      if (!stop) continue;
+      this.scrap -= stop.paid;
+      this.scrapSpent += stop.paid;
+      const record = { service: pit.service.id, paid: stop.paid, text: stop.text,
+        lap: r.lap ?? 0, time: this.time };
+      this.pitStops.push(record);
+      this.events?.emit('pit:served', record);
+    }
+  }
+
+  /**
+   * The pit lane ahead, for the HUD: what it sells, what it would cost, and
+   * how far away the entry is. Null once the entry is behind the car.
+   *
+   * @param within  metres of warning
+   */
+  nextPit(within = 260) {
+    const pit = this.pit;
+    if (!pit || !this.player) return null;
+    const s = this.player.sample.s ?? 0;
+    const lap = this.track.length;
+    const d = ((pit.lane.entryS - s) % lap + lap) % lap;
+    // Always while you are in it. A car in the lane has its station mapped
+    // between entry and exit, so the distance *to* the entry is nearly a whole
+    // lap — and the readout vanished at exactly the moment it was describing
+    // where the car actually was.
+    const inLane = this.player.sample.branch === pit.lane;
+    if (d > within && !inLane) return null;
+
+    const quote = pit.service.quote(this.player);
+    return {
+      service: pit.service,
+      distance: d,
+      inLane,
+      price: quote.price,
+      amount: quote.amount,
+      unit: quote.unit,
+      affordable: quote.amount > 0 && this.scrap > 0,
+      useful: quote.amount > 0,
+    };
+  }
+
   _updateDraft(dt) {
     for (const r of this.racers) {
       if (!r.alive) { r.body.draft = 0; continue; }

@@ -49,8 +49,15 @@ for (let i = 0; i < RACES; i++) {
     const g = window.__game;
     g.showTitle();
   });
-  await page.waitForSelector('.cards .card', { timeout: 10000 });
-  await page.click('.cards .card >> nth=2');
+  // The title screen is the machine screen itself — one car at a time, walked
+  // with the arrows. It used to be a roster of cards and this waited for one;
+  // the cards went and this probe sat here for ten seconds and threw.
+  await page.waitForSelector('.stage-nav.next', { timeout: 10000 });
+  await page.click('.stage-nav.next');
+  await page.waitForTimeout(150);
+  await page.click('.stage-nav.next');
+  await page.waitForTimeout(150);
+  await page.click('.screen-foot .btn.primary');
   await page.waitForSelector('.mapnode.available', { timeout: 10000 });
   await page.click('.mapnode.available');
   await page.waitForSelector('.screen-foot .btn.primary', { timeout: 10000 });

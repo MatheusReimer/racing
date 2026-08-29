@@ -94,6 +94,12 @@ const BODY = /* glsl */`
       float d = max(band(x - at, LINE), band(x + at, LINE));
       paint = max(paint, d * dashed(sAlong, DASH, DASH + DASH_GAP));
     }
+  } else if (isBranch > 1.5) {
+    // The pit lane. Not a slip road and not a racing line: a working lane, so
+    // it gets what a working lane gets — a solid line down the middle to keep
+    // you off the wall, and nothing else. Chevrons here read as "this is a
+    // shortcut, take it", which is the opposite of what the lane is.
+    paint = max(paint, band(x, LINE));
   } else {
     // A branch leaves the road, so it is hatched rather than laned: chevrons
     // pointing back the way you came, which is how a real slip road is painted
@@ -200,6 +206,9 @@ export function paintMarkings(material, palette = {}, track = null) {
 function splitsOf(track) {
   const slots = Array.from({ length: 8 }, () => new THREE.Vector2());
   if (!track?.branches?.length) return { slots, count: 0, lap: 1 };
+  // The pit entry gets warning chevrons like any other split: it is a decision
+  // taken at speed, and forty metres of paint is the only warning the road
+  // itself can give.
 
   const at = { x: 0, y: 0, z: 0 };
   const tan = { x: 0, z: 0 };

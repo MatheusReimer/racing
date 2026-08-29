@@ -865,6 +865,16 @@
   stroke-linecap: round;
 }
 
+/* The pit lane. Solid and thicker than a shortcut: it is not a line anyone
+   takes for pace, so it must not read like one. */
+.circuit-pit {
+  fill: none;
+  stroke: #5fd08a;
+  stroke-width: 0.9;
+  stroke-linecap: round;
+  opacity: 0.95;
+}
+
 .circuit-start {
   stroke: var(--gold);
   stroke-width: 1.5;
@@ -894,6 +904,11 @@
 
 .circuit-legend .start::before { background: var(--gold); }
 .circuit-legend .branch::before { background: var(--speed); }
+
+/* The pit takes its service's colour, the same one the lane is drawn in and
+   the same one the HUD uses on the approach, so the three are one thing. */
+.circuit-legend .pit { color: var(--pit-color, #5fd08a); }
+.circuit-legend .pit::before { background: var(--pit-color, #5fd08a); }
 
 /* Label-and-value rows: the facts about a circuit, in a column. */
 .facts { display: grid; gap: var(--s1); margin-bottom: var(--s3); }

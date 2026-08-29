@@ -1,4 +1,5 @@
 import { RNG } from '../core/rng.js';
+import { assignPit } from '../race/pits.js';
 import { generateTrack } from './track.js';
 
 // What a circuit looks like from above, and what is true about it.
@@ -45,10 +46,14 @@ export function previewTrack(seed, biome, opts = {}) {
   });
 
   const main = track.path.points;
-  const branches = (track.branches ?? []).map((b) => b.path.points);
+  // The pit lane is a branch, but it is not a line: it is drawn differently and
+  // labelled, so it comes out of the list separately.
+  const laneBranch = (track.branches ?? []).find((b) => b.isPit) ?? null;
+  const branches = (track.branches ?? [])
+    .filter((b) => !b.isPit).map((b) => b.path.points);
 
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  for (const set of [main, ...branches]) {
+  for (const set of [main, ...branches, ...(laneBranch ? [laneBranch.path.points] : [])]) {
     for (const p of set) {
       if (p.x < minX) minX = p.x;
       if (p.x > maxX) maxX = p.x;
@@ -71,9 +76,17 @@ export function previewTrack(seed, biome, opts = {}) {
   const ahead = track.path.pointAt
     ? track.path.pointAt((track.startS ?? 0) + 12) : main[1];
 
+  // The same fork the race uses, off the same seed, so this is the service the
+  // race will actually offer rather than a second roll of the same dice.
+  const pitService = assignPit(new RNG(seed).fork('pit'), track, opts.racer ?? null);
+
   return {
     outline: main.map(to),
     branches: branches.map((set) => set.map(to)),
+    // The lane and what it sells, so the briefing can say both before the
+    // player is doing 200 km/h towards the entry.
+    pitLane: laneBranch ? laneBranch.path.points.map(to) : null,
+    pitService: pitService?.service ?? null,
     start: to(start),
     // The direction the grid faces, in the same flipped frame as the outline,
     // so a marker can be drawn across the road rather than along it.
@@ -213,7 +226,10 @@ function measure(track) {
     length: Math.round(track.length),
     corners,
     tightest: Math.round(tightest),
-    shortcuts: (track.branches ?? []).length,
+    // Not the pit lane: it is a branch in the geometry but it is not a line
+    // anyone drives for pace, and counting it told the briefing there was one
+    // more shortcut than the circuit has.
+    shortcuts: (track.branches ?? []).filter((b) => !b.isPit).length,
     climb: Math.round(maxY - minY),
     width: Math.round(track.baseWidth),
   };

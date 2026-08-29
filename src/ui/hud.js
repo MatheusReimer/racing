@@ -56,6 +56,16 @@ export class HUD {
         </div>
       </div>
 
+      <div class="hud-pit">
+        <div class="ico">&#128295;</div>
+        <div class="tx">
+          <div class="what">Mechanic</div>
+          <div class="deal">0 scrap</div>
+        </div>
+      </div>
+
+      <div class="hud-flash"></div>
+
       <div class="hud-drift">Drift <span class="dq">0</span></div>
       <div class="hud-state"><span class="lbl"></span><span class="why"></span></div>
       <div class="hud-skills"></div>
@@ -72,6 +82,11 @@ export class HUD {
       lapTotal: q('.hud-position .lt'),
       speed: q('.hud-speed .val'),
       speedBox: q('.hud-speed'),
+      flash: q('.hud-flash'),
+      pit: q('.hud-pit'),
+      pitIcon: q('.hud-pit .ico'),
+      pitWhat: q('.hud-pit .what'),
+      pitDeal: q('.hud-pit .deal'),
       corner: q('.hud-corner'),
       cornerArrow: q('.hud-corner .arrow'),
       cornerSev: q('.hud-corner .sev'),
@@ -143,6 +158,30 @@ export class HUD {
     if (towed !== prev.towed) {
       n.speedBox?.classList.toggle('towed', towed);
       prev.towed = towed;
+    }
+
+    // The pit lane ahead.
+    //
+    // The price has to arrive before the entry does, because entering is the
+    // decision — there is no menu once you are in the lane. So this reads as
+    // an offer rather than a marker: what it sells, what it would cost, and
+    // whether the money is there.
+    const pit = race.nextPit ? race.nextPit() : null;
+    const pitDist = pit ? Math.round(pit.distance / 10) * 10 : -1;
+    const pitKey = pit ? `${pit.service.id}${pit.price}${pitDist}${pit.inLane}` : '';
+    if (pitKey !== prev.pit) {
+      prev.pit = pitKey;
+      n.pit.classList.toggle('on', !!pit);
+      if (pit) {
+        n.pitIcon.textContent = pit.service.icon;
+        n.pitWhat.textContent = pit.inLane ? `In the pits — ${pit.service.name}` : pit.service.name;
+        n.pitDeal.textContent = !pit.useful ? 'nothing to do'
+          : !pit.affordable ? `${pit.price} scrap — no money`
+            : pit.inLane ? `${pit.price} scrap` : `${pit.price} scrap · ${pitDist} m`;
+        n.pit.classList.toggle('dead', !pit.useful || !pit.affordable);
+        n.pit.classList.toggle('here', !!pit.inLane);
+        n.pit.style.setProperty('--pit-color', pit.service.color);
+      }
     }
 
     // The next corner, as a pace note.
@@ -306,6 +345,26 @@ ${this.qualityName || ''}`;
     }
   }
 
+  /**
+   * A line that says something happened, then goes.
+   *
+   * The race does not stop for a pit stop, so what the stop bought has to be
+   * legible without being read: a big line for a second and a half, gone
+   * before the next corner needs the screen back.
+   */
+  flash(text, color = null) {
+    const el = this.nodes.flash;
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = color || '';
+    el.classList.remove('on');
+    // Reflow, or a second flash inside the fade never restarts the animation.
+    void el.offsetWidth;
+    el.classList.add('on');
+    clearTimeout(this._flashTimer);
+    this._flashTimer = setTimeout(() => el.classList.remove('on'), 1600);
+  }
+
   setQualityName(name) {
     this.qualityName = name;
   }
@@ -314,6 +373,7 @@ ${this.qualityName || ''}`;
   hide() { this.el.style.display = 'none'; }
 
   dispose() {
+    clearTimeout(this._flashTimer);
     this.el.remove();
   }
 }

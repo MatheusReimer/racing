@@ -22,6 +22,14 @@ import { clamp, clamp01, lerp, damp, wrapAngle } from '../core/math.js';
 
 /** Slip angle, in radians, at which we consider the car to be sliding. */
 const SLIP_DRIFT_THRESHOLD = 0.16;
+/**
+ * How hard the pit limiter pulls a car down to the lane's speed, m/s^2.
+ *
+ * Under a hard braking figure on purpose: arriving at the pit entry flat out
+ * should cost you, not be undone for free.
+ */
+const PIT_LIMITER_BRAKE = 14;
+
 /** Below this speed nothing counts as a drift; it is just parking. */
 const DRIFT_MIN_SPEED = 9;
 /** Handbrake cuts traction to this fraction, regardless of the Drift stat. */
@@ -179,6 +187,9 @@ export class VehicleBody {
     // simulation each step, because it is the only thing that can see the
     // other cars — a body knows about the road under it and nothing else.
     this.draft = 0;
+
+    // Pit-lane limiter, m/s. Infinity when the car is on a road it may race on.
+    this.speedCap = Infinity;
     this.stunTimer = 0;    // EMP / freeze: no throttle, no steering
     this.gripPenaltyTimer = 0;
     this.gripPenalty = 1;
@@ -219,9 +230,10 @@ export class VehicleBody {
     this.driftTime = 0;
   }
 
-  /** Current effective top speed, including boosts. */
+  /** Current effective top speed, including boosts and the pit limiter. */
   maxSpeedNow() {
-    return this.p.maxSpeed * (1 + this.boostPower + this.draft * DRAFT_TOP_SPEED);
+    const free = this.p.maxSpeed * (1 + this.boostPower + this.draft * DRAFT_TOP_SPEED);
+    return Math.min(free, this.speedCap);
   }
 
   /**
@@ -350,6 +362,17 @@ export class VehicleBody {
     const dragMult = (surface.dragMult ?? 1) * (1 - this.draft * DRAFT_DRAG_CUT);
     vFwd -= vFwd * 0.035 * dragMult * dt;
     vFwd -= vFwd * Math.abs(vFwd) * 0.00022 * dragMult * dt;
+
+    // The pit limiter.
+    //
+    // Capping the top speed only stops the car pulling harder, and drag here is
+    // deliberately small — a car arriving at 220 would coast almost the whole
+    // lane before it fell to the limit, which is no limit at all. So over the
+    // cap it is braked, firmly but at less than the tyres could do, so entering
+    // too fast costs time rather than being free.
+    if (vFwd > this.speedCap) {
+      vFwd = Math.max(this.speedCap, vFwd - PIT_LIMITER_BRAKE * dt);
+    }
 
     // Lateral grip -----------------------------------------------------------
     let gripRate = p.gripRate * (surface.grip ?? 1) * this.gripPenalty;

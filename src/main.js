@@ -74,6 +74,11 @@ class Game {
     });
 
     this.events.on('race:over', (result) => this._onRaceOver(result));
+    // A pit stop happens at speed with no screen in front of it, so the only
+    // report the player gets is this line.
+    this.events.on('pit:served', (stop) => {
+      this.hud?.flash(stop.paid > 0 ? `${stop.text}  −${stop.paid}` : stop.text);
+    });
   }
 
   // --- infrastructure ------------------------------------------------------
@@ -282,6 +287,9 @@ class Game {
         rivalArchetypes: cfg.rivalArchetypes,
         lengthScale: cfg.lengthScale,
         nodeType: cfg.nodeType,
+        // The run's money, lent to the race so the pit lane can spend it.
+        // Read back in `_onRaceOver`, whatever the finish.
+        scrap: this.run.scrap,
       },
     });
 
@@ -326,6 +334,11 @@ class Game {
     }
 
     const racer = this.scene.player;
+
+    // Whatever the pits took. Before `finishRace`, which pays the purse — the
+    // stop was made with the money the player had going in.
+    this.run.spendInRace(this.scene.scrapSpent ?? 0);
+
     const outcome = this.run.finishRace(result, racer);
 
     // Let the finish read before the screen changes.

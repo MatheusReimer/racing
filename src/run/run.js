@@ -180,6 +180,21 @@ export class Run {
    * @param result  from RaceSim: { outcome, place, time, field }
    * @param racer   the player's Racer, for carrying condition back out
    */
+  /**
+   * Take back what the pits spent during a race.
+   *
+   * The race is lent the run's scrap rather than handed a reference to it, so
+   * this is where the two are reconciled. Clamped, because a race that somehow
+   * reports spending more than the player had must not push the run negative:
+   * the sim already refuses to sell what it cannot be paid for, and this is the
+   * second lock on the same door.
+   */
+  spendInRace(amount) {
+    const paid = Math.max(0, Math.min(this.scrap, Math.round(amount || 0)));
+    this.scrap -= paid;
+    return paid;
+  }
+
   finishRace(result, racer) {
     // A race started outside the map (the sandbox entry point used by the
     // tools) has no node behind it. Fall back to a plain race rather than

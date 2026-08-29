@@ -41,7 +41,11 @@ const BARRIER_HEIGHT = 1.35;
 // vertices.
 
 function buildRibbon(path, lengthOf, halfWidthAt, opts = {}) {
+  // 0 main line, 1 a branch off it, 2 the pit lane. Three values rather than a
+  // flag because the three are painted differently, and the shader is the only
+  // thing that knows how to paint anything.
   const { isBranch = false, closed = true, lift = ROAD_LIFT } = opts;
+  const laneKind = isBranch === true ? 1 : (isBranch || 0);
   const L = lengthOf;
   const rings = Math.max(4, Math.floor(L / RING_SPACING));
   const cols = ROAD_COLS;
@@ -80,7 +84,7 @@ function buildRibbon(path, lengthOf, halfWidthAt, opts = {}) {
       lane[k * 4] = u;
       lane[k * 4 + 1] = s;
       lane[k * 4 + 2] = hw;
-      lane[k * 4 + 3] = isBranch ? 1 : 0;
+      lane[k * 4 + 3] = laneKind;
       col[k * 3] = 1; col[k * 3 + 1] = 1; col[k * 3 + 2] = 1;
     }
   }
@@ -490,7 +494,7 @@ export class TrackMesh {
     // --- branches ---
     for (const br of track.branches) {
       const g = buildRibbon(br.path, br.path.length, () => br.halfWidth, {
-        isBranch: true, closed: false, lift: BRANCH_LIFT,
+        isBranch: br.isPit ? 2 : true, closed: false, lift: BRANCH_LIFT,
       });
       const m = new THREE.Mesh(g, this.roadMat);
       m.receiveShadow = !!quality?.shadows;

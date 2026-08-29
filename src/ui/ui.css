@@ -429,3 +429,79 @@ html, body {
   box-shadow: 0 0 12px rgba(120, 210, 255, 0.85);
 }
 .g-nos.firing .gauge-label { color: #9fe4ff; }
+
+/* The pit lane ahead.
+   Opposite the pace note, because it is the opposite kind of information: the
+   corner is something happening to you and the pit is something you may choose,
+   and a driver who has to weigh the two should not find them stacked. */
+.hud-pit {
+  position: absolute;
+  left: 3.2vw;
+  /* Clear of the gauges, which are four bars and a heading tall and start at
+     the same corner. Stacked on them the pit read as a fifth gauge. */
+  bottom: calc(3.4vh + 178px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.hud-pit.on { opacity: 1; }
+
+.hud-pit .ico {
+  font-size: clamp(20px, 2.4vw, 32px);
+  line-height: 1;
+  filter: drop-shadow(0 0 10px var(--pit-color, #5fd08a));
+}
+
+.hud-pit .what {
+  font-size: clamp(12px, 1.3vw, 17px);
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--pit-color, #5fd08a);
+}
+
+.hud-pit .deal {
+  font-family: var(--mono);
+  font-size: clamp(11px, 1.1vw, 14px);
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* Nothing to sell, or nothing to sell it with: still shown, because knowing
+   the lane is pointless this lap is what stops you throwing four seconds at
+   it, but shown as a thing you should drive past. */
+.hud-pit.dead { opacity: 0.45; }
+.hud-pit.dead .what { color: var(--text-dim); }
+
+/* Committed. */
+.hud-pit.here .what { color: #fff; }
+
+/* What a pit stop bought. Centre screen, briefly, because it is the only
+   report of a transaction that happened while the player was busy driving. */
+.hud-flash {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(20px, 2.8vw, 40px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 26px rgba(0, 0, 0, 0.9);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hud-flash.on { animation: hud-flash 1.6s ease forwards; }
+
+@keyframes hud-flash {
+  0% { opacity: 0; transform: translate(-50%, -30%) scale(0.94); }
+  12% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  72% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -62%) scale(1); }
+}
