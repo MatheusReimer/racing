@@ -185,9 +185,23 @@ buy, not smaller payouts.** Both missing sinks are now in.
 
 - **The garage was free.** Repair and a skill upgrade both cost nothing, which
   made the one node that exists purely to spend money the one node that did not
-  take any. Repair is now 1.4 scrap a point and never refuses — it does what
-  the money on hand covers — and an upgrade is priced from the skill's rarity,
-  rising with each rank down a branch, all-or-nothing.
+  take any. Repair is now 1.4 scrap a point and is sold **pro rata**: the share
+  of the price you can pay is the share of the repair you get, so 50 scrap
+  against a 100 scrap job mends half the damage. That is the rule for every
+  repair in the game, in the garage and in the pits, and it exists because the
+  player who most needs the garage is exactly the one who cannot pay in full —
+  an all-or-nothing repair would turn the node that salvages a bad run into the
+  node that turns it away.
+
+  Below 5% of the price it refuses instead, and the node is not consumed: a
+  garage is a whole map node, and spending it to be handed two points of
+  Durability is worse than being turned away while you can still go elsewhere.
+  `tools/economy-probe.mjs` holds the rule at 100/75/50/25% and the refusal.
+
+  A skill upgrade is the exception and stays all-or-nothing — priced from the
+  skill's rarity, rising with each rank down a branch. A rank is discrete and
+  there is no half of one to sell. It refuses for free, which is why the garage
+  needed an exit that costs nothing.
 - **Pits** are in; see below.
 
 Greedy-shopper surplus: **3.6x → 2.7x**, under the target of 3. The probe holds
