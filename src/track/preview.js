@@ -82,6 +82,93 @@ export function previewTrack(seed, biome, opts = {}) {
   };
 }
 
+/**
+ * Every corner on a circuit, in order, as something a pace note could read.
+ *
+ * The same curvature walk `measure` does, kept rather than counted: where the
+ * corner starts, which way it goes, and how tight it gets at its worst. A
+ * driver approaching a bend wants those three and nothing else.
+ */
+export function findCorners(track) {
+  const pts = track.path.points;
+  const n = pts.length;
+  const out = [];
+
+  let run = null;
+  const close = () => {
+    if (run && run.length >= CORNER_MIN_LENGTH) out.push({
+      s: run.s,
+      // Signed: negative turns left, positive right, in the same frame the
+      // road's own normal uses.
+      direction: run.turn < 0 ? -1 : 1,
+      radius: Math.round(run.tightest),
+      length: Math.round(run.length),
+    });
+    run = null;
+  };
+
+  // Twice around, so a corner that straddles the start line is found whole
+  // rather than as two stubs. The second lap only closes what the first began.
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = 0; i < n; i++) {
+      const a = pts[(i - 1 + n) % n];
+      const b = pts[i];
+      const c = pts[(i + 1) % n];
+      const ax = b.x - a.x, az = b.z - a.z;
+      const bx = c.x - b.x, bz = c.z - b.z;
+      const la = Math.hypot(ax, az);
+      const lb = Math.hypot(bx, bz);
+      if (la < 1e-6 || lb < 1e-6) continue;
+
+      const cross = ax * bz - az * bx;
+      let turn = Math.acos(Math.min(1, Math.max(-1, (ax * bx + az * bz) / (la * lb))));
+      if (turn < 1e-6) turn = 1e-6;
+      const radius = ((la + lb) / 2) / turn;
+
+      if (radius < CORNER_RADIUS) {
+        if (!run) run = { s: (i / n) * track.length, length: 0, tightest: radius, turn: cross };
+        run.length += lb;
+        if (radius < run.tightest) { run.tightest = radius; run.turn = cross; }
+      } else {
+        if (pass === 1 && run && run.s >= (n - 1) / n * track.length) { close(); continue; }
+        close();
+      }
+      if (pass === 1 && out.length && run === null) break;
+    }
+  }
+  close();
+
+  // The wrap pass can find the same corner twice.
+  const seen = new Set();
+  const list = out.filter((c) => {
+    const k = Math.round(c.s);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  }).sort((a, b) => a.s - b.s);
+
+  // A corner across the start line is found as two: a tail at station zero and
+  // a head near the lap's end. Whichever the walk saw first keeps the length.
+  if (list.length > 1) {
+    const last = list[list.length - 1];
+    const first = list[0];
+    if (last.s + last.length > track.length && first.s < (last.s + last.length) - track.length + 1) {
+      last.length = Math.round(last.length + first.length);
+      last.radius = Math.min(last.radius, first.radius);
+      list.shift();
+    }
+  }
+  return list;
+}
+
+/** What to call a corner, from how tight it gets. */
+export function cornerName(radius) {
+  if (radius < 26) return 'hairpin';
+  if (radius < 48) return 'sharp';
+  if (radius < 85) return 'medium';
+  return 'easy';
+}
+
 /** Length, corners and climb — the things a circuit is described by. */
 function measure(track) {
   const pts = track.path.points;

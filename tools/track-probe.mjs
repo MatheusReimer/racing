@@ -4,7 +4,7 @@
 // shows up in 1 seed in 200 is a run-ending bug in play.
 
 import { generateTrack } from '../src/track/track.js';
-import { previewTrack } from '../src/track/preview.js';
+import { previewTrack, findCorners, cornerName } from '../src/track/preview.js';
 import { RaceSim } from '../src/race/sim.js';
 import { Build } from '../src/build/build.js';
 import { EventBus } from '../src/core/events.js';
@@ -214,6 +214,79 @@ function shapeDrift(track, outline) {
     worstD = Math.max(worstD, Math.hypot(x - outline[i].x, y - outline[i].y));
   }
   return worstD;
+}
+
+// --- the pace note names the corner that is actually next ------------------
+//
+// The HUD's corner call is a lookup into a list built once per circuit, and
+// both halves can be wrong quietly: a corner list that misses the bend you are
+// about to arrive at, or a lookup that hands you one you have already driven
+// through. Either way the note reads plausibly and points at the wrong thing,
+// which is worse than no note at all.
+{
+  console.log('\nThe next corner is the next corner:\n');
+  let bad = 0;
+  let worst = '';
+  let total = 0;
+
+  for (let i = 0; i < 8; i++) {
+    const biome = BIOMES[i % BIOMES.length];
+    const track = generateTrack(new RNG(`corner-${i}`).fork('track'), biome,
+      { difficulty: 1, lengthScale: 1 });
+    const corners = findCorners(track);
+    total += corners.length;
+    if (!corners.length) continue;
+
+    // Corners are in order, none overlap, and none run past the lap.
+    for (let c = 1; c < corners.length; c++) {
+      if (corners[c].s <= corners[c - 1].s) {
+        bad++; worst = worst || `${biome.id}: corners out of order`;
+      }
+      if (corners[c - 1].s + corners[c - 1].length > corners[c].s + 1) {
+        bad++; worst = worst || `${biome.id}: corners overlap at ${Math.round(corners[c].s)} m`;
+      }
+    }
+
+    // And walking the lap, the note always points forward and never skips one.
+    for (let s = 0; s < track.length; s += 17) {
+      let bestGap = Infinity;
+      let best = null;
+      for (const c of corners) {
+        let gap = c.s - s;
+        if (gap < 0) gap += track.length;
+        if (gap > track.length - c.length) continue;
+        if (gap < bestGap) { bestGap = gap; best = c; }
+      }
+      if (!best) continue;
+      if (bestGap < 0 || bestGap > track.length) {
+        bad++; worst = worst || `${biome.id}: gap ${bestGap.toFixed(0)} m at station ${s}`;
+      }
+      // Nothing else may sit between here and the corner it named.
+      for (const c of corners) {
+        if (c === best) continue;
+        let gap = c.s - s;
+        if (gap < 0) gap += track.length;
+        if (gap > track.length - c.length) continue;
+        if (gap < bestGap - 0.5) {
+          bad++;
+          worst = worst || `${biome.id}: skipped a corner at ${Math.round(c.s)} m`;
+        }
+      }
+    }
+  }
+  if (bad) fails++;
+  console.log(`  ${total} corners over 8 circuits, ${bad} wrong`.padEnd(52)
+    + (bad ? `FAIL ${worst}` : 'ok'));
+}
+
+// --- and it is named the way a driver would name it ------------------------
+{
+  const pairs = [[18, 'hairpin'], [25, 'hairpin'], [30, 'sharp'], [47, 'sharp'],
+    [50, 'medium'], [84, 'medium'], [90, 'easy'], [128, 'easy']];
+  const wrong = pairs.filter(([r, want]) => cornerName(r) !== want);
+  if (wrong.length) fails++;
+  console.log(`  severity names, ${pairs.length} radii`.padEnd(52)
+    + (wrong.length ? `FAIL ${wrong.map(([r, w]) => `${r}m->${cornerName(r)} want ${w}`).join(', ')}` : 'ok'));
 }
 
 process.exit(fails > 0 ? 1 : 0);

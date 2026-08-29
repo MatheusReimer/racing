@@ -48,6 +48,14 @@ export class HUD {
         <div class="draft">Slipstream</div>
       </div>
 
+      <div class="hud-corner">
+        <div class="arrow">&#8598;</div>
+        <div class="tx">
+          <div class="sev">Easy left</div>
+          <div class="dist">200 m</div>
+        </div>
+      </div>
+
       <div class="hud-drift">Drift <span class="dq">0</span></div>
       <div class="hud-state"><span class="lbl"></span><span class="why"></span></div>
       <div class="hud-skills"></div>
@@ -64,6 +72,10 @@ export class HUD {
       lapTotal: q('.hud-position .lt'),
       speed: q('.hud-speed .val'),
       speedBox: q('.hud-speed'),
+      corner: q('.hud-corner'),
+      cornerArrow: q('.hud-corner .arrow'),
+      cornerSev: q('.hud-corner .sev'),
+      cornerDist: q('.hud-corner .dist'),
       durFill: q('.g-dur .gauge-fill'),
       durNum: q('.g-dur .num'),
       nrgFill: q('.g-nrg .gauge-fill'),
@@ -131,6 +143,30 @@ export class HUD {
     if (towed !== prev.towed) {
       n.speedBox?.classList.toggle('towed', towed);
       prev.towed = towed;
+    }
+
+    // The next corner, as a pace note.
+    //
+    // Rounded to ten metres before it is compared: the raw distance changes
+    // every frame at ninety metres a second, and rewriting the DOM sixty times
+    // a second to move a number nobody can read is the whole reason this file
+    // caches every field it touches.
+    const corner = race.nextCorner ? race.nextCorner() : null;
+    const dist = corner ? Math.round(corner.distance / 10) * 10 : -1;
+    const key = corner ? `${corner.severity}${corner.direction}${dist}` : '';
+    if (key !== prev.corner) {
+      prev.corner = key;
+      n.corner.classList.toggle('on', !!corner);
+      if (corner) {
+        const left = corner.direction < 0;
+        n.cornerArrow.innerHTML = left ? '&#8598;' : '&#8599;';
+        n.cornerSev.textContent =
+          `${corner.severity[0].toUpperCase()}${corner.severity.slice(1)} ${left ? 'left' : 'right'}`;
+        n.cornerDist.textContent = `${dist} m`;
+        // A hairpin at forty metres is a different message from an easy right
+        // at two hundred, and the difference has to arrive before the corner.
+        n.corner.classList.toggle('urgent', corner.radius < 48 && dist <= 90);
+      }
     }
 
     // Placing

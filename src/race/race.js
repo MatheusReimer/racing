@@ -9,6 +9,7 @@ import { PropsMesh } from '../world/propsmesh.js';
 import { TrafficMesh } from './trafficmesh.js';
 import { StreetLighting } from '../fx/lights.js';
 import { ContactShadows } from '../fx/contact.js';
+import { findCorners, cornerName } from '../track/preview.js';
 import { TRAFFIC_FOOTPRINTS } from './trafficmesh.js';
 
 export { makeDefaultRivalBuild } from './sim.js';
@@ -40,6 +41,9 @@ export class Race extends RaceSim {
     this.fx = new FX(this.scene, events, quality.settings);
     // Racers and civilians both; a civilian without one is the pasted-on
     // sticker this exists to fix, and there are more of them than of us.
+    // The circuit's corners, once. A pace note is a lookup, not a search.
+    this.corners = findCorners(this.track);
+
     this.contact = new ContactShadows(this.scene, 8 + this.traffic.length);
     this.contact.applyQuality(quality.settings);
     this._groundAt = (x, z) => this.track.groundAt(x, z);
@@ -156,6 +160,38 @@ export class Race extends RaceSim {
     this.fx.update(dt, this.racers, this.combat, this.camera.camera.position);
     this.sky.update(dt, this.camera.camera.position);
     return this.camera.camera;
+  }
+
+  /**
+   * The next corner, from where a car is now — direction, how tight, how far.
+   *
+   * Returns null on a circuit with no corners worth naming, and on the run up
+   * to one that is still too far away to be worth thinking about.
+   */
+  nextCorner(racer = this.player, within = 260) {
+    if (!this.corners.length) return null;
+    const s = racer.sample?.s ?? 0;
+    const lap = this.track.length;
+
+    let best = null;
+    let bestGap = Infinity;
+    for (const c of this.corners) {
+      // Wrapped, because a lap is a loop and the next corner is often behind
+      // you in station terms.
+      let gap = c.s - s;
+      if (gap < 0) gap += lap;
+      // Already in it: a note about the corner you are turning through is
+      // noise, so it counts as passed once you are past its entry.
+      if (gap > lap - c.length) continue;
+      if (gap < bestGap) { bestGap = gap; best = c; }
+    }
+    if (!best || bestGap > within) return null;
+    return {
+      distance: bestGap,
+      direction: best.direction,
+      radius: best.radius,
+      severity: cornerName(best.radius),
+    };
   }
 
   postFx() {

@@ -297,6 +297,52 @@ html, body {
 
 .hud-speed.towed .draft { opacity: 1; }
 
+/* The next corner, as a pace note.
+   Above the speed, on the same side: the two numbers a driver reads on a
+   straight are how fast they are going and what is coming, and putting them
+   apart makes reading both a saccade the corner does not leave time for. */
+.hud-corner {
+  position: absolute;
+  right: 3.2vw;
+  bottom: calc(3.4vh + clamp(64px, 9vw, 128px));
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.hud-corner.on { opacity: 1; }
+
+.hud-corner .arrow {
+  font-size: clamp(26px, 3.2vw, 44px);
+  line-height: 1;
+  color: var(--speed);
+}
+
+.hud-corner .tx { text-align: right; }
+
+.hud-corner .sev {
+  font-size: clamp(12px, 1.3vw, 17px);
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.hud-corner .dist {
+  font-family: var(--mono);
+  font-size: clamp(11px, 1.1vw, 14px);
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* A tight one, close. The colour is the message; the words are the detail. */
+.hud-corner.urgent .arrow { color: var(--danger); }
+.hud-corner.urgent .sev { color: var(--danger); }
+
 .hud-drift {
   position: absolute;
   left: 50%;
