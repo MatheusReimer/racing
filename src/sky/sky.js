@@ -107,8 +107,13 @@ void main() {
 }`;
 
 export class Sky {
-  constructor(scene) {
+  constructor(scene, gl = null) {
     this.scene = scene;
+    // The GL context, only so the dome can be baked into an environment map.
+    // Without one the sky still draws; the world simply has nothing to reflect.
+    this.gl = gl;
+    this.pmrem = null;
+    this.envRT = null;
 
     const geo = new THREE.SphereGeometry(1, 32, 16);
     this.material = new THREE.ShaderMaterial({
@@ -244,11 +249,52 @@ export class Sky {
     }
     this.skyline?.apply(p);
 
+    this._bakeEnvironment(p);
+
     this.configureShadows(quality);
 
     // Fog colour must track the horizon stop, or the dissolve shows a seam.
     this.scene.fog = new THREE.FogExp2(new THREE.Color(p.fog), p.fogDensity ?? 0.004);
     this.scene.background = null; // the dome is the background
+  }
+
+  /**
+   * Bake the dome into the environment every material reflects.
+   *
+   * Without this the project's PBR is a lie. `metalness` means "this surface's
+   * colour comes from what it reflects", and it is set to 0.75 on chrome trim,
+   * 0.55 on glass, 0.45 on wet asphalt and up to 0.58 on car paint — with
+   * nothing in the scene to reflect, the diffuse term goes to zero and all
+   * that is left is the specular highlight of three lights. Every chrome
+   * bumper in the game has been drawing as a near-black facet.
+   *
+   * The source is the dome itself rather than a hand-made gradient, so the
+   * reflection is the sky that is actually overhead: change a biome's palette
+   * and its reflections follow, including the moon.
+   *
+   * Done once per race, at load. A prefiltered map is what makes roughness
+   * mean anything — a raw cube reflects a mirror image into a matte panel.
+   */
+  _bakeEnvironment(palette) {
+    if (!this.gl) return;
+    this.pmrem = this.pmrem || new THREE.PMREMGenerator(this.gl);
+
+    // A scene holding only the sky, sharing the dome's material so the bake is
+    // the same shader the player is looking at.
+    const only = new THREE.Scene();
+    const dome = new THREE.Mesh(this.mesh.geometry, this.material);
+    dome.frustumCulled = false;
+    only.add(dome);
+
+    this.envRT?.dispose();
+    this.envRT = this.pmrem.fromScene(only, 0, 0.1, 100);
+    only.remove(dome);
+
+    this.scene.environment = this.envRT.texture;
+    // Enough to light metal and wet tarmac, not enough to flatten the rig the
+    // biomes were lit with. A night district reflects a night sky, so this is
+    // one number rather than one per palette.
+    this.scene.environmentIntensity = palette.envIntensity ?? 1.0;
   }
 
   configureShadows(quality) {
@@ -288,6 +334,11 @@ export class Sky {
   }
 
   dispose() {
+    this.scene.environment = null;
+    this.envRT?.dispose();
+    this.envRT = null;
+    this.pmrem?.dispose();
+    this.pmrem = null;
     this.skyline?.dispose();
     this.skyline = null;
     this.mesh.geometry.dispose();

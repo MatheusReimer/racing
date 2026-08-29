@@ -233,6 +233,8 @@ class Game {
       playerBuild: this.run.build,
       quality: this.quality,
       events: this.events,
+      // The sky bakes itself into an environment map, which needs a GL context.
+      renderer: this.renderer,
       config: {
         laps: cfg.laps,
         rivals: cfg.rivals,

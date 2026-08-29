@@ -33,6 +33,10 @@ export const QUALITY_TIERS = [
     // than like a different game.
     bloom: true,
     bloomPasses: 1,
+    // Nine taps a pixel, and this is the tier for machines that cannot hold
+    // the rate. The render scale is lowest here anyway, so the upscale is
+    // already doing some of the job.
+    fxaa: false,
     shadows: false,
     shadowMapSize: 0,
     particleBudget: 260,
@@ -55,6 +59,7 @@ export const QUALITY_TIERS = [
     maxPixelRatio: 1.25,
     bloom: true,
     bloomPasses: 2,
+    fxaa: true,
     shadows: false,
     shadowMapSize: 0,
     particleBudget: 650,
@@ -74,6 +79,7 @@ export const QUALITY_TIERS = [
     maxPixelRatio: 1.5,
     bloom: true,
     bloomPasses: 3,
+    fxaa: true,
     shadows: true,
     shadowMapSize: 1024,
     particleBudget: 1300,
@@ -93,6 +99,7 @@ export const QUALITY_TIERS = [
     maxPixelRatio: 2.0,
     bloom: true,
     bloomPasses: 4,
+    fxaa: true,
     shadows: true,
     shadowMapSize: 2048,
     particleBudget: 2400,

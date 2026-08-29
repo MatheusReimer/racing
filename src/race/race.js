@@ -20,13 +20,13 @@ export { makeDefaultRivalBuild } from './sim.js';
 // and `onWreck`, and this turns those into camera shoves and effects.
 
 export class Race extends RaceSim {
-  constructor({ seed, biome, playerBuild, config = {}, quality, events }) {
+  constructor({ seed, biome, playerBuild, config = {}, quality, events, renderer }) {
     super({ seed, biome, playerBuild, config, events });
 
     this.quality = quality;
 
     this.scene = new THREE.Scene();
-    this.sky = new Sky(this.scene);
+    this.sky = new Sky(this.scene, renderer?.gl ?? null);
     this.sky.apply(biome, quality.settings);
 
     this.trackMesh = new TrackMesh(this.track, biome, quality.settings).addTo(this.scene);

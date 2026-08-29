@@ -62,7 +62,59 @@ uniform float uVignette;
 uniform float uChroma;      // radial chromatic split, driven by speed
 uniform float uSpeedBlur;   // radial smear strength, driven by speed
 uniform vec2  uFocus;       // screen point the smear radiates from
+uniform vec2  uTexel;       // 1 / scene render target size
+uniform float uFxaa;        // 0 off, 1 on
 varying vec2 vUv;
+
+// FXAA, the compact one.
+//
+// The renderer asks for no MSAA — it is expensive on a scaled buffer and does
+// nothing for the alpha-tested and shader-drawn edges here — and the render
+// scale plus the dither were standing in for it. That works for gradients and
+// not for silhouettes, and a low-poly game is nothing but silhouettes: every
+// hard edge crawls as the car moves, which is exactly the frame in which it
+// gets looked at.
+//
+// Nine taps, run on the scene buffer before bloom and grading, which is where
+// geometry edges live. Luma is measured on a tone-compressed copy: the buffer
+// is HDR-linear, and next to a highlight of forty everything is an edge.
+vec3 fxaa(sampler2D tex, vec2 uv) {
+  vec3 m  = texture2D(tex, uv).rgb;
+  if (uFxaa < 0.5) return m;
+
+  vec3 nw = texture2D(tex, uv + vec2(-1.0, -1.0) * uTexel).rgb;
+  vec3 ne = texture2D(tex, uv + vec2( 1.0, -1.0) * uTexel).rgb;
+  vec3 sw = texture2D(tex, uv + vec2(-1.0,  1.0) * uTexel).rgb;
+  vec3 se = texture2D(tex, uv + vec2( 1.0,  1.0) * uTexel).rgb;
+
+  const vec3 W = vec3(0.299, 0.587, 0.114);
+  float lNW = dot(nw / (1.0 + nw), W);
+  float lNE = dot(ne / (1.0 + ne), W);
+  float lSW = dot(sw / (1.0 + sw), W);
+  float lSE = dot(se / (1.0 + se), W);
+  float lM  = dot(m  / (1.0 + m),  W);
+
+  float lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)));
+  float lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));
+  // Flat enough to leave alone. Skipping here is most of the pixels.
+  if (lMax - lMin < max(0.028, lMax * 0.125)) return m;
+
+  vec2 dir = vec2(
+    -((lNW + lNE) - (lSW + lSE)),
+     ((lNW + lSW) - (lNE + lSE)));
+  float reduce = max((lNW + lNE + lSW + lSE) * 0.03125, 0.0078125);
+  float rcp = 1.0 / (min(abs(dir.x), abs(dir.y)) + reduce);
+  dir = clamp(dir * rcp, vec2(-8.0), vec2(8.0)) * uTexel;
+
+  vec3 a = 0.5 * (texture2D(tex, uv + dir * (1.0 / 3.0 - 0.5)).rgb
+                + texture2D(tex, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
+  vec3 b = a * 0.5 + 0.25 * (texture2D(tex, uv - dir * 0.5).rgb
+                           + texture2D(tex, uv + dir * 0.5).rgb);
+  float lB = dot(b / (1.0 + b), W);
+  // The wider average can overshoot on a thin bright line; fall back when it
+  // lands outside the neighbourhood it was meant to blend within.
+  return (lB < lMin || lB > lMax) ? a : b;
+}
 
 // ACES filmic approximation (Narkowicz). Cheap, and holds saturation in the
 // highlights, which matters when half the screen is an explosion.
@@ -99,7 +151,10 @@ void main() {
     }
     col /= total;
   } else {
-    col = texture2D(tDiffuse, vUv).rgb;
+    // Only when the frame is not already being smeared: six radial taps have
+    // resolved the edges more thoroughly than FXAA would, and doing both is
+    // paying twice for one result.
+    col = fxaa(tDiffuse, vUv);
   }
 
   if (uChroma > 0.001) {
@@ -194,6 +249,8 @@ export class Renderer {
         uBloomStrength: { value: 0.45 }, uExposure: { value: 1.0 },
         uVignette: { value: 0.22 }, uChroma: { value: 0.0 },
         uSpeedBlur: { value: 0.0 }, uFocus: { value: new THREE.Vector2(0.5, 0.55) },
+        uTexel: { value: new THREE.Vector2(1 / 1280, 1 / 720) },
+        uFxaa: { value: 1 },
       },
     });
 
@@ -376,6 +433,10 @@ export class Renderer {
     u.uChroma.value = fx.chroma ?? this.chroma;
     u.uSpeedBlur.value = fx.speedBlur ?? this.speedBlur;
     u.uFocus.value.set(fx.focusX ?? 0.5, fx.focusY ?? 0.55);
+    // The scene buffer's size, not the canvas's: FXAA runs before the upscale,
+    // where the geometry edges are.
+    u.uTexel.value.set(1 / Math.max(1, this.sceneRT.width), 1 / Math.max(1, this.sceneRT.height));
+    u.uFxaa.value = this.quality?.settings?.fxaa === false ? 0 : 1;
     this._blit(this.compositeMat, null);
   }
 
