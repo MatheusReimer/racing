@@ -78,6 +78,87 @@ should be a probe.
 
 ---
 
+## Skills: the missing verb, then affinity, then more of them
+
+Scoped, not started. Three pieces in this order, because each one makes the
+next worth doing.
+
+### 1. Swapping, which is the actual bug
+
+There is no `removeSkill` anywhere. A car has three or four slots and starts
+with one skill, and once those slots are full `pickSkill` filters the catalogue
+down to skills the build *already has* — so from the third pickup onward the
+game stops offering new skills for the rest of the run. The decision the genre
+is built on, "is what just appeared worth more than what I am carrying", cannot
+happen at all.
+
+What it needs:
+
+- `Build.removeSkill(id)`, and `canAddSkill` stops being the gate on what is
+  *offered* — it becomes the gate on whether taking one is free or costs a
+  slot.
+- `pickSkill` offers unheld skills regardless of space. It currently returns
+  null rather than a choice.
+- A screen. Taking a skill with no room has to ask which one goes, and that is
+  the real work here — the reward screen hands off to a "which of these three
+  do you drop" step, and the garage is the natural place to allow it freely.
+- `applyOffer` has to carry the answer back.
+
+Fifteen skills against three slots is the ratio that makes this matter. It is
+not a feature on top; without it, two thirds of the catalogue is decoration.
+
+### 2. Affinity, not fixed pools
+
+A heavy car should reach for blunt things and a precise one for precise things
+— and that intent is already in the data, unread. Every car's *starting* skill
+already fits its numbers: the Tsurugi is weight +55 and impact +55 and starts
+with Shockwave (Area/Impact/Explosive); the Roadster is luck +55 and starts
+with Banana (Trap/Control). What is missing is the roll respecting it.
+
+Affinity rather than a closed set of seven per car, and the reason is
+arithmetic. There are fifteen skills and six cars. Seven each is forty-two
+slots to fill from fifteen things: either the sets overlap almost entirely and
+the identity evaporates, or the catalogue has to more than double first. Slay
+the Spire's per-character pools work because each is seventy-odd cards deep —
+at fifteen, fixing seven at the car-select screen decides half the run before
+the first race, which is the opposite of what the genre wants.
+
+So: each vehicle carries tag weights, and `pickSkill` multiplies by them. It is
+already `rng.weighted(pool, fn)`, so this is a few lines and a table:
+
+  Tsurugi GT-S   Impact, Explosive, Area, Defense     the brute
+  Vantera WRC    Trap, Explosive, Projectile          the fighter
+  Hinode Roadster Trap, Control, Defense              the trickster
+  Sableline      Electric, Energy, Control            the technician
+  Aoi 13B        Speed, Projectile, Fire              fast and fragile
+  Kanzen 1.6     Speed, Control, Energy               nimble
+
+Nothing is locked out. A Tsurugi can still find Cryo Burst; it will just see
+Shockwave-shaped things more often, and two runs in the same car will still
+differ.
+
+One thing to check before trusting the numbers: rarity weight, the Luck stat
+and affinity would all multiply into the same roll. Three multiplicative terms
+is how a "slight preference" becomes "always the same skill" — worth a probe
+that rolls a few thousand offers per car and reports the spread, before the
+weights are tuned rather than after.
+
+### 3. More skills, and a rarity curve that is not a cliff
+
+Fifteen, as 7 common / 7 rare / **1 epic**. One epic in the entire game is not
+a rarity tier, it is a single card, and the crate-style excitement of finding
+something rare has nowhere to land.
+
+The tag vocabulary is just as lopsided: Control appears on 8 of 15 skills,
+while Impact, Ice and Fire have exactly one each — so an affinity table that
+leans on Impact is leaning on a single skill. Growing to around thirty, with
+the thin tags filled out and three or four more epics, is what makes both the
+affinity table and a future closed-pool design possible. It is also the point
+at which "seven per car" stops being arithmetic nonsense and becomes a real
+option to weigh.
+
+---
+
 ## Crates: what is in them next
 
 The first slice is in — cosmetics that persist, a crate for finishing a
