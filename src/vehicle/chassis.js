@@ -246,6 +246,9 @@ const HULL_PRIMER = 0x6b6560;
 const HULL_SCORCH = 0x322d29;
 // A torn panel shows its back, which never saw paint or daylight.
 const HULL_TORN = 0x494440;
+// What is behind a window. Not pure black — a cabin has a little light in it,
+// and pure black against near-black glass makes the glass disappear.
+const HULL_CABIN = 0x0b0e13;
 
 // What paint turns into where the light does not reach it.
 //
@@ -1934,28 +1937,15 @@ export class VehicleMesh {
       clearcoatRoughness: lerp(0.11, 0.26, armor),
     });
 
-    if (hull) {
-      // The inside of a car is not the outside of one.
-      //
-      // A decimated shell has no interior, and it draws double sided because
-      // its winding is inconsistent — so looking through a side window you see
-      // the *back* of the far door skin, lit and painted as though it were
-      // bodywork in the sun. On some cars that is a pale wedge sitting in the
-      // middle of a black window, which is what it was reported as: triangles
-      // the colour of the car where there should be shadow.
-      //
-      // A back face is inside the car by definition, whatever the winding says
-      // about which way round the triangle is. So it is taken down to the dark
-      // the cabin would be. Cheaper and more reliable than authoring an
-      // interior for seven references nobody here modelled.
-      this.bodyMat.onBeforeCompile = (shader) => {
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <dithering_fragment>',
-          'if (!gl_FrontFacing) gl_FragColor.rgb *= 0.16;\n#include <dithering_fragment>',
-        );
-      };
-      this.bodyMat.customProgramCacheKey = () => 'hull-body';
-    }
+    // No back-face darkening here, and it is worth saying why not.
+    //
+    // "A back face is inside the car" is true of a consistently wound mesh and
+    // these are not: measured, the references run from 39% to 76% of faces
+    // pointing outward, which is the reason this material draws double sided in
+    // the first place. Darkening back faces took the WRC — 42% outward — and
+    // painted well over half of its bodywork the colour of a cabin. The problem
+    // it was aimed at is solved below instead, by putting something dark inside
+    // the car rather than by guessing which side of a triangle you are on.
     // Everything that pitches and rolls hangs off `chassis`; the wheels do not.
     //
     // Pitch used to be applied to the whole car about the group's origin, which
@@ -2033,6 +2023,33 @@ export class VehicleMesh {
     this._damageLevel = 0;
     // How hard the engine bay should be smoking, for the FX layer to read.
     this.damageSmoke = 0;
+
+    // The cabin, blanked.
+    //
+    // A decimated shell has no interior: through a side window you see the back
+    // of the far door skin, lit as though it were bodywork in the sun, and on
+    // a car whose glass is sparse you can see straight through the greenhouse
+    // to the scenery. A box of dark sitting inside the cabin costs twelve
+    // triangles and one draw call, and whatever a window shows, it shows this.
+    this.cabin = null;
+    if (hullLampGeo?.bounds) {
+      const b = hullLampGeo.bounds;
+      const h = b.maxY - b.minY;
+      // Sized to sit *inside* the greenhouse, not to fill the car. The first
+      // attempt took 86% of the width — which on a hull measured across its
+      // mirrors is wider than the cabin — and pushed a black slab out through
+      // both doors.
+      const geo = box(
+        (b.maxX - b.minX) * 0.58, h * 0.30, (b.maxZ - b.minZ) * 0.34,
+        0, b.minY + h * 0.68, (b.maxZ + b.minZ) / 2 - (b.maxZ - b.minZ) * 0.05,
+        HULL_CABIN,
+      );
+      this.cabinMat = new THREE.MeshBasicMaterial({
+        vertexColors: true, toneMapped: false,
+      });
+      this.cabin = new THREE.Mesh(geo, this.cabinMat);
+      attach(this.cabin);
+    }
 
     this.torn = null;
     if (hullLampGeo?.bounds) {
@@ -2349,6 +2366,8 @@ export class VehicleMesh {
   }
 
   dispose() {
+    this.cabinMat?.dispose();
+    this.cabin?.geometry.dispose();
     this.tornMat?.dispose();
     this.torn?.bonnet.geometry.dispose();
     this.torn?.bumper.geometry.dispose();

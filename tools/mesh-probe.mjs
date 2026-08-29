@@ -97,6 +97,40 @@ for (const [label, ids] of [
   cases.push({ label, build: b, def: b.vehicle });
 }
 
+// --- the cabin blank stays inside the car ----------------------------------
+//
+// A decimated shell has no interior, so a dark box sits inside the greenhouse
+// and is what a window shows. It is sized from the hull's own extents, and a
+// hull is measured across its mirrors and its wing — so a fraction that looks
+// modest can still be wider than the cabin. The first one took 86% of the
+// width and pushed a black slab out through both doors.
+{
+  const THREE = await import('three');
+  console.log('\nThe cabin blank stays inside the bodywork\n');
+  let worst = -Infinity;
+  let worstCar = '';
+  for (const v of VEHICLES) {
+    const b = new Build(v.id);
+    const mesh = new VehicleMesh(visualProfile(b.stats.all(), b.tags, b.vehicle),
+      { shadows: false });
+    if (!mesh.cabin) { mesh.dispose(); continue; }
+    const body = new THREE.Box3().setFromObject(mesh.bodyMesh);
+    const cab = new THREE.Box3().setFromObject(mesh.cabin);
+    const out = Math.max(
+      cab.max.x - body.max.x, body.min.x - cab.min.x,
+      cab.max.y - body.max.y, body.min.y - cab.min.y,
+      cab.max.z - body.max.z, body.min.z - cab.min.z,
+    );
+    if (out > worst) { worst = out; worstCar = v.bodyType; }
+    mesh.dispose();
+  }
+  const ok = worst < -0.05;
+  if (!ok) problems++;
+  console.log(`  closest approach ${(-worst * 100).toFixed(0)} cm inside (${worstCar})`
+    .padEnd(52) + (ok ? 'ok' : 'FAIL — the blank is showing'));
+}
+
+
 console.log('Manifold orientation of generated vehicle meshes\n');
 
 for (const c of cases) {
