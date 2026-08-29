@@ -250,12 +250,28 @@ const HULL_TORN = 0x494440;
 // What paint turns into where the light does not reach it.
 //
 // Not simply darker. A shaded panel is lit by the sky rather than by the sun,
-// so it goes *cooler* and loses saturation — and a car whose shadowed side is
-// the same hue at half brightness is the single clearest tell of a moulded
-// plastic toy. This is the colour the occluded parts are pulled toward, and
-// how far.
-const PAINT_SHADOW = 0x2a3444;
-const PAINT_SHADOW_MIX = 0.55;
+// so it goes cooler and loses a little saturation — and a car whose shadowed
+// side is the same hue at half brightness is the clearest tell of a moulded toy.
+//
+// Derived from the car's own colour, not mixed toward one shade for every car.
+// A fixed cool navy is invisible on a blue car and turns a red one the colour
+// of cooked salmon, which is exactly the "melted plastic" some of the roster
+// had and the rest did not — the ones whose paint was nowhere near the shade
+// colour got wrecked by it and the ones near it did not.
+const SHADOW_DARKEN = 0.62;      // of its own lightness
+const SHADOW_DESATURATE = 0.82;  // of its own saturation
+const SHADOW_HUE_SHIFT = 0.02;   // a nudge toward blue, in turns
+
+/** The colour a surface takes on where the sky is all that reaches it. */
+function shadeOf(colour) {
+  const hsl = { h: 0, s: 0, l: 0 };
+  colour.getHSL(hsl);
+  return new THREE.Color().setHSL(
+    (hsl.h + SHADOW_HUE_SHIFT) % 1,
+    hsl.s * SHADOW_DESATURATE,
+    hsl.l * SHADOW_DARKEN,
+  );
+}
 
 /** Which of the four states a remaining-durability fraction is in. */
 export function damageLevel(healthFrac) {
@@ -614,9 +630,32 @@ function bakeCavity(shared) {
     ofVertex[i] = id;
     nx[id] += nor[o]; ny[id] += nor[o + 1]; nz[id] += nor[o + 2];
   }
+  // Orient every normal outward before measuring anything with it.
+  //
+  // None of the references are consistently wound — measured, they run from 39%
+  // to 76% of faces facing out — which is why the body material draws double
+  // sided in the first place. Rendering survives it because Three flips the
+  // normal for a back face on its way into the shader. This did not: a vertex
+  // whose normal pointed into the car saw every neighbour "in front of" its
+  // tangent plane, called that a crease, and occluded it. On two of the six
+  // cars that was *every vertex on the body*, so the whole car came out a flat
+  // wash — which is what melted plastic looks like.
+  //
+  // A car is roughly star-shaped about the line running through it, so the way
+  // out is away from that line. Good enough to get the sign right, which is all
+  // this needs.
+  let midY = 0;
+  for (let i = 0; i < unique; i++) midY += py[i];
+  midY /= Math.max(1, unique);
   for (let i = 0; i < unique; i++) {
     const l = Math.hypot(nx[i], ny[i], nz[i]) || 1;
     nx[i] /= l; ny[i] /= l; nz[i] /= l;
+    const ox = px[i];
+    const oy = py[i] - midY;
+    const ol = Math.hypot(ox, oy) || 1;
+    if ((nx[i] * ox + ny[i] * oy) / ol < 0) {
+      nx[i] = -nx[i]; ny[i] = -ny[i]; nz[i] = -nz[i];
+    }
   }
 
   // A uniform grid over the car's own extents, as a counting sort: `start`
@@ -802,7 +841,8 @@ function damageRanks(shared, hull) {
 function paintHull(shared, byClass, col, damage = 0) {
   const cls = shared.bodyClasses;
   const ao = shared.ao;
-  const shadow = new THREE.Color(PAINT_SHADOW);
+  // One shade per class, worked out once rather than per vertex.
+  const shadows = byClass.map((c) => shadeOf(c));
   const shaded = new THREE.Color();
   const rank = shared.damageRank;
   const primer = new THREE.Color(HULL_PRIMER);
@@ -825,12 +865,12 @@ function paintHull(shared, byClass, col, damage = 0) {
       // tinting a window toward it would make the creases in a windscreen
       // *brighter* — and black glass took two goes to get right already.
       if (shade < 1 && (cls[t] === 0 || cls[t] === 3)) {
-        // Toward the shade colour first, then down. Doing only the second is
-        // what makes a dark panel read as the same plastic under less light.
-        shaded.copy(c).lerp(shadow, (1 - shade) * PAINT_SHADOW_MIX);
-        col[o] = shaded.r * shade;
-        col[o + 1] = shaded.g * shade;
-        col[o + 2] = shaded.b * shade;
+        // Toward its own shade first, then down. Doing only the second is what
+        // makes a dark panel read as the same plastic under less light.
+        shaded.copy(c).lerp(shadows[cls[t]] ?? c, 1 - shade);
+        col[o] = shaded.r;
+        col[o + 1] = shaded.g;
+        col[o + 2] = shaded.b;
       } else {
         col[o] = c.r * shade;
         col[o + 1] = c.g * shade;

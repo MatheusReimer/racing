@@ -81,11 +81,16 @@ export function showGarage(game, mode = 'vehicles', aspect = 1400 / 620, opts = 
   scene.background = new THREE.Color(0x10141a);
 
   // Flat, neutral, three-point light: a showroom, not a biome.
-  scene.add(new THREE.HemisphereLight(0xbfd4e8, 0x2a2622, 1.6));
-  const key = new THREE.DirectionalLight(0xffffff, 2.3);
+  // Turned down from 1.6 / 2.3 / 1.0. This rig was tuned against a scene with
+  // no environment, and an environment was added under it — so every car in
+  // here has been lit twice since, and a saturated red came out the colour of
+  // cooked salmon. The environment supplies the ambient now; these three are
+  // back to being a key, a rim and a floor bounce.
+  scene.add(new THREE.HemisphereLight(0xbfd4e8, 0x2a2622, 0.55));
+  const key = new THREE.DirectionalLight(0xffffff, 1.7);
   key.position.set(5, 7, 6);
   scene.add(key);
-  const rim = new THREE.DirectionalLight(0x88bbff, 1.0);
+  const rim = new THREE.DirectionalLight(0x88bbff, 0.7);
   rim.position.set(-6, 3, -5);
   scene.add(rim);
 
@@ -116,7 +121,7 @@ export function showGarage(game, mode = 'vehicles', aspect = 1400 / 620, opts = 
     const pmrem = new THREE.PMREMGenerator(game.renderer.gl);
     const rt = pmrem.fromScene(env, 0, 0.1, 100);
     scene.environment = rt.texture;
-    scene.environmentIntensity = 1.0;
+    scene.environmentIntensity = 0.5;
     dome.geometry.dispose();
     dome.material.dispose();
     pmrem.dispose();

@@ -291,10 +291,15 @@ export class Sky {
     only.remove(dome);
 
     this.scene.environment = this.envRT.texture;
-    // Enough to light metal and wet tarmac, not enough to flatten the rig the
-    // biomes were lit with. A night district reflects a night sky, so this is
-    // one number rather than one per palette.
-    this.scene.environmentIntensity = palette.envIntensity ?? 1.0;
+    // Reflection, not a second ambient.
+    //
+    // At 1.0 this adds a full sky's worth of light to every surface, on top of
+    // rigs that six palettes were tuned against before it existed — so every
+    // car came out a stop and a half hot and a strong red rendered the colour
+    // of cooked salmon. The environment's job here is to give metal, glass and
+    // wet tarmac something to reflect; the hemisphere light is what lights the
+    // scene, and it was already doing it.
+    this.scene.environmentIntensity = palette.envIntensity ?? 0.5;
   }
 
   configureShadows(quality) {
