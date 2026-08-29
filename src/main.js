@@ -56,6 +56,12 @@ class Game {
     this.scene = null;
     this.showroom = null;
     this.lastSummary = null;
+    // The seed of the run that has not started yet. Held here rather than
+    // rolled inside `startRun` so the title screen can show it and the player
+    // can reject it — a seed you only learn after committing is a number, not
+    // a choice.
+    this.titleSeed = null;
+    this.garageOpen = false;
 
     this.loop = new Loop({
       update: (dt) => this.update(dt),
@@ -112,12 +118,42 @@ class Game {
       // The canvas is only ever painted inside the stage, so the last car drawn
       // would sit there under the next menu until something else wrote over it.
       if (this._showroomDrawn) { this.renderer.clear(); this._showroomDrawn = false; }
+      this._showroomShadow(false);
       return;
     }
     this._showroomDrawn = true;
+    this._showroomShadow(true);
     this.showroom.update(dt);
     const camera = this.showroom.render(rect.width / Math.max(1, rect.height));
     this.renderer.renderInset(this.showroom.scene, camera, rect);
+  }
+
+  /**
+   * Shadow maps, on for the turntable whatever the tier says.
+   *
+   * `shadows` is a quality decision about a race: a shadow camera spanning the
+   * visible track, re-rendered every frame while forty cars and the scenery
+   * move through it. The showroom is one car on a fourteen-metre frustum in a
+   * menu paced at thirty, which the lowest tier this game targets can afford —
+   * and the contact shadow under the car is most of what stops it looking
+   * pasted onto the road.
+   *
+   * Toggled on the transition in and out, never per frame: `enabled` is part
+   * of every material's compiled defines, so setting it inside the loop would
+   * rebuild every program in the scene once a frame.
+   */
+  _showroomShadow(on) {
+    const gl = this.renderer.gl;
+    const want = on || !!this.quality.settings?.shadows;
+    // Compared against the renderer's actual state, not against what this
+    // asked for last time. The governor changes tier while the menu is up and
+    // `applyQuality` writes this same flag from the tier — so a version that
+    // remembered its own intent set it once, was overruled by the next
+    // downgrade, and never noticed. Nothing is written while the two agree, so
+    // this is still a transition and not a per-frame recompile.
+    if (gl.shadowMap.enabled === want) return;
+    gl.shadowMap.enabled = want;
+    gl.shadowMap.needsUpdate = true;
   }
 
   // --- routing -------------------------------------------------------------
@@ -131,7 +167,7 @@ class Game {
     // — nothing read it, but a stale run holding a build, a map and a durability
     // count is the sort of thing the next feature reads by accident.
     this.run = null;
-    this.showroom = this.showroom || new Showroom();
+    this.showroom = this.showroom || new Showroom(this.renderer.gl);
     this.showMachine(this.titleVehicleId || VEHICLES[0].id);
   }
 
@@ -147,19 +183,32 @@ class Game {
     this.hud.hide();
     this.loop.setMode('menu');
     this.input.enabled = false;
-    this.showroom = this.showroom || new Showroom();
+    this.showroom = this.showroom || new Showroom(this.renderer.gl);
     this.showroom.setVehicle(vehicleId, this.profile.look());
     // A crate owed is opened before anything else. It is the reward for the run
     // that just ended, and burying it behind a menu is the surest way to make
     // finishing a run feel like nothing happened.
     if (this.profile.crates > 0) { this.openCrate(vehicleId); return; }
 
+    this.titleSeed = this.titleSeed || randomSeedString();
+
     this.screens.title({
       vehicleId,
       lastSummary: this.lastSummary,
       profile: this.profile,
+      seed: this.titleSeed,
+      runNumber: this.profile.runsStarted + 1,
+      garageOpen: this.garageOpen,
       onStart: (id) => this.startRun(id),
       onSwitch: (id) => this.showMachine(id),
+      onReseed: () => {
+        this.titleSeed = randomSeedString();
+        this.showMachine(vehicleId);
+      },
+      onGarage: (open) => {
+        this.garageOpen = open;
+        this.showMachine(vehicleId);
+      },
       onEquip: (key) => {
         this.profile.equip(key);
         // Straight back to the same screen, so the car on the turntable is
@@ -189,7 +238,13 @@ class Game {
     this.quickMode = false;
     // `forcedSeed` lets the UI-flow harness pin the map so the set of screens it
     // visits — and therefore the set of checks it runs — is the same every time.
-    this.run = new Run({ seed: this.forcedSeed || randomSeedString(), vehicleId });
+    const seed = this.forcedSeed || this.titleSeed || randomSeedString();
+    // Spent. The next visit to the title screen rolls a fresh one, so coming
+    // back after a wreck does not silently offer the run that just killed you.
+    this.titleSeed = null;
+    this.garageOpen = false;
+    this.profile.startedRun();
+    this.run = new Run({ seed, vehicleId });
     this.showMap();
   }
 

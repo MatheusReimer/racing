@@ -82,6 +82,8 @@ const state = () => page.evaluate(() => ({
   hasScene: !!window.__game.scene,
   raceState: window.__game.scene?.state ?? null,
   screen: document.querySelector('.screen-title')?.textContent ?? null,
+  machine: document.querySelector('.machine-name')?.textContent ?? null,
+  roster: document.querySelectorAll('.rcard').length,
   cards: document.querySelectorAll('.card').length,
   nodes: document.querySelectorAll('.mapnode.available').length,
 }));
@@ -123,8 +125,13 @@ await page.waitForFunction(() => window.__game, { timeout: 20000 });
 // --- title ---
 await page.waitForSelector('.screen-title', { timeout: 10000 });
 let s = await state();
-check('title screen renders', !!s.screen && (await page.$$('.machine-info .statrow')).length >= 12,
-  `screen="${s.screen}" spec rows=${(await page.$$('.machine-info .statrow')).length}`);
+// The five bars on the card are a summary; the fifteen attributes they reduce
+// are folded away under them, not dropped. A screen that showed only the
+// summary would break the house rule about never racing on a number the player
+// was not shown, so the folded rows are counted rather than trusted.
+check('title screen renders', !!s.machine && (await page.$$('.machine-spec .statrow')).length >= 12,
+  `machine="${s.machine}" spec rows=${(await page.$$('.machine-spec .statrow')).length}`);
+check('the roster strip shows every machine', s.roster === 6, `${s.roster} cards`);
 // The turntable draws on the next frame; shooting before it has is a picture
 // of an empty stage, which is not what this screen looks like.
 await page.waitForTimeout(500);
@@ -141,12 +148,23 @@ await page.evaluate(() => { window.__game.forcedSeed = 'UIFLOW1'; });
 // the arrows so the run below is always the same car.
 check('no run exists before the grid is taken', !s.run,
   s.run ? 'a run started without the button being pressed' : 'clean');
-const firstMachine = s.screen;
+const firstMachine = s.machine;
 await page.click('.stage-nav.next');
 await page.waitForTimeout(150);
 s = await state();
-check('the arrows move along the roster', s.screen !== firstMachine,
-  `${firstMachine} -> ${s.screen}`);
+check('the arrows move along the roster', s.machine !== firstMachine,
+  `${firstMachine} -> ${s.machine}`);
+// The strip is the other way to change car, and the one the layout leads with.
+//
+// A fixed card, not "the first one that is not selected". The latter depends on
+// what the arrows left selected, so the machine this walk starts its run in —
+// and therefore the screens it visits and the number of checks it runs — moved
+// with the timing of the click before it.
+await page.click('.rcard >> nth=3');
+await page.waitForTimeout(150);
+const clicked = (await state()).machine;
+check('the roster strip selects a machine', clicked !== s.machine,
+  `${s.machine} -> ${clicked}`);
 await page.click('.stage-nav.next');
 await page.waitForTimeout(150);
 s = await state();
@@ -339,7 +357,7 @@ await shot('gameover');
 // --- back to title ---
 await page.click('.screen-foot .btn.primary');
 await page.waitForTimeout(400);
-const back = await page.evaluate(() => document.querySelector('.screen-title')?.textContent);
+const back = await page.evaluate(() => document.querySelector('.machine-name')?.textContent);
 s = await state();
 check('restart returns to the title', !!(await page.$('.screen--machine')) && !s.run,
   `screen="${back}"${s.run ? ' but a run is live' : ''}`);

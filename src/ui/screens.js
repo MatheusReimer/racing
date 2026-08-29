@@ -8,6 +8,9 @@ import { previewTrack } from '../track/preview.js';
 import { COSMETICS, CRATE_RARITY } from '../data/cosmetics.js';
 import { branchesOf, chargesOf } from '../data/skills.js';
 import { clamp01 } from '../core/math.js';
+import { summarise, PIP_COUNT } from '../stats/summary.js';
+import { isLocked, unlockLabel } from '../data/unlocks.js';
+import { vehicleThumbnails } from '../vehicle/thumbnails.js';
 
 // Every screen that is not the in-race HUD.
 //
@@ -384,22 +387,15 @@ export class Screens {
 
   // --- title / vehicle select ----------------------------------------------
 
-  title({ vehicleId, onStart, onSwitch, lastSummary, profile, onEquip }) {
-    return this.machine(vehicleId, { onStart, onSwitch, lastSummary, profile, onEquip });
+  // Forwarded whole, not field by field. This used to name the six options it
+  // knew about, so every option `machine` gained afterwards was silently
+  // dropped on the way through and the screen fell back to its defaults.
+  title(opts) {
+    return this.machine(opts.vehicleId, opts);
   }
 
   // --- one machine, in detail ----------------------------------------------
 
-  /**
-   * The screen between picking a machine off the roster and committing to it.
-   *
-   * A roster card that starts a run the moment it is clicked asks for the
-   * decision before showing you what you are deciding: six cars at thumbnail
-   * size, a paragraph each. This is the car at the size it deserves with its
-   * whole specification beside it, and the run does not begin until you say
-   * so. The arrows either side of it move along the roster, so comparing two
-   * machines does not mean going back and forth through a menu.
-   */
   /**
    * A crate, opened.
    *
@@ -435,51 +431,91 @@ export class Screens {
     return this._show(root);
   }
 
-  machine(vehicleId, { onStart, onSwitch, lastSummary, profile, onEquip }) {
+  /**
+   * The screen between picking a machine off the roster and committing to it.
+   *
+   * Three columns and a strip. The car is the middle one at the size it
+   * deserves; what it *is* sits to its left and what it *starts with* to its
+   * right, so a comparison between two machines is two glances at fixed
+   * positions rather than a scroll. The strip along the bottom is the roster
+   * itself — every machine visible at once, because the decision is between
+   * six things and a decision you have to page through is a decision made on
+   * whichever one you saw last.
+   *
+   * The five bars are a summary and say so; the fifteen attributes they reduce
+   * are one click away and nothing is hidden that the race will use. That is
+   * the screen's one concession to the house rule about never showing a number
+   * without showing what it does — the number is still here, it just is not
+   * the first thing asked of a player choosing a shape.
+   */
+  machine(vehicleId, {
+    onStart, onSwitch, lastSummary, profile, onEquip,
+    seed, runNumber = 1, onReseed, garageOpen = false, onGarage,
+  }) {
     const v = VEHICLE_BY_ID[vehicleId];
-    const { root, body, foot, hint } = frame(v.name, v.tagline, null);
+    const { root, body, foot } = frame(
+      'Select your ride', 'Choose your car and start your run', null,
+    );
     root.classList.add('screen--machine');
-    // The game's name, once, above the machine's. There is no longer a roster
-    // screen in front of this one to carry it.
     root.querySelector('.screen-head')
       .prepend(el('div', 'screen-overline', 'Rogue Racer'));
     root.style.setProperty('--machine', v.accent || v.color);
     root.style.setProperty('--machine-body', v.color);
 
-    const wrap = el('div', 'machine');
-    const stage = el('div', 'machine-stage');
-
-    // Along the roster without leaving the screen.
-    const at = VEHICLES.findIndex((x) => x.id === v.id);
-    for (const [dir, cls] of [[-1, 'prev'], [1, 'next']]) {
-      const other = VEHICLES[(at + dir + VEHICLES.length) % VEHICLES.length];
-      const b = el('button', `stage-nav ${cls}`, dir < 0 ? '‹' : '›');
-      b.title = other.name;
-      b.onclick = () => onSwitch(other.id);
-      stage.appendChild(b);
+    // The run this is about to be, named in the corner. The seed is shown
+    // because it is the one input to a run the player can hold on to: a run
+    // worth repeating is a string worth reading, and it is rerollable from the
+    // footer rather than fixed at the moment the button is pressed.
+    const meta = el('div', 'machine-meta');
+    meta.appendChild(el('div', 'run-no', `Run ${String(runNumber).padStart(2, '0')}`));
+    if (seed) {
+      const row = el('div', 'seed-row');
+      row.appendChild(el('span', 'seed-lbl', 'Seed'));
+      row.appendChild(el('span', 'seed-val', esc(seed)));
+      meta.appendChild(row);
     }
-    wrap.appendChild(stage);
+    if (lastSummary) {
+      meta.appendChild(el('div', 'meta-last', esc(
+        `Last: ${lastSummary.vehicle} — ${lastSummary.outcome === 'victory'
+          ? 'took the tournament' : `wrecked after ${lastSummary.races} races`}`)));
+    }
+    root.appendChild(meta);
 
-    const info = el('div', 'machine-info');
-    info.appendChild(el('div', 'section-label', 'What it is'));
-    info.appendChild(el('div', 'machine-identity', esc(v.identity)));
-    if (v.rule) info.appendChild(el('div', 'rule', esc(v.rule.text)));
+    const wrap = el('div', 'machine');
 
-    // Above the specification, not below it. The locker is the thing a player
-    // came here to touch; the numbers are reference, and reference belongs
-    // under the controls rather than in front of them.
-    if (profile) info.appendChild(lockerPanel(profile, onEquip));
-
-    // The whole specification, in absolutes, computed by the same StatBlock
-    // the race will run on — not the deltas the card shows, which only say
-    // what is unusual about this machine rather than what it actually is.
+    // --- what it is ---
     const build = new Build(v.id);
     const stats = build.stats.all();
-    info.appendChild(el('div', 'section-label', 'Specification'));
+
+    const card = el('div', 'machine-card');
+    card.appendChild(el('h2', 'machine-name', esc(v.name)));
+    card.appendChild(el('div', 'machine-class', esc(v.class || v.bodyType)));
+    card.appendChild(el('div', 'machine-identity', esc(v.identity)));
+
+    const summary = el('div', 'summary');
+    for (const row of summarise(stats)) {
+      const r = el('div', 'sumrow');
+      r.title = row.note;
+      r.appendChild(el('span', 'nm', esc(row.name)));
+      const pips = el('div', 'pips');
+      for (let i = 0; i < PIP_COUNT; i++) {
+        pips.appendChild(el('span', `pip${i < row.pips ? ' on' : ''}`));
+      }
+      r.appendChild(pips);
+      r.appendChild(el('span', 'vl', String(row.pips)));
+      summary.appendChild(r);
+    }
+    card.appendChild(summary);
+    card.appendChild(el('div', 'machine-quote', esc(v.tagline)));
+
+    // The whole specification, in absolutes, computed by the same StatBlock
+    // the race will run on — folded away rather than dropped, because it is
+    // reference and reference does not need to be the loudest thing on screen.
+    const spec = el('div', 'machine-spec');
     for (const group of Object.values(GROUPS)) {
       const attrs = ATTRIBUTES.filter((a) => a.group === group.id);
       if (!attrs.length) continue;
-      info.appendChild(el('h4', 'machine-group', esc(group.name)));
+      spec.appendChild(el('h4', 'machine-group', esc(group.name)));
       for (const a of attrs) {
         const row = el('div', 'statrow');
         row.appendChild(el('span', 'nm', esc(a.name)));
@@ -490,36 +526,154 @@ export class Screens {
         bar.appendChild(fill);
         row.appendChild(bar);
         row.appendChild(el('span', 'vl', String(Math.round(stats[a.id]))));
-        info.appendChild(row);
+        spec.appendChild(row);
       }
     }
+    const toggle = el('button', 'spec-toggle', 'Full specification');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.onclick = () => {
+      const open = spec.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.textContent = open ? 'Hide specification' : 'Full specification';
+    };
+    card.appendChild(toggle);
+    card.appendChild(spec);
+    wrap.appendChild(card);
 
-    info.appendChild(el('div', 'section-label', 'Loadout'));
+    // --- the car ---
+    const stage = el('div', 'machine-stage');
+    const at = VEHICLES.findIndex((x) => x.id === v.id);
+    for (const [dir, cls] of [[-1, 'prev'], [1, 'next']]) {
+      // Past a locked machine rather than into it: an arrow that lands on a
+      // card the button underneath refuses is an arrow that stops working.
+      const n = VEHICLES.length;
+      let other = null;
+      for (let step = 1; step <= n; step++) {
+        const cand = VEHICLES[(((at + dir * step) % n) + n) % n];
+        if (!isLocked(cand.id, profile)) { other = cand; break; }
+      }
+      if (!other || other.id === v.id) continue;
+      const b = el('button', `stage-nav ${cls}`, dir < 0 ? '‹' : '›');
+      b.title = other.name;
+      b.onclick = () => onSwitch(other.id);
+      stage.appendChild(b);
+    }
+    wrap.appendChild(stage);
+
+    // --- what it starts with ---
+    const side = el('div', 'machine-side');
+    const skill = SKILL_BY_ID[v.startingSkill];
+    if (skill) {
+      side.appendChild(el('div', 'section-label', 'Special skill'));
+      const sc = el('div', 'skillcard');
+      sc.appendChild(el('div', 'ic', skill.icon || '◆'));
+      const tx = el('div', 'tx');
+      const hd = el('div', 'hd');
+      hd.appendChild(el('span', 'nm', esc(skill.name)));
+      hd.appendChild(el('span', 'badge', 'Active'));
+      tx.appendChild(hd);
+      tx.appendChild(el('div', 'ds',
+        esc(typeof skill.desc === 'function' ? skill.desc(1) : skill.desc || '')));
+      if (skill.cooldown) {
+        tx.appendChild(el('div', 'cd',
+          `Cooldown ${skill.cooldown}s · ${skill.cost} Energy`));
+      }
+      sc.appendChild(tx);
+      side.appendChild(sc);
+    }
+
+    if (v.rule) {
+      side.appendChild(el('div', 'section-label', 'Starting perk'));
+      const p = el('div', 'perk');
+      p.appendChild(el('div', 'ic', v.rule.icon || '◆'));
+      const tx = el('div', 'tx');
+      tx.appendChild(el('div', 'nm', esc(v.rule.name || 'Rule')));
+      tx.appendChild(el('div', 'ds', esc(v.rule.text)));
+      p.appendChild(tx);
+      side.appendChild(p);
+    }
+
+    side.appendChild(el('div', 'section-label', 'Loadout'));
     const slots = el('div', 'tally tally--tight');
     slots.innerHTML =
       `<div class="item"><div class="v">${build.partSlots}</div><div class="k">Part slots</div></div>`
       + `<div class="item"><div class="v">${build.skillSlots}</div><div class="k">Skill slots</div></div>`;
-    info.appendChild(slots);
+    side.appendChild(slots);
 
-    const skill = SKILL_BY_ID[v.startingSkill];
-    if (skill) {
-      const line = el('div', 'machine-skill');
-      line.appendChild(el('div', 'lbl', `${skill.icon || ''} ${esc(skill.name)}`));
-      line.appendChild(el('div', 'det',
-        esc(typeof skill.desc === 'function' ? skill.desc(1) : skill.desc || '')));
-      info.appendChild(line);
-    }
+    // Named, not blank. What the empty slots are for is the reason to take one
+    // machine over another with fewer of them.
+    const empty = el('div', 'perk empty');
+    empty.appendChild(el('div', 'ic', '🔒'));
+    const etx = el('div', 'tx');
+    etx.appendChild(el('div', 'nm', 'Empty slots'));
+    etx.appendChild(el('div', 'ds', 'Parts and skills found on the run fill these. Nothing carries over.'));
+    empty.appendChild(etx);
+    side.appendChild(empty);
 
-    wrap.appendChild(info);
+    wrap.appendChild(side);
     body.appendChild(wrap);
 
-    hint.textContent = lastSummary
-      ? `Last run: ${lastSummary.vehicle} — ${lastSummary.outcome === 'victory'
-        ? 'completed the tournament' : `destroyed after ${lastSummary.races} races`}`
-      : 'Nothing is committed until you take the grid';
-    const go = el('button', 'btn primary', `Start a run in the ${v.name}`);
+    // --- the roster ---
+    const roster = el('div', 'roster');
+    const track = el('div', 'roster-track');
+    const thumbs = vehicleThumbnails(profile?.look?.() ?? null);
+    for (const other of VEHICLES) {
+      const locked = isLocked(other.id, profile);
+      const b = el('button',
+        `rcard${other.id === v.id ? ' on' : ''}${locked ? ' locked' : ''}`);
+      b.style.setProperty('--card', other.accent || other.color);
+
+      const thumb = el('div', 'rthumb');
+      const url = thumbs.get(other.id);
+      // No thumbnail is a real outcome, not a failure to handle: a machine
+      // that would not give the generator a GL context still gets a card, and
+      // the card still says which machine it is.
+      if (url) thumb.style.backgroundImage = `url("${url}")`;
+      b.appendChild(thumb);
+
+      if (locked) {
+        b.appendChild(el('div', 'rname', 'Locked'));
+        b.appendChild(el('div', 'runlock', esc(unlockLabel(other.id))));
+        b.disabled = true;
+      } else {
+        b.appendChild(el('div', 'rname', esc(other.name)));
+        const sk = SKILL_BY_ID[other.startingSkill];
+        if (sk?.icon) b.appendChild(el('div', 'rbadge', sk.icon));
+        b.onclick = () => onSwitch(other.id);
+      }
+      track.appendChild(b);
+    }
+    roster.appendChild(track);
+    body.appendChild(roster);
+
+    // --- commit ---
+    const reseed = el('button', 'btn', 'New seed');
+    reseed.title = 'Roll a different run. Nothing about the car changes.';
+    reseed.onclick = () => onReseed?.();
+    const go = el('button', 'btn primary', 'Select car');
     go.onclick = () => onStart(v.id);
+    const garage = el('button', 'btn', 'Garage');
+    garage.title = 'Paint and wheels you have found.';
+    garage.onclick = () => onGarage?.(true);
+    foot.appendChild(reseed);
     foot.appendChild(go);
+    foot.appendChild(garage);
+
+    // The locker, over the screen rather than beside it. It is the one thing
+    // here that is not about choosing a car, and on a screen whose whole job
+    // is a choice between six cars it was competing with the roster.
+    if (garageOpen) {
+      const ov = el('div', 'overlay');
+      const box = el('div', 'overlay-box');
+      box.appendChild(el('div', 'overlay-title', 'Garage'));
+      box.appendChild(lockerPanel(profile, onEquip));
+      const done = el('button', 'btn', 'Done');
+      done.onclick = () => onGarage?.(false);
+      box.appendChild(done);
+      ov.appendChild(box);
+      ov.onclick = (e) => { if (e.target === ov) onGarage?.(false); };
+      root.appendChild(ov);
+    }
 
     const node = this._show(root);
     this.showroomStage = stage;

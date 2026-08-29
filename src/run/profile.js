@@ -54,6 +54,10 @@ export class Profile {
     };
     this.crates = Math.max(0, saved?.crates ?? 0);
     this.runsWon = Math.max(0, saved?.runsWon ?? 0);
+    // Runs taken to the grid, won or not. The title screen counts with it, so
+    // it is the number of the run about to be attempted rather than a score —
+    // a profile saved before this field existed simply starts from zero.
+    this.runsStarted = Math.max(0, saved?.runsStarted ?? 0);
     this.persisted = saved !== null;
   }
 
@@ -92,6 +96,11 @@ export class Profile {
     return true;
   }
 
+  startedRun() {
+    this.runsStarted += 1;
+    this.save();
+  }
+
   wonRun() {
     this.runsWon += 1;
     this.save();
@@ -119,6 +128,7 @@ export class Profile {
       equipped: this.equipped,
       crates: this.crates,
       runsWon: this.runsWon,
+      runsStarted: this.runsStarted,
     });
     return this.persisted;
   }

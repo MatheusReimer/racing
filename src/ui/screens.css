@@ -637,17 +637,201 @@
 
 /* ------------------------------------------------------- machine detail --- */
 
-/* The car at the size it deserves, with its specification beside it.
-   Two columns inside the body rather than the screen's own panel column: the
-   panel is the run's readout and belongs to the run, and this screen has no
-   run yet. The body does not scroll here — the specification does. */
+/* Three columns and a strip.
+   The car is the middle one because it is the thing being chosen; what the
+   machine *is* sits left of it and what it *starts with* sits right, at fixed
+   positions, so comparing two machines is two glances rather than a scroll.
+   Neither side column pushes the stage around — they are bounded, the stage
+   takes what is left, and a car does not change size when a description runs
+   one line longer. */
 .machine {
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
-  gap: var(--s5);
+  grid-template-columns: minmax(250px, 310px) minmax(0, 1fr) minmax(250px, 320px);
+  gap: var(--s4);
+  /* The side panels are as tall as what is in them; only the stage fills the
+     row. Stretched to the full height they put 300px of empty panel under the
+     last line on a 1080p screen, which reads as content that failed to load
+     rather than as a frame. */
+  align-items: start;
 }
+
+.machine-stage { align-self: stretch; }
+
+.machine-card,
+.machine-side {
+  min-height: 0;
+  /* Bounded by the row even though they no longer fill it, so a long
+     specification scrolls inside its panel instead of pushing the roster off
+     the bottom of the screen. */
+  max-height: 100%;
+  overflow-y: auto;
+  padding: var(--s3);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.machine-side > .section-label:first-child { margin-top: 0; }
+
+/* Tighter than a section label elsewhere. This column is four short blocks in
+   a fixed box rather than sections of a page, and the page's rhythm pushed the
+   last of them past the bottom edge on an 800px window. */
+.machine-side .section-label { margin: var(--s3) 0 var(--s2); }
+.machine-side .tally--tight { margin-bottom: var(--s2); }
+.machine-side .tally--tight .v { font-size: 17px; }
+.machine-side .tally--tight .item { padding: var(--s1) var(--s2); }
+
+/* The run this is about to be, in the corner the eye goes to last.
+   Out of the header's flow rather than in it: the header is a title and a
+   subtitle at the left margin, and threading a second column through it made
+   every other screen's header a grid for the sake of this one. */
+.machine-meta {
+  position: absolute;
+  top: var(--s5);
+  right: max(var(--gutter), (100% - var(--measure-wide)) / 2);
+  z-index: 3;
+  text-align: right;
+  pointer-events: none;
+}
+
+.run-no {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--machine, var(--speed));
+}
+
+/* Monospaced, because it is a string to be copied rather than read. */
+.seed-row {
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+
+.seed-lbl {
+  color: var(--text-faint);
+  text-transform: uppercase;
+  margin-right: var(--s1);
+}
+
+.seed-val { color: var(--text-dim); }
+
+.meta-last {
+  margin-top: var(--s2);
+  max-width: 260px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+.machine-name {
+  margin: 0;
+  font-size: clamp(22px, 2.2vw, 31px);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+}
+
+/* The shape, named. `bodyType` is the one thing about a machine that is true
+   from thirty metres, so it gets said before any number. */
+.machine-class {
+  display: inline-block;
+  margin: var(--s2) 0 var(--s3);
+  padding: 3px var(--s2);
+  border-radius: 3px;
+  background: var(--machine, var(--speed));
+  color: #0b0d10;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* Five bars, ten pips each. Segments rather than a continuous fill because
+   these are a rating out of ten and a bar reads as a percentage: the pips say
+   the scale is coarse and deliberate, which is exactly what a summary is. */
+.summary { margin-bottom: var(--s3); }
+
+.sumrow {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: var(--s2);
+  padding: 3px 0;
+}
+
+.sumrow .nm {
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.pips { display: flex; gap: 2px; }
+
+.pip {
+  flex: 1 1 0;
+  height: 10px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.pip.on { background: var(--machine, var(--speed)); }
+
+.sumrow .vl {
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The tagline, in the machine's own colour. It is the one line here that is
+   not a fact about the car, and it is marked as such rather than left to be
+   mistaken for one. */
+.machine-quote {
+  margin: var(--s3) 0;
+  padding-left: var(--s2);
+  border-left: 2px solid var(--machine, var(--speed));
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--machine, var(--speed));
+}
+
+.spec-toggle {
+  width: 100%;
+  padding: var(--s2);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.spec-toggle:hover { border-color: var(--edge-bright); color: var(--text); }
+.spec-toggle:focus-visible { outline: 2px solid var(--speed); outline-offset: 2px; }
+
+/* Folded away, not dropped. The fifteen attributes are still in the document
+   — the house rule is that the race never runs on a number the screen would
+   not show, and `display: none` on a wrapper keeps that true while letting
+   five bars be the first thing asked of somebody choosing a shape. */
+.machine-spec {
+  display: none;
+  margin-top: var(--s3);
+  font-size: 12px;
+}
+
+.machine-spec.open { display: block; }
 
 /* `Renderer.renderInset` draws the turntable into exactly this rectangle, so
    this element is a measured hole and paints nothing but its own arrows. */
@@ -715,15 +899,6 @@
 .stage-nav.next:hover { transform: translate(3px, -50%); }
 .stage-nav:focus-visible { outline: 2px solid var(--speed); outline-offset: 2px; }
 
-.machine-info {
-  overflow-y: auto;
-  min-height: 0;
-  padding-right: var(--s2);
-  font-size: 12px;
-}
-
-.machine-info > .section-label:first-child { margin-top: 0; }
-
 /* A machine's one mechanical promise. It gets a mark of its own rather than
    being a third paragraph in the same grey as the rest. */
 .rule {
@@ -736,8 +911,8 @@
 }
 
 .machine-identity {
-  font-size: 13.5px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.55;
   color: var(--text-dim);
   margin-bottom: var(--s3);
 }
@@ -763,6 +938,296 @@
 .tally--tight .item { min-width: 0; padding: var(--s2) var(--s3); }
 .tally--tight .v { font-size: 20px; }
 
+/* What the machine starts with: one skill, one rule, and the slots the run
+   will fill. The two share a shape because they are the same kind of fact —
+   something the car does that the numbers on the left do not say. */
+.skillcard,
+.perk {
+  display: flex;
+  gap: var(--s2);
+  align-items: flex-start;
+  padding: var(--s2);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.skillcard { border-left: 2px solid var(--machine, var(--speed)); }
+.perk { margin-bottom: var(--s2); }
+
+/* Dashed and dimmed. An empty slot is a shape with nothing in it, and that is
+   the whole message — a solid card would read as a third thing you have. */
+.perk.empty {
+  border-style: dashed;
+  opacity: 0.55;
+}
+
+.skillcard .ic,
+.perk .ic {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  border: 1px solid var(--edge);
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.skillcard .tx,
+.perk .tx { min-width: 0; }
+
+.skillcard .hd {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+
+.skillcard .nm,
+.perk .nm { font-size: 13px; font-weight: 700; }
+
+.skillcard .badge {
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: var(--machine, var(--speed));
+  color: #0b0d10;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.skillcard .ds,
+.perk .ds {
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.skillcard .cd {
+  margin-top: var(--s1);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* The roster, all of it, along the bottom.
+   Six cards at once rather than a pager: the choice is between six things, and
+   a choice you have to page through gets made on whichever one you saw last. */
+.roster {
+  flex: 0 0 auto;
+  margin-top: var(--s3);
+}
+
+.roster-track {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: var(--s2);
+}
+
+.rcard {
+  position: relative;
+  padding: var(--s1);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 90ms ease, box-shadow 140ms ease;
+}
+
+.rcard:hover:not(.locked) { transform: translateY(-2px); border-color: var(--edge-bright); }
+
+/* Ringed in the machine's own accent, so the strip says which car the stage is
+   showing without the name having to be read. */
+.rcard.on {
+  border-color: var(--card);
+  box-shadow: 0 0 0 1px var(--card),
+    0 0 18px color-mix(in srgb, var(--card) 32%, transparent);
+}
+
+.rcard:focus-visible { outline: 2px solid var(--speed); outline-offset: 2px; }
+
+/* `contain`, not `cover`: a rally car and a roadster are different lengths and
+   cropping to fill would cut the nose off one of them. */
+.rthumb {
+  position: relative;
+  height: 66px;
+  background: center / contain no-repeat;
+}
+
+.rname {
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The skill it starts with, in the corner of its card. */
+.rbadge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 3px;
+  border: 1px solid var(--edge);
+  background: rgba(0, 0, 0, 0.5);
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* Locked: the silhouette stays, the car does not. Showing the shape of what is
+   still out there is the reason to come back; blanking the card would make the
+   roster shorter instead of making it a target. */
+.rcard.locked { cursor: default; opacity: 0.7; }
+.rcard.locked .rthumb { filter: grayscale(1) brightness(0.22); }
+
+.rcard.locked .rthumb::after {
+  content: '🔒';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 19px;
+  filter: none;
+}
+
+.runlock {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* The locker, over the screen rather than beside it. It is the one thing on
+   this screen that is not about choosing a car, and next to the roster it was
+   competing with it. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 8, 11, 0.78);
+  backdrop-filter: blur(4px);
+}
+
+.overlay-box {
+  width: min(560px, 90vw);
+  max-height: 82vh;
+  overflow-y: auto;
+  padding: var(--s4);
+  border: 1px solid var(--edge-bright);
+  border-radius: var(--radius);
+  background: var(--panel-solid);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+}
+
+.overlay-box > .btn {
+  display: block;
+  margin-left: auto;
+  margin-top: var(--s3);
+}
+
+.overlay-title {
+  margin-bottom: var(--s3);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+/* The screen is the car; the backdrop stays out of its way.
+   The band this replaced ramped its backdrop to 97% opaque by four fifths of
+   the way down, which is right for a strip across the top of a screen and a
+   dark wash over the bottom half of a car that runs from a sixth to four
+   fifths. Nothing is behind this screen but the cleared canvas and the
+   turntable drawn into it, so it needs almost no backdrop, and no blur at
+   all — that would frost the thing the screen exists to show. */
+.screen--machine {
+  /* Its own measure, wider than the shared one.
+     `--measure-wide` is 1180px because that is where a row of reward cards and
+     a paragraph of event text stop being readable — a cap on prose. This screen
+     is three columns and a strip of thumbnails, and on a 1920px monitor that cap
+     left 370px of empty background down each side while the car, the one thing
+     the screen exists to show, was squeezed into the middle of what was left.
+     Redefined here rather than raised globally: the head, the body, the footer
+     and the corner readout all derive their inset from this property, so one
+     declaration moves every one of them and no other screen changes. */
+  --measure-wide: 1760px;
+
+  background: radial-gradient(130% 100% at 50% 45%,
+    rgba(22, 28, 36, 0.30), rgba(8, 10, 13, 0.72));
+
+  /* `.screen` frosts whatever is behind it, which is right for a menu laid over
+     a paused race and exactly wrong here: `#ui` sits above the canvas, so the
+     one thing being blurred was the car on the turntable. The paragraph above
+     always said this screen wanted "no blur at all" — it just never turned the
+     inherited one off, and only overrode the background. */
+  backdrop-filter: none;
+}
+
+.screen--machine .screen-body {
+  padding-bottom: var(--s3);
+  justify-content: stretch;
+}
+
+/* Three actions across the full width: leave, commit, and the locker. The
+   hint this replaces said the run was not committed yet, which the button
+   between these two now says by being the only primary one on the screen. */
+.screen--machine .foot-hint { display: none; }
+
+.screen--machine .foot-actions {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--s3);
+  margin-left: 0;
+}
+
+.screen--machine .foot-actions > .btn:first-child { justify-self: start; }
+.screen--machine .foot-actions > .btn:last-child { justify-self: end; }
+
+/* Narrow: the side columns stack under the stage rather than squeezing it.
+   A car in a 200px column is a thumbnail with arrows either side of it. */
+@media (max-width: 1180px) {
+  .machine {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "stage stage" "card side";
+  }
+  .machine-stage { grid-area: stage; min-height: 30vh; }
+  .machine-card { grid-area: card; }
+  .machine-side { grid-area: side; }
+  .machine-meta { position: static; text-align: left; margin-bottom: var(--s2); }
+}
+
+@media (max-width: 760px) {
+  .machine { grid-template-columns: minmax(0, 1fr); grid-template-areas: "stage" "card" "side"; }
+  .roster-track { grid-auto-flow: row; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* ------------------------------------------------------------ briefing --- */
+
+/* One of the build's skills, listed before a race. It used to live with the
+   machine screen, which is where it was written and no longer where it is
+   used: that screen shows its starting skill in a `.skillcard` now, and this
+   is the briefing's list of everything the build has picked up since. */
 .machine-skill {
   border: 1px solid var(--edge);
   border-left: 2px solid var(--machine, var(--speed));
@@ -773,27 +1238,6 @@
 
 .machine-skill .lbl { font-size: 13px; font-weight: 600; }
 .machine-skill .det { font-size: 12px; color: var(--text-dim); margin-top: var(--s1); }
-
-/* The screen is the car; the backdrop stays out of its way.
-   The band this replaced ramped its backdrop to 97% opaque by four fifths of
-   the way down, which is right for a strip across the top of a screen and a
-   dark wash over the bottom half of a car that runs from a sixth to four
-   fifths. Nothing is behind this screen but the cleared canvas and the
-   turntable drawn into it, so it needs almost no backdrop, and no blur at
-   all — that would frost the thing the screen exists to show. */
-.screen--machine {
-  background: radial-gradient(130% 100% at 32% 45%,
-    rgba(22, 28, 36, 0.30), rgba(8, 10, 13, 0.72));
-}
-
-.screen--machine .screen-body { padding-bottom: var(--s3); }
-
-@media (max-width: 900px) {
-  .machine { grid-template-columns: minmax(0, 1fr); }
-  .machine-stage { min-height: 34vh; }
-}
-
-/* ------------------------------------------------------------ briefing --- */
 
 /* The body is the full height here and does not scroll; the facts column
    scrolls inside it, so the circuit stays put while you read past it. */
