@@ -194,6 +194,13 @@ export class VehicleBody {
     this.gripPenaltyTimer = 0;
     this.gripPenalty = 1;
 
+    // A puncture. Separate from the grip penalty because it is a different
+    // kind of hurt: grip is what you lose in a corner, this is what you lose
+    // everywhere, and a car limping at 70% of its top speed is a car that has
+    // to decide whether to keep racing on it.
+    this.speedPenaltyTimer = 0;
+    this.speedPenalty = 1;
+
     this.surface = SURFACES.road;
     /** Set by the collision layer each step so effects can read the last hit. */
     this.lastImpactSpeed = 0;
@@ -230,10 +237,22 @@ export class VehicleBody {
     this.driftTime = 0;
   }
 
-  /** Current effective top speed, including boosts and the pit limiter. */
+  /** Current effective top speed, including boosts, punctures and the limiter. */
   maxSpeedNow() {
-    const free = this.p.maxSpeed * (1 + this.boostPower + this.draft * DRAFT_TOP_SPEED);
+    const free = this.p.maxSpeed * this.speedPenalty
+      * (1 + this.boostPower + this.draft * DRAFT_TOP_SPEED);
     return Math.min(free, this.speedCap);
+  }
+
+  /**
+   * Puncture: hold the car below a fraction of its top speed for a while.
+   *
+   * Takes the worse of what is already on it and the new one, and the longer
+   * of the two timers, so a second strip cannot heal the first.
+   */
+  puncture(fraction, seconds) {
+    this.speedPenalty = Math.min(this.speedPenalty, fraction);
+    this.speedPenaltyTimer = Math.max(this.speedPenaltyTimer, seconds);
   }
 
   /**
@@ -259,6 +278,10 @@ export class VehicleBody {
     if (this.gripPenaltyTimer > 0) {
       this.gripPenaltyTimer -= dt;
       if (this.gripPenaltyTimer <= 0) this.gripPenalty = 1;
+    }
+    if (this.speedPenaltyTimer > 0) {
+      this.speedPenaltyTimer -= dt;
+      if (this.speedPenaltyTimer <= 0) this.speedPenalty = 1;
     }
 
     const stunned = this.stunTimer > 0;

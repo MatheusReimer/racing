@@ -188,18 +188,38 @@ export function assignPit(rng, track, racer = null) {
  * @returns { paid, text } or null if there was nothing to sell
  */
 export function servePit(service, racer, scrap) {
+  // A wheel change, free, whatever the lane sells.
+  //
+  // You stopped. Somebody was standing there. Charging for the tyre would be
+  // charging twice for a stop you already paid five seconds for — and it is
+  // what makes the lane worth taking on a car that is otherwise fine, which
+  // is the only reason a puncture is a decision rather than a tax.
+  let wheel = null;
+  if (racer.body?.speedPenaltyTimer > 0) {
+    racer.body.speedPenalty = 1;
+    racer.body.speedPenaltyTimer = 0;
+    const st = racer.statuses?.findIndex((x) => x.id === 'punctured');
+    if (st != null && st >= 0) racer.statuses.splice(st, 1);
+    wheel = 'Wheel changed';
+  }
+
   const quote = service.quote(racer);
-  if (!(quote.amount > 0)) return null;
-  if (quote.price <= 0) return { paid: 0, text: service.apply(racer, quote.amount) };
+  if (!(quote.amount > 0)) return wheel ? { paid: 0, text: wheel } : null;
+  const join = (t) => (wheel ? `${wheel} · ${t}` : t);
+  if (quote.price <= 0) return { paid: 0, text: join(service.apply(racer, quote.amount)) };
 
   const share = Math.min(1, scrap / quote.price);
-  if (share <= 0) return { paid: 0, text: 'No scrap. Nothing done.' };
+  if (share <= 0) {
+    return { paid: 0, text: wheel ? `${wheel} · no scrap for anything else` : 'No scrap. Nothing done.' };
+  }
 
-  // Floored for the discrete services: a third of a cooldown is not a thing to
+  // Floored for the discrete services: a third of a charge is not a thing to
   // hand out, and rounding up would sell what was not paid for.
   const amount = quote.unit === 'charges'
     ? Math.floor(quote.amount * share) : quote.amount * share;
-  if (!(amount > 0)) return { paid: 0, text: 'Not enough scrap.' };
+  if (!(amount > 0)) {
+    return { paid: 0, text: wheel ? `${wheel} · not enough scrap for more` : 'Not enough scrap.' };
+  }
 
   const paid = Math.min(scrap, Math.ceil(quote.price * (amount / quote.amount)));
   const text = service.apply(racer, amount);
@@ -207,6 +227,6 @@ export function servePit(service, racer, scrap) {
   // of the price you could pay is the share of the job you get.
   return {
     paid,
-    text: share >= 1 ? text : `${text} — ${Math.round(share * 100)}%`,
+    text: join(share >= 1 ? text : `${text} — ${Math.round(share * 100)}%`),
   };
 }

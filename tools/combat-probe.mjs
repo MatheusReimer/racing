@@ -45,6 +45,28 @@ for (const def of SKILLS) {
     const durBefore = target.durability;
     const selfBefore = shooter.durability;
 
+    // Every status this skill *asks* for, taken from the specs it hands the
+    // combat system rather than guessed at from its description.
+    //
+    // This is the check that was missing. The pass condition below is "the
+    // skill landed something", and a skill that lands two things out of three
+    // satisfies it — so the Banana, which both spun and (from level 4) was
+    // supposed to Oil, passed on the spin alone while its Oiled never once
+    // applied. The status rode along inside `_dealDamage`, and the Banana's
+    // damage did not start until level 5. Nothing failed loudly; the effect
+    // simply was not there, for as long as the skill existed.
+    const asked = new Set();
+    const realTrap = sim.combat.spawnTrap.bind(sim.combat);
+    const realProj = sim.combat.spawnProjectile.bind(sim.combat);
+    sim.combat.spawnTrap = (owner, spec) => {
+      if (spec?.status) asked.add(spec.status);
+      return realTrap(owner, spec);
+    };
+    sim.combat.spawnProjectile = (owner, spec) => {
+      if (spec?.status) asked.add(spec.status);
+      return realProj(owner, spec);
+    };
+
     const trapsBefore = sim.combat.traps.length;
     const fired = sim.useSkill(shooter, 0);
 
@@ -103,6 +125,15 @@ for (const def of SKILLS) {
       why = 'landed nothing on a target 9 m ahead';
     }
 
+    // A status a skill asked for and never delivered is a promise on the card
+    // the code did not keep. Checked separately from "did it land anything",
+    // because landing something else is exactly how this hid.
+    const missing = [...asked].filter((id) => !sawStatus.has(id));
+    if (missing.length) {
+      ok = false;
+      why = `asked for [${missing.join(',')}] and never applied it`;
+    }
+
     if (!ok) fails++;
     console.log(
       `${ok ? 'ok  ' : 'FAIL'} ${def.id.padEnd(18)} L${level}  ` +
@@ -119,5 +150,7 @@ for (const def of SKILLS) {
   }
 }
 
-console.log(fails === 0 ? '\nevery skill lands' : `\n${fails} skill(s) do nothing`);
+console.log(fails === 0
+  ? '\nevery skill lands, and every status it asks for arrives'
+  : `\n${fails} skill(s) do nothing, or promise a status they never apply`);
 process.exit(fails ? 1 : 0);

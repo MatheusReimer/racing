@@ -119,7 +119,7 @@ export const VEHICLES = [
   {
     id: 'roadster',
     bodyType: 'roadster',
-    startingSkill: 'banana',
+    startingSkill: 'spike_strip',
     name: 'Hinode Roadster',
     class: 'Roadster',
     tagline: 'No roof, no weight, no mercy.',

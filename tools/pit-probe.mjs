@@ -283,6 +283,35 @@ console.log('\nSkills run out, which is why there is somewhere to reload:\n');
   else console.log('  ok  spamming a skill empties it, and the lane is the way back');
 }
 
+// --- 4c. the lane changes a wheel, free ------------------------------------
+//
+// The HUD tells a punctured driver "the pits can fix it", so the pits have to
+// fix it — whichever service the circuit's lane happens to sell, and without
+// charging, because five seconds in the lane is already the price of a stop.
+console.log('\nA punctured car that pits comes out on fresh rubber:\n');
+{
+  let mended = 0;
+  let charged = 0;
+  let servedAnyway = 0;
+  for (let i = 0; i < 8; i++) {
+    const sim = makeSim(`flat-${i}`, biomes[i % biomes.length], 0, 2);
+    const p = sim.player;
+    // Flat, whole, and skint: nothing but the wheel to sell, and no money.
+    p.body.puncture(0.72, 30);
+    const r = driveLane(sim, sim.pit.lane.path, 20, 30);
+    if (p.body.speedPenaltyTimer <= 0 && p.body.speedPenalty === 1) mended++;
+    if (sim.scrapSpent > 0) charged++;
+    if (r.served.length) servedAnyway++;
+  }
+  console.log(`  came out mended       ${mended} of 8`);
+  console.log(`  charged for it        ${charged} of 8`);
+  console.log(`  reported as a stop    ${servedAnyway} of 8`);
+  if (mended < 8) fail(`${8 - mended} punctured cars left the lane still flat`);
+  else if (charged) fail('a wheel change took money');
+  else if (servedAnyway < 8) fail('a wheel change did not report as a stop');
+  else console.log('  ok  the lane mends it, free, and says so');
+}
+
 // --- 5. what a stop costs in seconds ---------------------------------------
 //
 // The number that decides whether any of this is a real choice. Too cheap and

@@ -767,8 +767,11 @@ export class RaceSim {
       price: quote.price,
       amount: quote.amount,
       unit: quote.unit,
+      // A puncture is mended free by any pit, so a lane whose service has
+      // nothing to sell is still worth taking on a car limping on a flat.
+      punctured: (this.player.body?.speedPenaltyTimer ?? 0) > 0,
       affordable: quote.amount > 0 && this.scrap > 0,
-      useful: quote.amount > 0,
+      useful: quote.amount > 0 || (this.player.body?.speedPenaltyTimer ?? 0) > 0,
     };
   }
 

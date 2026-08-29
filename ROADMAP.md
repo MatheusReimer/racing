@@ -83,6 +83,59 @@ should be a probe.
 Three pieces in this order, because each one makes the next worth doing — and
 one that came before all of them, because without it none of them meant much.
 
+### -1. Spike Strip, in place of the Banana — done
+
+The one thing in the game that had wandered in from a sillier one. What
+replaced it is not a reskin, because a reskin would have kept the mechanic and
+the mechanic was the weaker half: a banana spins you, and a spin is over in a
+second and a half.
+
+A strip **punctures**. 72% of top speed for five to nine seconds depending on
+level, laid as a line across the road rather than a cluster of points — a
+strip you can thread is not a strip, and how wide it is *is* the level. Which
+makes it a decision rather than a moment: race on and lose ground every
+straight, or give up five seconds in the pit lane to have it seen to.
+
+Any pit changes the wheel, free, whatever that lane sells. You stopped and
+somebody was standing there; charging for the tyre would be charging twice for
+a stop already paid for in seconds. It is also what makes the lane worth taking
+on a car that is otherwise fine, which is the difference between a puncture
+being a decision and a puncture being a tax.
+
+`punctured` is a new status and `body.speedPenalty` a new channel, deliberately
+separate from `gripPenalty`: grip is what you lose in a corner, a puncture is
+what you lose everywhere.
+
+Three bugs fell out of building it, all of which had been quietly live, and
+all of them the same shape: **a status carried on a spec that the code path
+which actually fired never forwarded.**
+
+- **A trap's status only applied if the trap also did damage.** It rode along
+  inside `_dealDamage`, so a zero-damage trap applied nothing — which means the
+  Banana's "victims are also Oiled" at level 4 never once happened, because its
+  damage did not start until level 5.
+- **An area projectile's status was dropped entirely.** `explode()` has always
+  taken an `opts.status` and nothing has ever handed it one, so a Molotov never
+  set anyone Burning and an Electric Grenade never Electrified anything, at any
+  level, in the whole life of the game. Both read as working, because both
+  still did their damage and their blast. Molotov's level-5 damage against a
+  target went from 21.5 to 38.7 once the fire actually burned.
+- **A trap's spin always took the full 0.2 grip penalty for 1.1s**, whatever
+  the spin was. Fine for a hazard built to spin you out; wrong for one meant
+  only to twitch the wheel, which got the whole spin-out anyway. It now scales.
+
+None of them failed loudly. The effects simply were not there, and
+`combat-probe` passed all three because its question was "did this skill land
+*something*" — and a skill that lands two things out of three answers yes. It
+now also asks, of every skill at every level: **every status you asked for, did
+it arrive?** The specs are read off the calls the skill makes rather than
+guessed at from its description, so it cannot drift out of date. That check
+found the second bug within a minute of being written.
+
+And `applyStatus` takes a duration, because a card that promises nine seconds
+has to be able to deliver nine seconds — at level 5 the strip went through the
+damage path, which dropped the override, and punctured for six.
+
 ### 0. Charges — done, and it was the hole under everything else
 
 Skills were not limited. They were *paced*.
@@ -137,8 +190,8 @@ levels 3 and 5; they are now given up for each other.
 Left to do: the other fourteen. Most already have two or three distinct
 qualitative effects buried in `desc(lv)` and `level >= N` checks — 31 of those
 checks across the file — so the content largely exists and the work is
-restructuring rather than invention. Banana and a couple of others have only
-two, and will need a third written.
+restructuring rather than invention. A couple have only two, and will need a
+third written.
 
 ### 2. Affinity, not fixed pools
 
@@ -146,7 +199,7 @@ A heavy car should reach for blunt things and a precise one for precise things
 — and that intent is already in the data, unread. Every car's *starting* skill
 already fits its numbers: the Tsurugi is weight +55 and impact +55 and starts
 with Shockwave (Area/Impact/Explosive); the Roadster is luck +55 and starts
-with Banana (Trap/Control). What is missing is the roll respecting it.
+with Spike Strip (Trap/Control). What is missing is the roll respecting it.
 
 Affinity rather than a closed set of seven per car, and the reason is
 arithmetic. There are fifteen skills and six cars. Seven each is forty-two

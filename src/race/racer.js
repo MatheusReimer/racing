@@ -344,6 +344,21 @@ export class Racer {
       };
     }
 
+    // Punctured.
+    //
+    // Below the states that take the car away from you and above the ones that
+    // are only awkward, because it is neither: the car answers perfectly, it
+    // just will not go. That is exactly the failure this whole readout exists
+    // for — a driver who cannot see it feels a slow car and blames the car.
+    if (b.speedPenaltyTimer > 0) {
+      return {
+        id: 'punctured',
+        label: 'PUNCTURED',
+        why: `held to ${Math.round(b.speedPenalty * 100)}% — the pits can fix it`,
+        severity: 0.6,
+      };
+    }
+
     // Only sustained flight is worth naming. A state that flickers on and off
     // as the car crests a rise is noise, and it was appearing constantly while
     // all four wheels were on the road.

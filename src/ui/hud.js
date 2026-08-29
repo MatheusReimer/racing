@@ -172,7 +172,8 @@ export class HUD {
     // whether the money is there.
     const pit = race.nextPit ? race.nextPit() : null;
     const pitDist = pit ? Math.round(pit.distance / 10) * 10 : -1;
-    const pitKey = pit ? `${pit.service.id}${pit.price}${pitDist}${pit.inLane}` : '';
+    const pitKey = pit
+      ? `${pit.service.id}${pit.price}${pitDist}${pit.inLane}${pit.punctured}` : '';
     if (pitKey !== prev.pit) {
       prev.pit = pitKey;
       n.pit.classList.toggle('on', !!pit);
@@ -180,8 +181,12 @@ export class HUD {
         n.pitIcon.textContent = pit.service.icon;
         n.pitWhat.textContent = pit.inLane ? `In the pits — ${pit.service.name}` : pit.service.name;
         n.pitDeal.textContent = !pit.useful ? 'nothing to do'
-          : !pit.affordable ? `${pit.price} scrap — no money`
-            : pit.inLane ? `${pit.price} scrap` : `${pit.price} scrap · ${pitDist} m`;
+          // The free wheel change leads, because it is the reason to pull in
+          // when the money is not there for anything else.
+          : pit.punctured && !pit.affordable
+            ? `free wheel change · ${pitDist} m`
+            : !pit.affordable ? `${pit.price} scrap — no money`
+              : pit.inLane ? `${pit.price} scrap` : `${pit.price} scrap · ${pitDist} m`;
         n.pit.classList.toggle('dead', !pit.useful || !pit.affordable);
         n.pit.classList.toggle('here', !!pit.inLane);
         n.pit.style.setProperty('--pit-color', pit.service.color);

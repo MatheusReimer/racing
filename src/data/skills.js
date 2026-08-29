@@ -280,35 +280,55 @@ export const SKILLS = [
   },
 
   {
-    id: 'banana',
-    name: 'Banana',
-    icon: '🍌',
+    // Was a Banana, which was the one thing in the game that looked like it had
+    // wandered in from a different, sillier game. What replaces it is not a
+    // reskin: a banana spins you, and a spin is over in a second and a half.
+    // A strip punctures you, and a puncture is a decision — you race on at 72%
+    // of your top speed and lose ground every straight, or you give up five
+    // seconds in the pit lane to have it seen to.
+    //
+    // Which also gives the pit lane something to mend that is not damage — any
+    // pit changes the wheel, free — and makes a trap dropped on lap one still
+    // matter on lap two.
+    id: 'spike_strip',
+    name: 'Spike Strip',
+    // A safety pin was the first pick and read as stationery. This is the one
+    // glyph in the set that is a row of metal points, which is what the thing
+    // is, and it does not collide with the bomb, the drum or the hook.
+    icon: '🔱',
     tags: ['Trap', 'Control'],
     rarity: 'common',
     cost: 8,
     cooldown: 3,
     maxLevel: 5,
-    desc: (lv) => `Drops a slip hazard that spins whoever touches it.`
-      + (lv >= 2 ? ` Drops ${Math.min(3, 1 + Math.floor(lv / 2))}.` : '')
-      + (lv >= 4 ? ' Victims are also Oiled.' : '')
-      + (lv >= 5 ? ' Spun cars take 15 damage.' : ''),
+    desc: (lv) => `Lays a strip ${(3.2 + lv * 0.9).toFixed(1)}m across.`
+      + ` Punctures whoever crosses it: 72% top speed for ${(4 + lv).toFixed(0)}s.`
+      + (lv >= 3 ? ' Twitches the wheel on contact.' : '')
+      + (lv >= 5 ? ' And costs them 18 Durability.' : ''),
     fire(ctx) {
       const { racer, level, combat } = ctx;
-      const count = Math.min(3, 1 + Math.floor(level / 2));
-      for (let i = 0; i < count; i++) {
+      // A line across the road rather than a cluster of points. A strip you
+      // can thread is not a strip, and the width is the level: at Lv1 a wide
+      // road leaves room round it, at Lv5 it does not.
+      const teeth = 3 + Math.min(3, Math.floor(level / 2));
+      const span = 3.2 + level * 0.9;
+      for (let i = 0; i < teeth; i++) {
         const t = combat.spawnTrap(racer, {
-          damage: level >= 5 ? 15 : 0,
-          spin: 2.4 + level * 0.2,
-          hitRadius: 2.6,
+          damage: level >= 5 ? 18 : 0,
+          // A puncture is not a spin. A little kick at higher levels so the
+          // hit is felt at the wheel, but the car is never taken away from
+          // the player — what it loses is speed, not control.
+          spin: level >= 3 ? 0.7 : 0,
+          hitRadius: 1.7,
           life: 40,
           tags: ['Trap', 'Control'],
-          status: level >= 4 ? 'oiled' : null,
-          visual: 'banana',
+          status: 'punctured',
+          statusDuration: 4 + level,
+          visual: 'spike_strip',
         });
-        // Fan them across the road so a single line does not dodge all three.
-        const spread = (i - (count - 1) / 2) * 3.0;
-        t.x += Math.cos(racer.body.yaw) * spread;
-        t.z += -Math.sin(racer.body.yaw) * spread;
+        const across = (i - (teeth - 1) / 2) * (span / Math.max(1, teeth - 1));
+        t.x += Math.cos(racer.body.yaw) * across;
+        t.z += -Math.sin(racer.body.yaw) * across;
       }
     },
   },
@@ -577,7 +597,7 @@ export function chargesOf(skill, stats = null) {
 export const SKILL_BY_ID = Object.fromEntries(SKILLS.map((s) => [s.id, s]));
 
 /** The five the MVP section of the design brief calls for. */
-export const STARTER_SKILL_IDS = ['nitro', 'rocket', 'mine', 'banana', 'electric_grenade'];
+export const STARTER_SKILL_IDS = ['nitro', 'rocket', 'mine', 'spike_strip', 'electric_grenade'];
 
 export function skillById(id) {
   return SKILL_BY_ID[id];

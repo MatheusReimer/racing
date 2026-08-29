@@ -107,7 +107,8 @@ export class FX {
     on('fx:projectile', (p) => this._addMarker(p, 0.35,
       p.tags?.includes('Electric') ? 0x6fd9ff : 0xffa040));
     on('fx:trap', (t) => this._addMarker(t, 0.5,
-      t.visual === 'banana' ? 0xf5d442 : t.visual === 'oil' ? 0x2a2a30 : 0xff5555));
+      t.visual === 'spike_strip' ? 0xb8c0cc
+        : t.visual === 'oil' ? 0x2a2a30 : 0xff5555));
     on('fx:despawn', (o) => this._removeMarker(o));
 
     on('fx:propSmashed', (e) => {

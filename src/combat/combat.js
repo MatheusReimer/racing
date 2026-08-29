@@ -33,6 +33,13 @@ export const STATUS = {
     onApply: (racer) => racer.body.stun(1.6),
   },
   oiled: { id: 'oiled', name: 'Oiled', duration: 2.5 },
+  punctured: {
+    id: 'punctured', name: 'Punctured', duration: 6.0,
+    // Not grip. A flat tyre does not make you slide in corners, it makes you
+    // slow everywhere, which is a different decision: you keep racing on it
+    // and lose ground steadily, or you spend a pit stop on it.
+    onApply: (racer, seconds = 6.0) => racer.body.puncture(0.72, seconds),
+  },
 };
 
 let nextId = 1;
@@ -94,6 +101,7 @@ export class CombatSystem {
     p.tags = spec.tags || [];
     p.pierce = spec.pierce ?? 0;
     p.status = spec.status || null;
+    p.statusDuration = spec.statusDuration ?? null;
     p.onHit = spec.onHit || null;
     p.target = null;
     p.dead = false;
@@ -127,7 +135,8 @@ export class CombatSystem {
     t.arm = spec.arm ?? 0.6;
     t.tags = spec.tags || [];
     t.status = spec.status || null;
-    t.spin = spec.spin ?? 0;         // a banana spins you out instead of damaging
+    t.statusDuration = spec.statusDuration ?? null;
+    t.spin = spec.spin ?? 0;         // takes the line away instead of damaging
     t.surface = spec.surface || null; // oil slick
     t.onHit = spec.onHit || null;
     t.dead = false;
@@ -156,7 +165,7 @@ export class CombatSystem {
 
       const falloff = 1 - d / r;
       const dmg = damage * dmgMult * (0.35 + falloff * 0.65);
-      this._dealDamage(owner, racer, dmg, tags, opts.status);
+      this._dealDamage(owner, racer, dmg, tags, opts.status, false, opts.statusSeconds);
       racer.body.applyBlast(x, z, (opts.force ?? 26) * falloff, r);
     }
 
@@ -223,7 +232,13 @@ export class CombatSystem {
         if (dx * dx + dz * dz > (p.hitRadius + racer.radius) ** 2) continue;
 
         if (p.radius > 0) {
-          this.explode(p.owner, p.x, p.z, p.radius, p.damage, p.tags);
+          // With its status. `explode` has always taken one and nothing has
+          // ever handed it one, so every *area* projectile dropped it on the
+          // floor: a Molotov never set anyone Burning and an Electric Grenade
+          // never Electrified anything, at any level, ever. Both read as
+          // working, because both still did their damage and their blast.
+          this.explode(p.owner, p.x, p.z, p.radius, p.damage, p.tags,
+            { status: p.status, statusSeconds: p.statusDuration });
         } else {
           this._dealDamage(p.owner, racer, p.damage * this._tagMultiplier(p.owner, p.tags),
             p.tags, p.status);
@@ -257,17 +272,35 @@ export class CombatSystem {
         if (dx * dx + dz * dz > (t.hitRadius + racer.radius) ** 2) continue;
 
         if (t.radius > 0) {
-          this.explode(t.owner, t.x, t.z, t.radius, t.damage, t.tags);
+          this.explode(t.owner, t.x, t.z, t.radius, t.damage, t.tags,
+            { status: t.status, statusSeconds: t.statusDuration });
         } else if (t.damage > 0) {
+          // `statusSeconds` last, past `silent`: a trap that both hurts and
+          // applies a status used to lose its duration here, so a Spike Strip
+          // at level 5 — the only level where it also does damage — punctured
+          // for six seconds instead of the nine its card promised.
           this._dealDamage(t.owner, racer, t.damage * this._tagMultiplier(t.owner, t.tags),
-            t.tags, t.status);
+            t.tags, t.status, false, t.statusDuration);
+        } else if (t.status) {
+          // A trap whose whole point is the status and not the damage.
+          //
+          // The status used to ride along inside `_dealDamage`, so a
+          // zero-damage trap applied nothing at all — which meant the Banana's
+          // "victims are also Oiled" at level 4 never once happened, because
+          // its damage only starts at level 5. Nothing failed loudly; the
+          // effect simply was not there.
+          this.applyStatus(racer, t.status, t.owner, t.statusDuration);
         }
         if (t.spin > 0) {
-          // A banana does not hurt: it takes your line away, which at speed is
-          // worse.
+          // Taking the line away, at whatever strength the trap asked for.
+          //
+          // The grip loss used to be a flat 0.2 for 1.1s whatever the spin —
+          // fine for a hazard built to spin you out, wrong for one that only
+          // means to twitch the wheel, which got the full spin-out anyway.
+          const bite = Math.min(1, t.spin / 2.4);
           racer.body.yawRate += (Math.random() > 0.5 ? 1 : -1) * t.spin;
-          racer.body.gripPenalty = 0.2;
-          racer.body.gripPenaltyTimer = 1.1;
+          racer.body.gripPenalty = Math.min(racer.body.gripPenalty, 1 - 0.8 * bite);
+          racer.body.gripPenaltyTimer = Math.max(racer.body.gripPenaltyTimer, 1.1 * bite);
         }
         if (t.onHit) t.onHit(this, t, racer);
         this.race.events?.emit('fx:trapHit', { trap: t, racer });
@@ -330,7 +363,7 @@ export class CombatSystem {
     return mult;
   }
 
-  _dealDamage(owner, victim, amount, tags, status, silent = false) {
+  _dealDamage(owner, victim, amount, tags, status, silent = false, statusSeconds = null) {
     if (amount <= 0 || !victim.alive) return 0;
 
     let dmg = amount;
@@ -342,7 +375,7 @@ export class CombatSystem {
     const applied = victim.damage(dmg, { type: 'skill', from: owner, tags }, this.race);
     if (owner) owner.stats.damageDealt += applied;
 
-    if (status) this.applyStatus(victim, status, owner);
+    if (status) this.applyStatus(victim, status, owner, statusSeconds);
     if (!silent) {
       this.race.events?.emit('fx:hit', { racer: victim, amount: applied, tags });
     }
@@ -354,16 +387,26 @@ export class CombatSystem {
     return applied;
   }
 
-  applyStatus(racer, id, source = null) {
+  /**
+   * @param seconds  override the status's own duration — a skill that scales
+   *                 how long it lasts needs to say so, and the description on
+   *                 the card is a promise the code has to keep
+   */
+  applyStatus(racer, id, source = null, seconds = null) {
     const def = STATUS[id];
     if (!def) return;
+    const t = seconds ?? def.duration;
     if (!racer.statuses) racer.statuses = [];
     const existing = racer.statuses.find((s) => s.id === id);
     if (existing) {
-      existing.t = Math.max(existing.t, def.duration);
+      existing.t = Math.max(existing.t, t);
+      // Re-applied, so whatever the status does to the car is re-applied too:
+      // a second hit that only pushed the timer out would leave a longer but
+      // weaker effect than the first one.
+      def.onApply?.(racer, t);
     } else {
-      racer.statuses.push({ id, t: def.duration, source });
-      def.onApply?.(racer);
+      racer.statuses.push({ id, t, source });
+      def.onApply?.(racer, t);
     }
     this.race.events?.emit('fx:status', { racer, id });
   }
