@@ -282,6 +282,21 @@ html, body {
 }
 
 /* Drift meter — appears only while sliding */
+/* The slipstream tell. Sits under the speed, hidden until there is a tow —
+   the number climbing is the effect, this is the reason for it. */
+.hud-speed .draft {
+  margin-top: 2px;
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--speed);
+  opacity: 0;
+  transition: opacity 160ms ease;
+  text-shadow: 0 0 12px rgba(79, 195, 247, 0.55);
+}
+
+.hud-speed.towed .draft { opacity: 1; }
+
 .hud-drift {
   position: absolute;
   left: 50%;

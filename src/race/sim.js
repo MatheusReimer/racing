@@ -215,6 +215,56 @@ export function makeDefaultRivalBuild(arch, difficulty = 1) {
   return build;
 }
 
+// Slipstream geometry.
+//
+// A wake is a cone behind a car: strongest just off its tail, gone by the time
+// you are seven car lengths back or a lane and a half to the side. These are
+// the numbers that decide whether following is worth doing, so they are here
+// rather than buried in the test below.
+const DRAFT_MIN_SPEED = 18;     // m/s; a tow at walking pace is not a thing
+const DRAFT_NEAR = 4.0;         // m; closer than this you are about to hit it
+const DRAFT_FULL = 13.0;        // m; out to here the wake is at full strength
+const DRAFT_FAR = 32.0;         // m; and gone by here
+const DRAFT_WIDTH = 1.3;        // m of lateral offset still fully in the wake
+const DRAFT_EDGE = 3.2;         // m at which you are in clean air again
+const DRAFT_RISE = 3.2;         // how fast the tow builds, per second
+const DRAFT_FALL = 2.0;         // and how fast it lets go
+
+/**
+ * How much of `other`'s wake `b` is sitting in, 0..1.
+ *
+ * `other` may be a racer's body or a civilian — a van tows too, and on a public
+ * road it is the thing you are most likely to catch. Both carry x, z, yaw and
+ * speed, which is all this needs.
+ */
+function draftBetween(b, other) {
+  if ((other.speed ?? 0) < DRAFT_MIN_SPEED * 0.5) return 0;
+
+  const dx = other.x - b.x;
+  const dz = other.z - b.z;
+  const along = dx * b.forwardX + dz * b.forwardZ;
+  if (along < DRAFT_NEAR || along > DRAFT_FAR) return 0;
+
+  const lateral = Math.abs(dx * b.rightX + dz * b.rightZ);
+  if (lateral > DRAFT_EDGE) return 0;
+
+  // Pointing the same way. Without this an oncoming car tows you as it passes,
+  // which is the opposite of what its wake does.
+  const ofx = other.forwardX ?? Math.sin(other.yaw ?? 0);
+  const ofz = other.forwardZ ?? Math.cos(other.yaw ?? 0);
+  const facing = ofx * b.forwardX + ofz * b.forwardZ;
+  if (facing < 0.55) return 0;
+
+  const byDistance = along <= DRAFT_FULL
+    ? 1
+    : 1 - (along - DRAFT_FULL) / (DRAFT_FAR - DRAFT_FULL);
+  const byOffset = lateral <= DRAFT_WIDTH
+    ? 1
+    : 1 - (lateral - DRAFT_WIDTH) / (DRAFT_EDGE - DRAFT_WIDTH);
+
+  return Math.max(0, byDistance) * Math.max(0, byOffset) * facing;
+}
+
 export class RaceSim {
   constructor({ seed, biome, playerBuild, config = {}, events = null }) {
     this.rng = new RNG(seed);
@@ -385,6 +435,8 @@ export class RaceSim {
         r.input.drift = false; r.input.nos = false;
       }
     }
+
+    if (racing) this._updateDraft(dt);
 
     // 2-3. motion, then sample
     for (const r of this.racers) {
@@ -605,6 +657,46 @@ export class RaceSim {
     racer._windowStart = racer.raceProgress(this.track);
     racer.rescuedAt = this.time;
     this.events?.emit('race:rescue', { racer });
+  }
+
+  /**
+   * Who is in whose wake.
+   *
+   * Runs before the step, so a car is towed by where the field was rather than
+   * by where it is about to be — which is what keeps this the same for every
+   * car and independent of the order they are integrated in.
+   *
+   * The field tows and so does the traffic: tucking in behind a van is a real
+   * thing to do on a public road, and the civilians are the only cars on the
+   * circuit slow enough to be caught easily.
+   */
+  _updateDraft(dt) {
+    for (const r of this.racers) {
+      if (!r.alive) { r.body.draft = 0; continue; }
+      const b = r.body;
+      if (b.speed < DRAFT_MIN_SPEED) { b.draft = 0; b.draftFrom = null; continue; }
+
+      let best = 0;
+      let from = null;
+      for (const other of this.racers) {
+        if (other === r || !other.alive) continue;
+        const d = draftBetween(b, other.body);
+        if (d > best) { best = d; from = other; }
+      }
+      for (const car of this.traffic ?? []) {
+        if (!car.alive) continue;
+        const d = draftBetween(b, car);
+        if (d > best) { best = d; from = car; }
+      }
+
+      // Eased rather than snapped. A wake is not a switch, and without this a
+      // car weaving behind another flickers between towed and not, which the
+      // engine falloff turns into audible surging.
+      const rate = best > b.draft ? DRAFT_RISE : DRAFT_FALL;
+      b.draft += (best - b.draft) * Math.min(1, rate * dt);
+      if (b.draft < 0.002) b.draft = 0;
+      b.draftFrom = b.draft > 0.05 ? from : null;
+    }
   }
 
   _leaderProgress() {

@@ -59,6 +59,21 @@ const JOLT_FREQ = 22;
 // is contact, not flight.
 const CONTACT_TOLERANCE = 0.12;
 
+// Slipstream.
+//
+// `draft` is 0 in clean air and 1 buried in another car's wake; the simulation
+// works out which and writes it there every step. These two numbers are what a
+// tow is worth, and together — the drag cut raises the attainable speed too —
+// they come to about six per cent flat out.
+//
+// Six per cent reels a rival in over a long straight without making following
+// better than leading, which is the line this has to walk: a tow that beats a
+// clean lap turns every race into a queue nobody wants to be at the front of.
+// The first pair of numbers came to nine and a half, and a car sat in the wake
+// for twelve seconds passed the one in front by thirty-five metres.
+const DRAFT_TOP_SPEED = 0.032;
+const DRAFT_DRAG_CUT = 0.60;
+
 /**
  * `grip`     multiplies the lateral decay rate — how hard it is to slide.
  * `resist`   is an explicit deceleration in m/s^2, not a multiplier. Sand
@@ -160,6 +175,10 @@ export class VehicleBody {
     // --- transient states applied by the game layer ---
     this.boostTimer = 0;
     this.boostPower = 0;   // additive fraction of max speed
+    // How deep in another car's wake this one is, 0..1. Written by the
+    // simulation each step, because it is the only thing that can see the
+    // other cars — a body knows about the road under it and nothing else.
+    this.draft = 0;
     this.stunTimer = 0;    // EMP / freeze: no throttle, no steering
     this.gripPenaltyTimer = 0;
     this.gripPenalty = 1;
@@ -202,7 +221,7 @@ export class VehicleBody {
 
   /** Current effective top speed, including boosts. */
   maxSpeedNow() {
-    return this.p.maxSpeed * (1 + this.boostPower);
+    return this.p.maxSpeed * (1 + this.boostPower + this.draft * DRAFT_TOP_SPEED);
   }
 
   /**
@@ -320,7 +339,15 @@ export class VehicleBody {
 
     // Aerodynamic drag only. Small by design: the engine falloff above is what
     // sets top speed, so drag must not fight it or the cap becomes unreachable.
-    const dragMult = surface.dragMult ?? 1;
+    //
+    // Which is exactly why a slipstream cannot be modelled as less drag alone.
+    // Physically that is what a slipstream is, and here it would be worth
+    // almost nothing — the cap is set by `falloff`, so a car already near it
+    // would gain a few tenths and never close. So the wake does both: it takes
+    // most of the aerodynamic drag away, which is the true part, and it lifts
+    // the top speed a little, which is the part that lets you actually come out
+    // from behind and pass.
+    const dragMult = (surface.dragMult ?? 1) * (1 - this.draft * DRAFT_DRAG_CUT);
     vFwd -= vFwd * 0.035 * dragMult * dt;
     vFwd -= vFwd * Math.abs(vFwd) * 0.00022 * dragMult * dt;
 

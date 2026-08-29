@@ -45,6 +45,7 @@ export class HUD {
       <div class="hud-speed">
         <div class="val">0</div>
         <div><span class="unit">KM/H</span></div>
+        <div class="draft">Slipstream</div>
       </div>
 
       <div class="hud-drift">Drift <span class="dq">0</span></div>
@@ -62,6 +63,7 @@ export class HUD {
       lap: q('.hud-position .l'),
       lapTotal: q('.hud-position .lt'),
       speed: q('.hud-speed .val'),
+      speedBox: q('.hud-speed'),
       durFill: q('.g-dur .gauge-fill'),
       durNum: q('.g-dur .num'),
       nrgFill: q('.g-nrg .gauge-fill'),
@@ -121,6 +123,14 @@ export class HUD {
     if (kmh !== prev.kmh) {
       n.speed.textContent = kmh;
       prev.kmh = kmh;
+    }
+
+    // Slipstream. A tow you cannot tell you are getting is a number the game
+    // keeps to itself; the speed rising is the effect, this is the reason.
+    const towed = (p.body?.draft ?? 0) > 0.3;
+    if (towed !== prev.towed) {
+      n.speedBox?.classList.toggle('towed', towed);
+      prev.towed = towed;
     }
 
     // Placing

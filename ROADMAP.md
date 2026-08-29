@@ -78,12 +78,16 @@ should be a probe.
 
 ---
 
-## A car that wins 85% of the time, and a five-second frame
+## The frame timer measures the wrong thing
 
-**`tools/balance.mjs` reports the Kanzen 1.6 winning around 85% of races.**
-Checked against the commits before the bodies, the scale change and the
-collision rewrite — it predates all of them. Worth a look before the roster is
-tuned around anything else.
+**The 85% Kanzen is gone, and it was not this that fixed it.** The entry that
+used to be here said `tools/balance.mjs` reported the Kanzen 1.6 winning around
+85% of races. It now wins 4%, and the spread across the roster is 4–25%.
+Measured deliberately with the slipstream disabled, so this is not the tow
+flattening it — something between then and now already had. The tow does help:
+with it the spread closes to 4–17%, because a car that runs away can now be
+reeled back in. Nothing here needs doing; the number is recorded so the next
+person does not go hunting a problem that has been solved.
 
 **`tools/realtime-probe.mjs` still fails at every tier, and the number is not
 what it looks like.** Its p99 is `workMs`, the loop's own timer, which starts at
