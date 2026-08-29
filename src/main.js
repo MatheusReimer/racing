@@ -243,16 +243,20 @@ class Game {
 
   showRest() {
     this.screens.rest(this.run, {
+      // A refusal is not a decision. Both jobs can turn the player down now —
+      // an upgrade they cannot afford — and leaving the garage anyway would
+      // spend the node on nothing.
       onRepair: () => {
         const r = this.run.restRepair();
-        this.screens.toast(r.text);
-        this.showMap();
+        this.screens.toast(r.ok ? r.text : r.reason);
+        if (r.ok) this.showMap(); else this.showRest();
       },
       onUpgrade: (id, branchId) => {
         const r = this.run.restUpgrade(id, branchId);
         this.screens.toast(r.ok ? r.text : r.reason);
-        this.showMap();
+        if (r.ok) this.showMap(); else this.showRest();
       },
+      onLeave: () => { this.run.leaveRest(); this.showMap(); },
     });
   }
 

@@ -302,10 +302,20 @@ while (guard++ < 26) {
       seen.add('rest');
       const choices = await page.$$('.choice');
       check('garage screen offers repair and upgrades', choices.length > 0, `options=${choices.length}`);
+      // The garage charges now, so every job has to say what it costs before
+      // the player commits a node to it.
+      const prices = await page.$$eval('.choice .price', (n) => n.map((e) => e.textContent));
+      check('garage jobs are priced', prices.length > 0, prices.slice(0, 3).join(' / '));
       await shot('rest');
     }
     const choices = await page.$$('.choice:not(.disabled)');
     if (choices.length) await choices[0].click();
+    else {
+      // Nothing affordable and nothing to mend: there must still be a way out.
+      const out = await page.$$('.screen-foot .btn');
+      check('a player who can afford nothing can still leave the garage', out.length > 0);
+      if (out.length) await out[out.length - 1].click();
+    }
     await page.waitForTimeout(350);
     continue;
   }

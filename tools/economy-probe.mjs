@@ -31,7 +31,16 @@ for (let i = 0; i < N; i++) {
       const open = run.availableNodes();
       if (!open.length) break;
       run.choose(open[rng.int(0, open.length - 1)]);
-      if (run.state === 'race') { run.finishRace({ place: rng.int(1, 6), laps: 3 }, { stats: {} }); }
+      if (run.state === 'race') {
+        const place = rng.int(1, 6);
+        // A race has to cost the car something, or the garage is a sink that
+        // never opens and the repair price never appears in the measurement.
+        // Worse finishes hurt more: the back of the field is where the paint
+        // gets traded.
+        const hurt = run.maxDurability * (0.06 + 0.045 * place) * rng.range(0.5, 1.5);
+        run.finishRace({ place, laps: 3 },
+          { stats: {}, durability: Math.max(0, run.durability - hurt) });
+      }
       continue;
     }
     if (run.state === 'reward') {
@@ -57,7 +66,22 @@ for (let i = 0; i < N; i++) {
       run.leaveShop();
       continue;
     }
-    if (run.state === 'rest') { run.restRepair(); continue; }
+    if (run.state === 'rest') {
+      // The garage, greedily: repair first, then whatever upgrade is affordable.
+      const before = run.scrap;
+      const r = run.restRepair();
+      if (r.ok) { spent += before - run.scrap; continue; }
+      const s0 = run.build.skills.find((sk) => run.upgradeQuote(
+        sk.id, sk.branches?.[0]?.id ?? null) <= run.scrap);
+      if (s0) {
+        const b4 = run.scrap;
+        if (run.restUpgrade(s0.id, s0.branches?.[0]?.id ?? null).ok) {
+          spent += b4 - run.scrap; continue;
+        }
+      }
+      run.leaveRest();
+      continue;
+    }
     if (run.state === 'event') { run.resolveEvent(0); continue; }
     break;
   }
@@ -78,13 +102,13 @@ console.log(`  terminaram em     ${JSON.stringify(ended.reduce((a, e) => ({ ...a
 // A greedy shopper that still ends with several times what it spent is a
 // currency with nothing to do.
 //
-// A ratchet, not a target. It stands at 3.6x today and the design wants it
+// A ratchet, not a target. It stands at 2.7x today and the design wants it
 // under 3 — but failing on that would mean a suite that cries every run for
 // work nobody has started, and a suite that always fails is a suite nobody
 // reads. So it holds the line where it is: this may not get worse, and the
 // number it prints is the one to watch as pits and paid garage work land.
 const TARGET = 3.0;
-const CEILING = 4.2;
+const CEILING = 3.0;
 const surplus = q(left, 0.5) / Math.max(1, q(spent, 0.5));
 const ok = surplus <= CEILING;
 console.log(`\n  surplus ${surplus.toFixed(1)}x  (target ${TARGET}, ceiling ${CEILING})`

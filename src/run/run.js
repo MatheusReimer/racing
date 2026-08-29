@@ -1,6 +1,7 @@
 import { RNG, randomSeedString } from '../core/rng.js';
 import { Build } from '../build/build.js';
 import { instantiateSkill } from '../data/skills.js';
+import { RARITY } from '../data/parts.js';
 import { generateMap, NODE_TYPES } from './nodemap.js';
 import { generateOffer, generateShop, applyOffer, scrapFor } from './rewards.js';
 import { biomeForRegion, drawItinerary, BIOMES } from '../data/biomes.js';
@@ -21,6 +22,15 @@ import { clamp, clamp01 } from '../core/math.js';
 // for bug reports and for seeded competition.
 
 export const REGIONS_PER_RUN = 3;
+
+/**
+ * What a point of Durability costs in the garage.
+ *
+ * Set against what a race pays: a mid-field finish is worth about 55 scrap, and
+ * a full 45% repair on a 140-point car is 63 points. At 1.4 that is 88 scrap —
+ * most of a race, which is the weight this decision should carry.
+ */
+const REPAIR_PER_POINT = 1.4;
 
 export class Run {
   constructor({ seed = randomSeedString(), vehicleId = 'hatch', regions = REGIONS_PER_RUN } = {}) {
@@ -176,7 +186,12 @@ export class Run {
     // dereferencing null — this is a public entry point.
     const node = this.pending || { type: 'race', outcome: null };
     this.racesRun++;
-    this.durability = Math.max(0, racer.durability);
+    // A racer that reports no durability took no damage as far as this run is
+    // concerned. `Math.max(0, undefined)` is NaN, and a NaN durability used to
+    // stay quietly inside the car — now the garage prices against it, so it
+    // would leak into the player's scrap and poison the whole economy.
+    this.durability = Number.isFinite(racer.durability)
+      ? Math.max(0, racer.durability) : this.durability;
 
     const challenge = this.pendingConfig?.challenge;
     let challengeMet = false;
@@ -296,23 +311,88 @@ export class Run {
 
   // --- garage --------------------------------------------------------------
 
-  restRepair() {
-    const healed = this.repairPlayer(this.maxDurability * 0.45);
+  /**
+   * Work in the garage, priced.
+   *
+   * The garage was free — the one node that exists purely to spend money was
+   * the one node that took none, while a greedy run finished holding three and
+   * a half times what it managed to spend (`tools/economy-probe.mjs`).
+   *
+   * Priced by what is actually restored, so topping up a healthy car is cheap
+   * and dragging a wreck back is not, and never refused for want of funds: it
+   * does what the money covers. A garage that turns you away because you are
+   * poor is a node wasted on the run that needed it most.
+   */
+  repairQuote() {
+    const missing = Math.max(0, this.maxDurability - this.durability);
+    const want = Math.min(missing, this.maxDurability * 0.45);
+    return { amount: want, price: Math.ceil(want * REPAIR_PER_POINT) };
+  }
+
+  /**
+   * Leave the garage having done nothing.
+   *
+   * There has to be a way out that costs nothing. Both jobs can now refuse —
+   * repair when the car is whole, an upgrade when the scrap is not there — and
+   * a player who can afford neither was stuck on the screen with no exit.
+   */
+  leaveRest() {
     this.state = 'map';
-    return { ok: true, text: `Repaired ${Math.round(healed)} Durability.` };
+    return { ok: true };
+  }
+
+  restRepair() {
+    const quote = this.repairQuote();
+    if (quote.amount <= 0) return { ok: false, reason: 'Nothing to put right.' };
+
+    // What the money covers, down to nothing.
+    const share = Math.min(1, this.scrap / Math.max(1, quote.price));
+    const paid = Math.min(this.scrap, quote.price);
+    const healed = this.repairPlayer(quote.amount * share);
+    this.scrap -= paid;
+    this.state = 'map';
+    return {
+      ok: true,
+      text: share >= 1
+        ? `Repaired ${Math.round(healed)} Durability for ${paid} scrap.`
+        : `${paid} scrap bought ${Math.round(healed)} Durability — all you could afford.`,
+    };
+  }
+
+  /** What a branch or a level costs, before it is bought. */
+  upgradeQuote(skillId, branchId = null) {
+    const s = this.build.skills.find((x) => x.id === skillId);
+    if (!s) return null;
+    const rarity = RARITY[s.rarity]?.price ?? 60;
+    if (branchId) {
+      const branch = s.branches?.find((b) => b.id === branchId);
+      if (!branch) return null;
+      const rank = s.picks?.[branchId] ?? 0;
+      // The second rank down a branch costs more than the first: specialising
+      // should be a decision each time, not once.
+      return Math.ceil(rarity * (0.55 + rank * 0.45));
+    }
+    return Math.ceil(rarity * (0.4 + (s.level ?? 1) * 0.18));
   }
 
   restUpgrade(skillId, branchId = null) {
+    const price = this.upgradeQuote(skillId, branchId);
+    if (price == null) return { ok: false, reason: 'That work cannot be done.' };
+    // Unlike a repair, this one is all or nothing — half a branch is not a
+    // thing — so it is the one place the garage can turn you away.
+    if (this.scrap < price) return { ok: false, reason: `That costs ${price} scrap.` };
+
     const ok = this.build.upgradeSkill(skillId, branchId);
     if (!ok) return { ok: false, reason: 'That work cannot be done.' };
+    this.scrap -= price;
     this.syncBuild();
     this.state = 'map';
     const s = this.build.skills.find((x) => x.id === skillId);
     if (branchId) {
       const b = s.branches?.find((x) => x.id === branchId);
-      return { ok: true, text: `${s.name}: ${b?.name ?? branchId}.` };
+      return { ok: true, text: `${s.name}: ${b?.name ?? branchId}. −${price} scrap.` };
     }
-    return { ok: true, text: `${s.name} is now level ${s.level}.` };
+    return { ok: true, text: `${s.name} is now level ${s.level}. −${price} scrap.` };
   }
 
   // --- events --------------------------------------------------------------

@@ -1014,3 +1014,26 @@
   border: 1px solid var(--edge-bright);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
+
+/* A price on a choice. The garage is a shop now, and a shop that does not show
+   what things cost is a shop you buy from by accident.
+
+   Clear of the chevron: the two sat on top of each other and read as one
+   string, "48 scrap->". A priced choice gets the wider right padding it needs,
+   which is why the row and not just the price carries the offset. */
+.choice:has(.price) { padding-right: calc(var(--s5) + 64px); }
+
+.choice .price {
+  position: absolute;
+  right: calc(var(--s4) + 22px);
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--gold);
+}
+
+/* Priced out reads differently from used up: one is wait, the other is never. */
+.choice.unaffordable { opacity: 0.5; }
+.choice.unaffordable .price { color: var(--danger); }

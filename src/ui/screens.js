@@ -732,16 +732,28 @@ export class Screens {
 
   // --- garage --------------------------------------------------------------
 
-  rest(run, { onRepair, onUpgrade }) {
-    const { root, body } = frame('Garage', 'One job. Choose it.', run, { withPanel: true });
+  rest(run, { onRepair, onUpgrade, onLeave }) {
+    const { root, body, foot } =
+      frame('Garage', 'One job. Choose it.', run, { withPanel: true });
 
     body.appendChild(el('div', 'section-label', 'One job'));
     const list = el('div', 'choice-list');
+    const quote = run.repairQuote();
     const repair = el('button', 'choice');
     repair.appendChild(el('div', 'lbl', 'Repair'));
-    repair.appendChild(el('div', 'det',
-      `Restore ${Math.round(run.maxDurability * 0.45)} Durability.`));
-    repair.onclick = onRepair;
+    repair.appendChild(el('div', 'det', quote.amount <= 0
+      ? 'Nothing to put right.'
+      : `Restore ${Math.round(quote.amount)} Durability.`
+        + (run.scrap >= quote.price
+          ? '' : ` Your ${run.scrap} buys what it buys.`)));
+    // The price sits with the thing, not in a corner: a garage is a shop and
+    // this was the one node in the game that took no money at all.
+    if (quote.amount > 0) {
+      repair.appendChild(el('div', 'price', `${Math.min(quote.price, run.scrap)} scrap`));
+      repair.onclick = onRepair;
+    } else {
+      repair.classList.add('disabled');
+    }
     list.appendChild(repair);
 
     for (const s of run.build.skills) {
@@ -755,7 +767,12 @@ export class Screens {
           // What this pick would give, not what the branch is in the abstract.
           b.appendChild(el('div', 'det', br.maxed
             ? 'Nothing more down this road.' : esc(br.desc(br.rank + 1))));
+          const price = run.upgradeQuote(s.id, br.id);
+          if (!br.maxed) b.appendChild(el('div', 'price', `${price} scrap`));
+          // Priced out reads differently from used up, and the player needs to
+          // tell them apart at a glance: one is wait, the other is never.
           if (br.maxed) b.classList.add('disabled');
+          else if (run.scrap < price) { b.classList.add('disabled', 'unaffordable'); }
           else b.onclick = () => onUpgrade(s.id, br.id);
           list.appendChild(b);
         }
@@ -766,11 +783,18 @@ export class Screens {
       const b = el('button', 'choice');
       b.appendChild(el('div', 'lbl', `Upgrade ${s.icon || ''} ${esc(s.name)} → Lv${(s.level ?? 1) + 1}`));
       b.appendChild(el('div', 'det', maxed ? 'Already at maximum.' : esc(descOf(s, (s.level ?? 1) + 1))));
+      const price = run.upgradeQuote(s.id);
+      if (!maxed) b.appendChild(el('div', 'price', `${price} scrap`));
       if (maxed) b.classList.add('disabled');
+      else if (run.scrap < price) { b.classList.add('disabled', 'unaffordable'); }
       else b.onclick = () => onUpgrade(s.id);
       list.appendChild(b);
     }
     body.appendChild(list);
+
+    const leave = el('button', 'btn', 'Leave it');
+    leave.onclick = onLeave;
+    foot.appendChild(leave);
     return this._show(root);
   }
 

@@ -161,11 +161,19 @@ for (let i = 0; i < RUNS; i++) {
       const ev = run.currentEvent;
       run.resolveEvent(rng.int(0, ev.choices.length - 1));
     } else if (run.state === 'rest') {
-      if (run.durabilityFrac < 0.75 || run.build.skills.length === 0) run.restRepair();
-      else {
+      // Both jobs cost scrap and both can refuse — a whole car has nothing to
+      // repair, an upgrade may be out of reach — so the walker has to be able
+      // to walk away, exactly as the player can.
+      let done = false;
+      if (run.durabilityFrac < 0.75 || run.build.skills.length === 0) {
+        done = run.restRepair().ok;
+      } else {
         const up = run.build.skills.find((s) => (s.level ?? 1) < (s.maxLevel ?? 5));
-        if (up) run.restUpgrade(up.id); else run.restRepair();
+        const branch = up?.branches?.find((b) => (up.picks?.[b.id] ?? 0) < (b.maxRank ?? 3));
+        if (up) done = run.restUpgrade(up.id, branch?.id ?? null).ok;
+        if (!done) done = run.restRepair().ok;
       }
+      if (!done) run.leaveRest();
     } else {
       break;
     }
