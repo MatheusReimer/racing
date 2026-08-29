@@ -16,6 +16,7 @@
 
 import { Run } from '../src/run/run.js';
 import { RNG } from '../src/core/rng.js';
+import { instantiateSkill } from '../src/data/skills.js';
 
 const N = 60;
 const ended = [];
@@ -168,6 +169,56 @@ let ruleProblems = 0;
   console.log(`  paid   0% of the price  ->  refused, node intact`
     + `   ${refused ? 'ok' : 'FAIL'}`);
 }
-if (ruleProblems) console.log(`\n  ${ruleProblems} problem(s) with the pro-rata rule`);
+// --- an upgrade is paid off, not turned away -------------------------------
+//
+// A rank is discrete, so unlike a repair it cannot be *delivered* in part —
+// but it can be *paid for* in part, across visits, and the rank lands on the
+// visit that finishes it. Same promise as the repair: your money is always
+// worth what it is worth.
+console.log('\nAn upgrade is paid off across visits:\n');
+{
+  const run = new Run({ seed: 'layaway', vehicleId: 'hatch' });
+  if (!run.build.skills.find((x) => x.id === 'nitro')) {
+    run.build.addSkill(instantiateSkill('nitro'));
+  }
+  const price = run.upgradeQuote('nitro', 'ram');
+  const step = Math.max(1, Math.ceil(price / 3));
+  let visits = 0;
+  let landed = false;
+  let spent = 0;
+  for (let i = 0; i < 6 && !landed; i++) {
+    run.scrap = step;
+    run.state = 'rest';
+    const before = run.scrap;
+    const r = run.restUpgrade('nitro', 'ram');
+    if (!r.ok) break;
+    visits++;
+    spent += before - run.scrap;
+    landed = !r.partial;
+  }
+  const rank = run.build.skills.find((x) => x.id === 'nitro')?.picks?.ram ?? 0;
+  const exact = spent === price;
+  console.log(`  a ${price} scrap branch, ${step} a visit`
+    + `  ->  landed after ${visits} visits, ${spent} paid`
+    + `   ${landed && rank > 0 && exact ? 'ok' : 'FAIL'}`);
+  if (!landed || rank < 1 || !exact) ruleProblems++;
+
+  // And the pot starts again for the next rank rather than carrying over.
+  const carried = run.upgradePaid('nitro', 'ram');
+  console.log(`  the pot resets for the next rank  ->  ${carried} carried`
+    + `   ${carried === 0 ? 'ok' : 'FAIL'}`);
+  if (carried !== 0) ruleProblems++;
+
+  // Too little to be worth the node: refused, node intact, same as a repair.
+  run.scrap = 1;
+  run.state = 'rest';
+  const tiny = run.restUpgrade('nitro', 'ram');
+  const held = !tiny.ok && run.state === 'rest' && run.scrap === 1;
+  console.log(`  1 scrap against the next rank  ->  refused, node intact, nothing taken`
+    + `   ${held ? 'ok' : 'FAIL'}`);
+  if (!held) ruleProblems++;
+}
+
+if (ruleProblems) console.log(`\n  ${ruleProblems} problem(s) with how part payment works`);
 
 process.exit(ok && !ruleProblems ? 0 : 1);

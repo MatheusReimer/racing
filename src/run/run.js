@@ -408,24 +408,86 @@ export class Run {
     return Math.ceil(rarity * (0.4 + (s.level ?? 1) * 0.18));
   }
 
+  /**
+   * What has already been put toward this upgrade, across earlier visits.
+   *
+   * Held on the skill instance rather than on the run, so it travels with the
+   * skill: trade the skill away and the part-payment goes with it, which is
+   * the honest answer — you paid a mechanic to work on a thing you no longer
+   * own.
+   */
+  upgradePaid(skillId, branchId = null) {
+    const s = this.build.skills.find((x) => x.id === skillId);
+    return s?.paid?.[branchId ?? 'lv'] ?? 0;
+  }
+
   restUpgrade(skillId, branchId = null) {
     const price = this.upgradeQuote(skillId, branchId);
     if (price == null) return { ok: false, reason: 'That work cannot be done.' };
-    // Unlike a repair, this one is all or nothing — half a branch is not a
-    // thing — so it is the one place the garage can turn you away.
-    if (this.scrap < price) return { ok: false, reason: `That costs ${price} scrap.` };
+
+    const s = this.build.skills.find((x) => x.id === skillId);
+    if (!s) return { ok: false, reason: 'That work cannot be done.' };
+
+    // A rank is discrete — there is no half of a branch to fit — so unlike a
+    // repair this cannot be *delivered* in part. What it can do is be paid for
+    // in part: scrap goes onto the job and stays there between visits, and the
+    // rank lands on the visit that finishes paying for it.
+    //
+    // That keeps the one rule the economy runs on — you always get what your
+    // money is worth — without pretending half a branch exists.
+    const key = branchId ?? 'lv';
+    s.paid = s.paid ?? {};
+    const already = s.paid[key] ?? 0;
+    const owed = Math.max(0, price - already);
+    const pay = Math.min(this.scrap, owed);
+    // The same floor a repair has, and for the same reason: the garage is a
+    // whole map node, and spending it to put three scrap onto a forty-scrap
+    // job is worse for the player than being turned away while they can still
+    // go somewhere else.
+    if (owed > 0 && pay < price * 0.05) {
+      return { ok: false, reason: this.scrap > 0
+        ? `${owed} scrap still owed on that. You have ${this.scrap}.`
+        : 'No scrap to put toward it.' };
+    }
+
+    this.scrap -= pay;
+    const paid = already + pay;
+    const label = branchId
+      ? `${s.name}: ${s.branches?.find((x) => x.id === branchId)?.name ?? branchId}`
+      : s.name;
+
+    if (paid < price) {
+      s.paid[key] = paid;
+      this.state = 'map';
+      return {
+        ok: true,
+        partial: true,
+        text: `${pay} scrap onto ${label}. ${price - paid} more and it is yours.`,
+      };
+    }
 
     const ok = this.build.upgradeSkill(skillId, branchId);
-    if (!ok) return { ok: false, reason: 'That work cannot be done.' };
-    this.scrap -= price;
+    if (!ok) {
+      // Refund rather than pocket it: the work could not be done, so it was
+      // never sold. Nothing here has changed the build.
+      this.scrap += pay;
+      return { ok: false, reason: 'That work cannot be done.' };
+    }
+    // The rank is in. The next one down this branch is a new job at a new
+    // price, so the pot starts again rather than carrying over.
+    s.paid[key] = 0;
     this.syncBuild();
     this.state = 'map';
-    const s = this.build.skills.find((x) => x.id === skillId);
-    if (branchId) {
-      const b = s.branches?.find((x) => x.id === branchId);
-      return { ok: true, text: `${s.name}: ${b?.name ?? branchId}. −${price} scrap.` };
-    }
-    return { ok: true, text: `${s.name} is now level ${s.level}. −${price} scrap.` };
+    const now = this.build.skills.find((x) => x.id === skillId) ?? s;
+    const done = branchId
+      ? `${now.name}: ${now.branches?.find((x) => x.id === branchId)?.name ?? branchId}`
+      : `${now.name} is now level ${now.level}`;
+    return {
+      ok: true,
+      text: already > 0
+        ? `${done}. −${pay} scrap, on top of the ${already} already down.`
+        : `${done}. −${pay} scrap.`,
+    };
   }
 
   // --- events --------------------------------------------------------------

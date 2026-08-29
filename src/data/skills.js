@@ -559,7 +559,10 @@ export function instantiateSkill(id, level = 1) {
   // `picks` is how far a skill has gone down each of its branches. Empty for
   // one that has none, which is every skill that has not been converted yet —
   // those keep reading `level` and behave exactly as they did.
-  return { ...def, level, picks: {} };
+  // `picks` is which branches have been taken and how far; `paid` is scrap
+  // already put toward a rank that has not landed yet. Both live on the
+  // instance so they travel with the skill when it is swapped out.
+  return { ...def, level, picks: {}, paid: {} };
 }
 
 /**

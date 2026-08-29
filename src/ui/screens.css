@@ -1038,6 +1038,10 @@
    which is why the row and not just the price carries the offset. */
 .choice:has(.price) { padding-right: calc(var(--s5) + 64px); }
 
+/* A part-paid job carries two numbers, and the longer one sets the width. */
+.choice:has(.part) { padding-right: calc(var(--s5) + 128px); }
+.choice:has(.part) .price { top: calc(50% - 7px); }
+
 .choice .price {
   position: absolute;
   right: calc(var(--s4) + 22px);
@@ -1052,3 +1056,23 @@
 /* Priced out reads differently from used up: one is wait, the other is never. */
 .choice.unaffordable { opacity: 0.5; }
 .choice.unaffordable .price { color: var(--danger); }
+
+/* Part-payment on an upgrade. Under the price it is counting down towards,
+   because the two numbers only mean anything together. */
+.choice .part {
+  position: absolute;
+  right: calc(var(--s4) + 22px);
+  top: calc(50% + 13px);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text-faint);
+}
+
+/* Something you are about to lose by choosing this. Not an error — the choice
+   is legitimate — but it must not be discovered afterwards. */
+.choice .warn {
+  font-size: 11px;
+  color: var(--gold);
+  margin-top: var(--s1);
+}

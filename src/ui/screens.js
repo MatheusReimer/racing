@@ -687,6 +687,14 @@ export class Screens {
       // What it does *now*, at the level it is actually at: the comparison is
       // against the thing you have, not against its entry in a catalogue.
       b.appendChild(el('div', 'det', esc(descOf(s, s.level ?? 1))));
+      // Scrap already put toward a rank on this skill goes with it. Losing 40
+      // scrap of part-paid upgrade to a swap you would not have made is the
+      // kind of thing a player should be told before, not after.
+      const down = Object.values(s.paid ?? {}).reduce((a, v) => a + (v || 0), 0);
+      if (down > 0) {
+        b.appendChild(el('div', 'warn', `${down} scrap already paid toward an upgrade`
+          + ' on this — it goes with it.'));
+      }
       b.onclick = () => onSwap(s.id);
       list.appendChild(b);
     }
@@ -794,11 +802,18 @@ export class Screens {
           b.appendChild(el('div', 'det', br.maxed
             ? 'Nothing more down this road.' : esc(br.desc(br.rank + 1))));
           const price = run.upgradeQuote(s.id, br.id);
-          if (!br.maxed) b.appendChild(el('div', 'price', `${price} scrap`));
-          // Priced out reads differently from used up, and the player needs to
-          // tell them apart at a glance: one is wait, the other is never.
+          const down = run.upgradePaid(s.id, br.id);
+          const owed = Math.max(0, price - down);
+          // The remaining, not the sticker price: an upgrade can be paid off
+          // across visits, so what it costs *you* is what is still owed.
+          if (!br.maxed) b.appendChild(el('div', 'price', `${owed} scrap`));
+          if (!br.maxed && down > 0) {
+            b.appendChild(el('div', 'part', `${down} of ${price} already down`));
+          }
+          // Used up is never; broke is only until the next race, and you can
+          // still put something toward it today.
           if (br.maxed) b.classList.add('disabled');
-          else if (run.scrap < price) { b.classList.add('disabled', 'unaffordable'); }
+          else if (run.scrap <= 0) { b.classList.add('disabled', 'unaffordable'); }
           else b.onclick = () => onUpgrade(s.id, br.id);
           list.appendChild(b);
         }
@@ -810,9 +825,14 @@ export class Screens {
       b.appendChild(el('div', 'lbl', `Upgrade ${s.icon || ''} ${esc(s.name)} → Lv${(s.level ?? 1) + 1}`));
       b.appendChild(el('div', 'det', maxed ? 'Already at maximum.' : esc(descOf(s, (s.level ?? 1) + 1))));
       const price = run.upgradeQuote(s.id);
-      if (!maxed) b.appendChild(el('div', 'price', `${price} scrap`));
+      const down = run.upgradePaid(s.id);
+      const owed = Math.max(0, price - down);
+      if (!maxed) b.appendChild(el('div', 'price', `${owed} scrap`));
+      if (!maxed && down > 0) {
+        b.appendChild(el('div', 'part', `${down} of ${price} already down`));
+      }
       if (maxed) b.classList.add('disabled');
-      else if (run.scrap < price) { b.classList.add('disabled', 'unaffordable'); }
+      else if (run.scrap <= 0) { b.classList.add('disabled', 'unaffordable'); }
       else b.onclick = () => onUpgrade(s.id);
       list.appendChild(b);
     }

@@ -198,10 +198,19 @@ buy, not smaller payouts.** Both missing sinks are now in.
   Durability is worse than being turned away while you can still go elsewhere.
   `tools/economy-probe.mjs` holds the rule at 100/75/50/25% and the refusal.
 
-  A skill upgrade is the exception and stays all-or-nothing — priced from the
-  skill's rarity, rising with each rank down a branch. A rank is discrete and
-  there is no half of one to sell. It refuses for free, which is why the garage
-  needed an exit that costs nothing.
+  A skill upgrade is priced from the skill's rarity, rising with each rank down
+  a branch, and is paid for the same way — with one difference forced by what
+  it is. A rank is discrete: there is no half of a branch to fit. So it cannot
+  be *delivered* in part, but it is *paid for* in part. Scrap goes onto the job
+  and stays there between garage visits, and the rank lands on the visit that
+  finishes paying for it. Then the pot resets, because the next rank is a new
+  job at a new price.
+
+  The pot lives on the skill instance (`s.paid`), not on the run, so it travels
+  with the skill: trade the skill away and the part-payment goes with it. That
+  is the honest answer — you paid a mechanic to work on a thing you no longer
+  own — but it is also a trap if it is discovered afterwards, so the swap
+  screen says what is on a skill before you give it up.
 - **Pits** are in; see below.
 
 Greedy-shopper surplus: **3.6x → 2.7x**, under the target of 3. The probe holds
