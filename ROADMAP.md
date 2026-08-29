@@ -167,6 +167,63 @@ option to weigh.
 
 ---
 
+## Pits: pay time and money, mid-race
+
+A garage, a fuel stop, an armourer — sitting on the circuit rather than between
+races, taking scrap in exchange for putting the car back together.
+
+**Not a pause and not a menu.** A race that stops so you can shop is a race
+that stops: you spend, you resume in the same position, and it cost nothing. A
+pit works in racing games because it costs *time*, and the interesting question
+is whether the seconds are worth it.
+
+**The branches are already the right shape.** A shortcut leaves the racing line
+and rejoins it, has geometry, painted chevrons and warning arrows, and — as
+noted elsewhere here — currently costs nothing and gives nothing. A pit is a
+branch with a service on it: longer or slower than the line it left, and paying
+out at the end.
+
+Steering into one is the consent. You cannot end up in a pit lane by accident
+the way you can drive over a pickup; you have to aim for it, which is what lets
+it take money without ever asking a question at 180 km/h. If the scrap is not
+there, it does what it can afford rather than refusing — a wasted detour is a
+harsh enough punishment for not checking.
+
+The three the game already has the machinery for:
+
+  Fuel      refills Energy, which is what skills spend
+  Garage    repairs Durability, which today only recovers between races
+  Armourer  clears cooldowns, or refunds skill uses
+
+The middle one fixes something real: durability is only recoverable in the
+garage node, so a race that starts badly cannot be salvaged from inside it.
+
+### The problem to solve first, which is structural
+
+**The race does not know the run.** `Race` is constructed with `playerBuild`,
+not with `Run`, and `scrap` lives on `Run` alone. That separation is deliberate
+and it is what makes `tools/balance.mjs` trustworthy: it drives `RaceSim` with
+no renderer, no effects and no run wrapped around it, and it is therefore
+honest about what the game does.
+
+So a pit that charges scrap needs a channel that does not break that. The
+options, and the trade in each:
+
+- **An optional wallet handed to `Race`** (`{ balance, spend }`). Small, and
+  `RaceSim` stays ignorant. But a balance run with no wallet has pits that
+  behave differently from the played game, and the runs stop measuring it.
+- **Scrap modelled inside `RaceSim`**, seeded from the run and read back after.
+  Keeps the balance runs honest, at the cost of putting an economy into the
+  layer that has carefully avoided having one.
+- **Settle after the race.** Simplest, and the decision loses its bite: you
+  cannot overspend if the bill arrives later.
+
+The second is probably right and is the most work. Worth deciding before
+building rather than after, because all three are cheap to write and only one
+of them leaves the balance runs still telling the truth.
+
+---
+
 ## The effects are placeholders and read like it
 
 Everything that happens to a car looks like the same thing happening: a burst
