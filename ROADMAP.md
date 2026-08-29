@@ -7,7 +7,12 @@ and what it will touch, so picking one up does not start from scratch.
 
 ## Damage you can see, at three quarters, a half, and wrecked
 
-**Next.** A car takes damage all race and looks exactly the same doing it. The
+**Started.** The paint half is in: four states, the fraction plumbed from
+`Racer` to the mesh, and `tools/damage-probe.mjs` holding them apart. What is
+left is the geometry half — the hanging bumper, the lifted bonnet, the smoke —
+which is the additive-pieces job described below and has not been touched.
+
+A car takes damage all race and looks exactly the same doing it. The
 number is in the HUD and in the run bar; the machine in front of you is not
 part of the conversation, so a run that is going badly reads as a number going
 down rather than as a car falling apart.

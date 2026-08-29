@@ -126,6 +126,10 @@ export class Race extends RaceSim {
         steer: racer.input.steer,
         // The brake lights need to know, and nothing else was telling them.
         brake: racer.input.brake,
+        // How beaten the car should look. The mesh turns this into one of four
+        // states and only does work when it crosses between them.
+        healthFrac: racer.maxDurability > 0
+          ? racer.durability / racer.maxDurability : 1,
       }, alpha);
     }
 

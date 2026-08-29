@@ -215,6 +215,38 @@ function loft(sections, color, opts = {}) {
 // draw that is to stop asking the lighting. Near black, with just enough blue
 // left in it to read as glass rather than as a hole.
 const HULL_GLASS = 0x070a0f;
+
+// --- damage ---------------------------------------------------------------
+//
+// Three states, and thresholds you can name. A bar sliding down is a number;
+// "it lost a wing at half" is something you remember about a run.
+//
+// The fractions below are of remaining durability, so they read the way the
+// player says them: knocked about at three quarters, in trouble at a half,
+// wrecked at nothing.
+// `paint` is the share of the bodywork that has stopped being paint. Calibrated
+// by rendering the four side by side (`node tools/garage.mjs damage`) rather
+// than by picking round numbers: at 0.48 the half-health car was already mostly
+// bare metal, which is what a wreck should look like and not what half is.
+export const DAMAGE_STATES = [
+  { at: 1.00, paint: 0.00, lamps: 1.00 },   // untouched
+  { at: 0.75, paint: 0.13, lamps: 0.72 },   // been hit
+  { at: 0.50, paint: 0.31, lamps: 0.34 },   // in trouble
+  { at: 0.00, paint: 0.64, lamps: 0.00 },   // wrecked
+];
+
+// Bare metal under lost paint, and the scorch around the worst of it.
+const HULL_PRIMER = 0x6b6560;
+const HULL_SCORCH = 0x322d29;
+
+/** Which of the four states a remaining-durability fraction is in. */
+export function damageLevel(healthFrac) {
+  const h = Number.isFinite(healthFrac) ? healthFrac : 1;
+  for (let i = DAMAGE_STATES.length - 1; i > 0; i--) {
+    if (h <= DAMAGE_STATES[i].at) return i;
+  }
+  return 0;
+}
 const HULL_DARK = 0x15181c;
 const HULL_CHROME = 0xb9bec6;
 // Lamp colours. Headlights are warm rather than white — a cold headlight reads
@@ -450,6 +482,7 @@ function hullShared(hull) {
   }
 
   if (!shared.bodyClasses) shared.bodyClasses = Uint8Array.from(bodyCls);
+  shared.damageRank = damageRanks(shared, hull);
 
   shared.lampFront = front.length / 3 >= MIN_FACES
     ? cut(front) : loose(synthLamps(hull, 1, 1, 1, true));
@@ -457,6 +490,123 @@ function hullShared(hull) {
     ? cut(rear) : loose(synthLamps(hull, 1, 1, 1, false));
   hullCache.set(hull, shared);
   return shared;
+}
+
+/**
+ * The order the panels lose their paint in, per triangle, once per reference.
+ *
+ * Not random. A car is hit at its corners and along its flanks, and hardly ever
+ * on the roof, so the rank is mostly *where a panel is* with enough hash mixed
+ * in to speckle the boundary — a clean band of primer across a wing reads as a
+ * decal, and the point is that it reads as damage.
+ *
+ * Shared with every car built from this reference, like the positions are: it
+ * depends on the geometry and not on the paint, and recomputing it per car
+ * would undo the whole reason `hullShared` exists.
+ */
+function damageRanks(shared, hull) {
+  const pos = shared.position.array;
+  const tris = shared.bodyClasses.length;
+  const rank = new Float32Array(tris);
+
+  let maxX = 1e-6, maxZ = 1e-6, minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < pos.length; i += 3) {
+    if (Math.abs(pos[i]) > maxX) maxX = Math.abs(pos[i]);
+    if (Math.abs(pos[i + 2]) > maxZ) maxZ = Math.abs(pos[i + 2]);
+    if (pos[i + 1] < minY) minY = pos[i + 1];
+    if (pos[i + 1] > maxY) maxY = pos[i + 1];
+  }
+  const height = Math.max(1e-6, maxY - minY);
+
+  for (let t = 0; t < tris; t++) {
+    let cx = 0, cy = 0, cz = 0;
+    for (let k = 0; k < 3; k++) {
+      const o = (t * 3 + k) * 3;
+      cx += pos[o]; cy += pos[o + 1]; cz += pos[o + 2];
+    }
+    cx /= 3; cy /= 3; cz /= 3;
+
+    // Exposure: 1 at a corner of the car, 0 in the middle of the roof.
+    const lateral = Math.abs(cx) / maxX;
+    const longitudinal = Math.abs(cz) / maxZ;
+    const low = 1 - (cy - minY) / height;
+    const exposure = Math.max(lateral, longitudinal) * 0.72 + low * 0.28;
+
+    // A cheap hash of the centroid, so the boundary is speckled rather than a
+    // contour line, and so it is the same speckle every time this car is built.
+    const h = Math.sin(cx * 12.9898 + cy * 78.233 + cz * 37.719) * 43758.5453;
+    const noise = h - Math.floor(h);
+
+    rank[t] = 1 - Math.min(1, exposure * 0.75 + noise * 0.25);
+  }
+
+  // Turn the score into a quantile of painted *area*, over the triangles that
+  // can lose paint.
+  //
+  // Two things this fixes. A raw threshold is a threshold on a score whose
+  // distribution piles up in the middle — two variables added together — so
+  // `paint: 0.13` took a tenth of a per cent of one car's body and a twentieth
+  // of another's. And a quantile by *count* is not what an eye reads: the
+  // decimator spends its triangles where the detail is, so a sill or a grille
+  // is hundreds of small ones and a door skin is a dozen large ones. By count,
+  // two thirds of a wrecked car's triangles could lose their paint and the car
+  // still look red. By area the constant means what its name says: this much
+  // of the bodywork you can see has stopped being paint.
+  const paintable = [];
+  let total = 0;
+  for (let t = 0; t < tris; t++) {
+    if (shared.bodyClasses[t] !== 0 && shared.bodyClasses[t] !== 3) continue;
+    const o = t * 9;
+    const e1x = pos[o + 3] - pos[o], e1y = pos[o + 4] - pos[o + 1], e1z = pos[o + 5] - pos[o + 2];
+    const e2x = pos[o + 6] - pos[o], e2y = pos[o + 7] - pos[o + 1], e2z = pos[o + 8] - pos[o + 2];
+    const area = Math.hypot(
+      e1y * e2z - e1z * e2y,
+      e1z * e2x - e1x * e2z,
+      e1x * e2y - e1y * e2x,
+    ) / 2;
+    paintable.push({ t, area });
+    total += area;
+  }
+  paintable.sort((a, b) => rank[a.t] - rank[b.t]);
+
+  const out = new Float32Array(tris).fill(1);
+  let run = 0;
+  for (const { t, area } of paintable) {
+    run += area;
+    out[t] = total > 0 ? run / total : 0;
+  }
+  return out;
+}
+
+/**
+ * Fill a car's colour buffer, with `damage` of its paint gone.
+ *
+ * Colour is the one thing that is per-car — positions and normals are shared —
+ * so this is where damage can be shown for free. Moving a vertex would end the
+ * sharing and with it the reason a car builds in seven milliseconds instead of
+ * twenty-four, which is why dents are a later, additive job and this is not.
+ */
+function paintHull(shared, byClass, col, damage = 0) {
+  const cls = shared.bodyClasses;
+  const rank = shared.damageRank;
+  const primer = new THREE.Color(HULL_PRIMER);
+  const scorch = new THREE.Color(HULL_SCORCH);
+
+  for (let t = 0; t < cls.length; t++) {
+    let c = byClass[cls[t]] ?? byClass[0];
+    if (damage > 0 && rank && (cls[t] === 0 || cls[t] === 3)) {
+      const r = rank[t];
+      // The worst third of what has gone is burnt rather than merely bare.
+      if (r < damage * 0.34) c = scorch;
+      else if (r < damage) c = primer;
+    }
+    for (let k = 0; k < 3; k++) {
+      const o = t * 9 + k * 3;
+      col[o] = c.r;
+      col[o + 1] = c.g;
+      col[o + 2] = c.b;
+    }
+  }
 }
 
 /**
@@ -479,17 +629,8 @@ function hullGeometry(hull, L, W, color, accent) {
     .map((c) => new THREE.Color(c));
 
   const shared = hullShared(hull);
-  const tris = shared.bodyClasses.length;
-  const col = new Float32Array(tris * 9);
-  for (let t = 0; t < tris; t++) {
-    const c = byClass[shared.bodyClasses[t]] ?? byClass[0];
-    for (let k = 0; k < 3; k++) {
-      const o = t * 9 + k * 3;
-      col[o] = c.r;
-      col[o + 1] = c.g;
-      col[o + 2] = c.b;
-    }
-  }
+  const col = new Float32Array(shared.bodyClasses.length * 9);
+  paintHull(shared, byClass, col, 0);
 
   // Its own geometry object, pointing at the shared buffers. Only the colours
   // belong to this car.
@@ -503,6 +644,11 @@ function hullGeometry(hull, L, W, color, accent) {
     glass: shared.glass,
     lampFront: shared.lampFront,
     lampRear: shared.lampRear,
+    // What `setDamage` needs to repaint this car without rebuilding it.
+    repaint: (damage) => {
+      paintHull(shared, byClass, col, damage);
+      body.getAttribute('color').needsUpdate = true;
+    },
     // Size is a scale on the node rather than baked into the vertices, which is
     // what lets one set of buffers serve a car the build stretched and one it
     // did not.
@@ -1492,6 +1638,11 @@ export class VehicleMesh {
       ? new THREE.Mesh(hullLampGeo.glass, this.hullGlassMat) : null;
     if (this.hullGlass) attach(this.hullGlass);
 
+    // Damage. Repainting walks every triangle, so it happens when the state
+    // changes and not per frame — which is three times in a bad race.
+    this._repaint = hullLampGeo?.repaint ?? null;
+    this._damageLevel = 0;
+
     this.lampFrontMat = new THREE.MeshBasicMaterial({ color: LAMP_HEAD, toneMapped: false });
     this.lampRearMat = new THREE.MeshBasicMaterial({ color: LAMP_TAIL, toneMapped: false });
     this.lampFront = hullLampGeo?.lampFront
@@ -1689,8 +1840,29 @@ export class VehicleMesh {
    * @param body   VehicleBody
    * @param state  { heatPct, energyFrac, boosting, steer }
    */
+  /**
+   * Show the car as `healthFrac` of its durability, in four named states.
+   *
+   * Repainting is O(triangles) and a car is fifty thousand of them, so this
+   * only does the work when the state index moves. It is idempotent: calling
+   * it every frame with an unchanged fraction costs one comparison.
+   */
+  setDamage(healthFrac) {
+    const level = damageLevel(healthFrac);
+    if (level === this._damageLevel) return;
+    this._damageLevel = level;
+    const st = DAMAGE_STATES[level];
+
+    this._repaint?.(st.paint);
+    // Headlights dim, then go out. The rear lamps are left to the brake logic,
+    // which writes their colour every frame and would undo anything set here.
+    this.lampFrontMat?.color.setHex(LAMP_HEAD).multiplyScalar(st.lamps);
+    if (this.lampFront) this.lampFront.visible = st.lamps > 0;
+  }
+
   update(dt, body, state = {}, alpha = 1) {
     const g = this.group;
+    if (state.healthFrac !== undefined) this.setDamage(state.healthFrac);
 
     // Drawn between the last two simulated poses, not at the newest one.
     //

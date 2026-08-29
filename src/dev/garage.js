@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { VehicleMesh, visualProfile } from '../vehicle/chassis.js';
+import { VehicleMesh, visualProfile, DAMAGE_STATES } from '../vehicle/chassis.js';
 import { Build } from '../build/build.js';
 import { VEHICLES } from '../data/vehicles.js';
 import { PART_BY_ID } from '../data/parts.js';
@@ -23,6 +23,22 @@ const CASES = {
     const build = new Build(v.id);
     const def = opts.bodyType ? { ...v, bodyType: opts.bodyType } : v;
     return [{ label: def.name, build, def }];
+  },
+
+  // One car in each damage state, side by side.
+  //
+  // The states are meant to be told apart at a glance from a chase camera, and
+  // the only way to know whether they are is to see them together. `VEHICLE`
+  // picks which car wears them.
+  damage: (opts = {}) => {
+    const v = VEHICLES.find((x) => x.id === opts.vehicle) || VEHICLES[2];
+    return DAMAGE_STATES.map((st, i) => ({
+      label: `${v.name} · ${['untouched', 'hit', 'in trouble', 'wrecked'][i]}`,
+      build: new Build(v.id),
+      def: v,
+      // Just inside the state, so this is the car at that threshold.
+      health: i === 0 ? 1 : st.at - 0.001,
+    }));
   },
 
   vehicles: () => VEHICLES.map((v) => {
@@ -82,12 +98,16 @@ export function showGarage(game, mode = 'vehicles', aspect = 1400 / 620, opts = 
   const meshes = [];
   const rows = [];
   const spacing = 8.6;
+  // Three across for six cars, four for four. A fixed three left a run of four
+  // cases with one orphan on a second row, half the size and behind the rest,
+  // which is not a comparison.
+  const cols = specs.length === 4 ? 4 : 3;
 
   specs.forEach((spec, i) => {
     const profile = visualProfile(spec.build.stats.all(), spec.build.tags, spec.def);
     const mesh = new VehicleMesh(profile, { shadows: false });
-    const col = i % 3;
-    const row = Math.floor(i / 3);
+    const col = i % cols;
+    const row = Math.floor(i / cols);
 
     // A static pose: three-quarter view, front wheels turned, so the nose,
     // flank, wheel detail and any wing are all visible at once.
@@ -97,6 +117,8 @@ export function showGarage(game, mode = 'vehicles', aspect = 1400 / 620, opts = 
       drifting: false, driftQuality: 0, boostTimer: 0,
       p: { maxSpeed: 46 },
     }, { heatPct: 0, steer: -0.5 });
+
+    if (spec.health !== undefined) mesh.setDamage(spec.health);
 
     if (mode === 'single') {
       mesh.group.position.set(0, 0, 0);
@@ -109,7 +131,7 @@ export function showGarage(game, mode = 'vehicles', aspect = 1400 / 620, opts = 
       if (opts.hideTrim) mesh.trimMesh.visible = false;
       if (opts.hideUnderglow) mesh.underglow.visible = false;
     } else {
-      mesh.group.position.set((col - 1) * spacing, 0, row * -11.0);
+      mesh.group.position.set((col - (cols - 1) / 2) * spacing, 0, row * -11.0);
       mesh.group.rotation.set(0, Math.PI * 0.82, 0);
     }
     scene.add(mesh.group);
@@ -140,7 +162,10 @@ export function showGarage(game, mode = 'vehicles', aspect = 1400 / 620, opts = 
     cam.position.set(4.2, h, 5.6);
     cam.lookAt(0, opts.aim ?? 0.55, 0);
   } else {
-    cam.position.set(2.6, 3.4, 17.0);
+    // Backed off by however much wider than three the row is, so a four-across
+    // comparison is not two cars and two halves.
+    const pull = 1 + Math.max(0, cols - 3) * 0.34;
+    cam.position.set(2.6 * pull, 3.4 * pull, 17.0 * pull);
     cam.lookAt(0.2, 0.70, -5.0);
   }
 
