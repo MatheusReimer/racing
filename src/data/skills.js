@@ -26,21 +26,65 @@ export const SKILLS = [
     cost: 18,
     cooldown: 6,
     maxLevel: 5,
-    desc: (lv) => `Instant boost to ${Math.round((0.35 + lv * 0.05) * 100)}% over top speed for ${(1.6 + lv * 0.25).toFixed(1)}s.`
-      + (lv >= 3 ? ' Purges Frozen and Oiled.' : '')
-      + (lv >= 5 ? ' Ramming while boosting deals double Impact.' : ''),
+    // Three ways to be a Nitro. The shove and the purge used to arrive on
+    // their own at levels 5 and 3; now they are things given up for each other.
+    branches: [
+      {
+        id: 'surge',
+        name: 'Surge',
+        max: 2,
+        desc: (r) => `+${r * 8}% boost and +${(r * 0.5).toFixed(1)}s of it.`,
+      },
+      {
+        id: 'purge',
+        name: 'Purge',
+        max: 2,
+        desc: (r) => (r >= 2
+          ? 'Clears Frozen and Oiled, and refuses them for 4s.'
+          : 'Clears Frozen and Oiled.'),
+      },
+      {
+        id: 'ram',
+        name: 'Battering Ram',
+        max: 2,
+        // Two and three, and nothing about taking less yourself: that would
+        // have meant a second thing to wire, and a described effect nobody
+        // implemented is exactly what this branch replaced.
+        desc: (r) => `Ramming while boosting deals ${r >= 2 ? 'triple' : 'double'} Impact.`,
+      },
+    ],
+    desc(lv, skill) {
+      const surge = rankOf(skill, 'surge');
+      const power = Math.round((0.35 + lv * 0.05 + surge * 0.08) * 100);
+      const time = (1.6 + lv * 0.25 + surge * 0.5).toFixed(1);
+      let out = `Instant boost to ${power}% over top speed for ${time}s.`;
+      // Only what has actually been chosen. A description that lists what a
+      // skill *could* become is a catalogue entry, and this is a thing you own.
+      for (const b of branchesOf(skill)) {
+        if (b.rank > 0 && b.id !== 'surge') out += ` ${b.desc(b.rank)}`;
+      }
+      return out;
+    },
     fire(ctx) {
-      const { racer, level, combat } = ctx;
+      const { racer, level, combat, skill } = ctx;
+      const surge = rankOf(skill, 'surge');
+      const secs = 1.6 + level * 0.25 + surge * 0.5;
       racer.body.applyBoost(
-        (0.35 + level * 0.05) * racer.build.stats.mod('boostPower'),
-        1.6 + level * 0.25,
+        (0.35 + level * 0.05 + surge * 0.08) * racer.build.stats.mod('boostPower'),
+        secs,
       );
       racer.addHeat(6);
-      if (level >= 3 && racer.statuses) {
+      const purge = rankOf(skill, 'purge');
+      if (purge > 0 && racer.statuses) {
         racer.statuses = racer.statuses.filter((s) => s.id !== 'frozen' && s.id !== 'oiled');
         racer.body.gripPenalty = 1;
+        if (purge >= 2) racer._purgeUntil = combat.time + 4;
       }
-      if (level >= 5) racer._nitroRamUntil = combat.time + 1.6 + level * 0.25;
+      const ram = rankOf(skill, 'ram');
+      if (ram > 0) {
+        racer._nitroRamUntil = combat.time + secs;
+        racer._nitroRamRank = ram;
+      }
       racer.build.fire('onBoost', { racer, race: ctx.race, source: 'nitro' });
     },
   },
@@ -512,5 +556,28 @@ export function skillById(id) {
 export function instantiateSkill(id, level = 1) {
   const def = SKILL_BY_ID[id];
   if (!def) throw new Error(`unknown skill: ${id}`);
-  return { ...def, level };
+  // `picks` is how far a skill has gone down each of its branches. Empty for
+  // one that has none, which is every skill that has not been converted yet —
+  // those keep reading `level` and behave exactly as they did.
+  return { ...def, level, picks: {} };
+}
+
+/**
+ * How far a skill has gone down one branch.
+ *
+ * The replacement for `level >= 3`. A level is a number that goes up on its
+ * own; a rank is one the player chose over two others, which is the whole
+ * point of the change.
+ */
+export function rankOf(skill, branchId) {
+  return skill?.picks?.[branchId] ?? 0;
+}
+
+/** Every branch, with what the player has put into it. */
+export function branchesOf(skill) {
+  return (skill?.branches ?? []).map((b) => ({
+    ...b,
+    rank: rankOf(skill, b.id),
+    maxed: rankOf(skill, b.id) >= (b.max ?? 2),
+  }));
 }

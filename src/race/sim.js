@@ -545,6 +545,9 @@ export class RaceSim {
       race: this,
       combat: this.combat,
       level: skill.level ?? 1,
+      // The instance, not just its level: a branched skill needs to know which
+      // branches were taken, and only the instance carries that.
+      skill,
       skill,
     };
     const fired = skill.fire(ctx);
@@ -1157,6 +1160,16 @@ export class RaceSim {
     const facing = clamp01(ab.forwardX * nx + ab.forwardZ * nz);
     const impact = attacker.build.physics.impactForce;
     let dmg = (approach - 3) * 1.3 * impact * (0.4 + facing * 0.9);
+
+    // Ramming under boost, where a skill has bought it.
+    //
+    // Nitro has set `_nitroRamUntil` since it was written and nothing has ever
+    // read it — "ramming while boosting deals double Impact" was in the
+    // description, in the level table, and nowhere in the simulation. Now the
+    // Battering Ram branch pays for it, it had better happen.
+    const ramRank = (attacker._nitroRamUntil ?? 0) > this.time
+      ? (attacker._nitroRamRank ?? 1) : 0;
+    if (ramRank > 0) dmg *= ramRank >= 2 ? 3 : 2;
 
     const ctx = {
       racer: attacker, race: this, target: victim, kind: 'ram',

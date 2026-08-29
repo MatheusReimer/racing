@@ -94,6 +94,27 @@ Still open here: the garage cannot drop a skill freely, only the reward screen
 can force the question. That is the natural place for "I want this gone" as
 opposed to "I want that instead".
 
+### 1b. Skill trees — the mechanism is in, one skill converted
+
+A skill may declare `branches`, each with a rank cap. The garage offers the
+branches instead of a level; finding another copy still raises the level. So
+finding one again makes it stronger and working on it makes it *specific*,
+which are different things and now read as different things.
+
+A skill without branches behaves exactly as before, which is what lets the
+other fourteen be converted one at a time instead of in one commit.
+
+Nitro is converted, as the worked example: Surge (more boost, longer), Purge
+(clears Frozen and Oiled, then refuses them) and Battering Ram (double, then
+triple Impact while boosting). Those last two used to arrive on their own at
+levels 3 and 5; they are now given up for each other.
+
+Left to do: the other fourteen. Most already have two or three distinct
+qualitative effects buried in `desc(lv)` and `level >= N` checks — 31 of those
+checks across the file — so the content largely exists and the work is
+restructuring rather than invention. Banana and a couple of others have only
+two, and will need a third written.
+
 ### 2. Affinity, not fixed pools
 
 A heavy car should reach for blunt things and a precise one for precise things

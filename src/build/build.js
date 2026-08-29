@@ -97,7 +97,7 @@ export class Build {
     if (existing) {
       existing.level = Math.min(existing.maxLevel ?? 5, (existing.level ?? 1) + 1);
     } else {
-      this.skills.push({ ...skill, level: skill.level ?? 1 });
+      this.skills.push({ ...skill, level: skill.level ?? 1, picks: skill.picks ?? {} });
     }
     this._dirty = true;
     this.recompute();
@@ -120,11 +120,32 @@ export class Build {
     return true;
   }
 
-  upgradeSkill(skillId) {
+  /**
+   * Work on a skill in the garage.
+   *
+   * For a skill with branches this is a *choice*: `branchId` says which one,
+   * and the level does not move — levels come from finding another of the same
+   * skill, which is a different thing happening. Finding one again makes it
+   * stronger; working on it makes it specific.
+   *
+   * For a skill without branches — everything not yet converted — it is the
+   * plain level bump it always was.
+   */
+  upgradeSkill(skillId, branchId = null) {
     const s = this.skills.find((x) => x.id === skillId);
     if (!s) return false;
-    if ((s.level ?? 1) >= (s.maxLevel ?? 5)) return false;
-    s.level = (s.level ?? 1) + 1;
+
+    if (s.branches?.length) {
+      const branch = s.branches.find((b) => b.id === branchId);
+      if (!branch) return false;
+      const rank = s.picks?.[branchId] ?? 0;
+      if (rank >= (branch.max ?? 2)) return false;
+      s.picks = { ...s.picks, [branchId]: rank + 1 };
+    } else {
+      if ((s.level ?? 1) >= (s.maxLevel ?? 5)) return false;
+      s.level = (s.level ?? 1) + 1;
+    }
+
     this._dirty = true;
     this.recompute();
     return true;

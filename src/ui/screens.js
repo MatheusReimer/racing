@@ -6,6 +6,7 @@ import { SKILL_BY_ID } from '../data/skills.js';
 import { Build } from '../build/build.js';
 import { previewTrack } from '../track/preview.js';
 import { COSMETICS, CRATE_RARITY } from '../data/cosmetics.js';
+import { branchesOf } from '../data/skills.js';
 import { clamp01 } from '../core/math.js';
 
 // Every screen that is not the in-race HUD.
@@ -26,6 +27,16 @@ const el = (tag, cls, html) => {
   if (html != null) n.innerHTML = html;
   return n;
 };
+
+/**
+ * What a skill does, as the player's copy of it does it.
+ *
+ * A branched skill's description depends on which branches were taken, so it
+ * needs the instance and not only a level. Ones without branches never look at
+ * the second argument, which is what lets both kinds sit in the same list.
+ */
+const descOf = (skill, level) => (typeof skill.desc === 'function'
+  ? skill.desc(level ?? skill.level ?? 1, skill) : (skill.desc ?? ''));
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -663,7 +674,7 @@ export class Screens {
       b.appendChild(el('div', 'lbl', `${s.icon || ''} ${esc(s.name)} — Lv${s.level ?? 1}`));
       // What it does *now*, at the level it is actually at: the comparison is
       // against the thing you have, not against its entry in a catalogue.
-      b.appendChild(el('div', 'det', esc(s.desc(s.level ?? 1))));
+      b.appendChild(el('div', 'det', esc(descOf(s, s.level ?? 1))));
       b.onclick = () => onSwap(s.id);
       list.appendChild(b);
     }
@@ -734,10 +745,27 @@ export class Screens {
     list.appendChild(repair);
 
     for (const s of run.build.skills) {
+      // A skill with branches offers its branches; one without offers a level,
+      // which is what every skill did before any of them had branches.
+      if (s.branches?.length) {
+        for (const br of branchesOf(s)) {
+          const b = el('button', 'choice');
+          b.appendChild(el('div', 'lbl',
+            `${s.icon || ''} ${esc(s.name)} — ${esc(br.name)}${br.rank ? ` ${br.rank + 1}` : ''}`));
+          // What this pick would give, not what the branch is in the abstract.
+          b.appendChild(el('div', 'det', br.maxed
+            ? 'Nothing more down this road.' : esc(br.desc(br.rank + 1))));
+          if (br.maxed) b.classList.add('disabled');
+          else b.onclick = () => onUpgrade(s.id, br.id);
+          list.appendChild(b);
+        }
+        continue;
+      }
+
       const maxed = (s.level ?? 1) >= (s.maxLevel ?? 5);
       const b = el('button', 'choice');
       b.appendChild(el('div', 'lbl', `Upgrade ${s.icon || ''} ${esc(s.name)} → Lv${(s.level ?? 1) + 1}`));
-      b.appendChild(el('div', 'det', maxed ? 'Already at maximum.' : esc(s.desc((s.level ?? 1) + 1))));
+      b.appendChild(el('div', 'det', maxed ? 'Already at maximum.' : esc(descOf(s, (s.level ?? 1) + 1))));
       if (maxed) b.classList.add('disabled');
       else b.onclick = () => onUpgrade(s.id);
       list.appendChild(b);

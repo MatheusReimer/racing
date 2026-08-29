@@ -299,12 +299,16 @@ export class Run {
     return { ok: true, text: `Repaired ${Math.round(healed)} Durability.` };
   }
 
-  restUpgrade(skillId) {
-    const ok = this.build.upgradeSkill(skillId);
-    if (!ok) return { ok: false, reason: 'That skill is already at maximum.' };
+  restUpgrade(skillId, branchId = null) {
+    const ok = this.build.upgradeSkill(skillId, branchId);
+    if (!ok) return { ok: false, reason: 'That work cannot be done.' };
     this.syncBuild();
     this.state = 'map';
     const s = this.build.skills.find((x) => x.id === skillId);
+    if (branchId) {
+      const b = s.branches?.find((x) => x.id === branchId);
+      return { ok: true, text: `${s.name}: ${b?.name ?? branchId}.` };
+    }
     return { ok: true, text: `${s.name} is now level ${s.level}.` };
   }
 

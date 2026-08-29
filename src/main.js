@@ -247,8 +247,8 @@ class Game {
         this.screens.toast(r.text);
         this.showMap();
       },
-      onUpgrade: (id) => {
-        const r = this.run.restUpgrade(id);
+      onUpgrade: (id, branchId) => {
+        const r = this.run.restUpgrade(id, branchId);
         this.screens.toast(r.ok ? r.text : r.reason);
         this.showMap();
       },
