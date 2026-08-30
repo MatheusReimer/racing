@@ -165,7 +165,7 @@ export function showGarage(game, mode = 'vehicles', aspect = 1400 / 620, opts = 
       mesh.group.rotation.set(0, opts.yaw ?? Math.PI * 0.78, 0);
       // Optionally strip the painted shell so whatever sits underneath the car
       // is visible on its own.
-      if (opts.hideBody) mesh.bodyMesh.visible = false;
+      if (opts.hideBody) for (const m of mesh.bodyParts) m.visible = false;
       if (opts.hideWheels) for (const w of mesh.wheels) w.pivot.visible = false;
       if (opts.hideGlass && mesh.glassMesh) mesh.glassMesh.visible = false;
       if (opts.hideTrim) mesh.trimMesh.visible = false;

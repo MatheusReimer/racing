@@ -216,8 +216,8 @@ let dragged = false;
 let hover = null;
 
 /** Only the hull's own meshes. A hit on a wheel is not a statement about a hull. */
-const targets = () => [mesh?.bodyMesh, mesh?.hullGlass, mesh?.lampFront, mesh?.lampRear]
-  .filter(Boolean);
+const targets = () => [...(mesh?.bodyParts ?? []), mesh?.hullGlass,
+  mesh?.lampFront, mesh?.lampRear].filter(Boolean);
 
 /**
  * Where on the car the pointer is, in the body's own coordinates.

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { HULLS, VOX } from '../data/bodies/index.js';
-import { voxGeometry } from './voxmesh.js';
+import { voxGeometry, VoxBody } from './voxmesh.js';
 import { clamp, clamp01, lerp, wrapAngle, angleDelta } from '../core/math.js';
 import { MARKS, applyMarks } from '../data/bodies/marks.js';
 
@@ -1394,11 +1394,36 @@ function paintHull(shared, byClass, col, damage = 0) {
  * bake marked as bodywork — see `voxmesh.js`.
  */
 function voxBodyGeometry(vox, L, W, color) {
-  const geo = voxGeometry(vox, { body: new THREE.Color(color) });
-  geo.computeBoundingBox();
-  const b = geo.boundingBox;
+  // A private copy of the grid: a chipped car must not take cells off every
+  // other car of the same body type, and `VOX` is shared by all of them.
+  const own = { ...vox, at: Uint16Array.from(vox.at) };
+
+  // Bounds off the grid rather than off a mesh. The body is meshed in slabs by
+  // `VoxBody`, and building a whole-car geometry here purely to read its
+  // bounding box would mesh every car twice — the box of the occupied cells is
+  // the same box, and finding it is one walk of a byte array.
+  let lo = [own.nx, own.ny, own.nz];
+  let hi = [-1, -1, -1];
+  for (let z = 0; z < own.nz; z++) {
+    for (let y = 0; y < own.ny; y++) {
+      for (let x = 0; x < own.nx; x++) {
+        if (!own.at[x + own.nx * (y + own.ny * z)]) continue;
+        if (x < lo[0]) lo[0] = x; if (x > hi[0]) hi[0] = x;
+        if (y < lo[1]) lo[1] = y; if (y > hi[1]) hi[1] = y;
+        if (z < lo[2]) lo[2] = z; if (z > hi[2]) hi[2] = z;
+      }
+    }
+  }
+  const o = [own.ox, own.oy, own.oz];
+  const b = {
+    min: { x: o[0] + lo[0] * own.step, y: o[1] + lo[1] * own.step, z: o[2] + lo[2] * own.step },
+    max: { x: o[0] + (hi[0] + 1) * own.step, y: o[1] + (hi[1] + 1) * own.step,
+      z: o[2] + (hi[2] + 1) * own.step },
+  };
+
   return {
-    body: geo,
+    // No whole-car geometry: `VoxBody` owns the meshes, one per slab.
+    body: null,
     glass: null,
     lampFront: null,
     lampRear: null,
@@ -1410,9 +1435,10 @@ function voxBodyGeometry(vox, L, W, color) {
       minX: b.min.x, maxX: b.max.x, minY: b.min.y, maxY: b.max.y,
       minZ: b.min.z, maxZ: b.max.z,
     },
-    // Damage repaints a decimated hull triangle by triangle. A voxel body will
-    // lose cells instead, which is a better answer and a later one.
+    // Damage repaints a decimated hull triangle by triangle. A voxel body
+    // loses cells instead, which is the better answer — see `chipAt`.
     repaint: null,
+    voxSource: own,
   };
 }
 
@@ -2428,9 +2454,23 @@ export class VehicleMesh {
       (this.hullRoot ?? this.chassis).add(m);
     };
 
-    this.bodyMesh = new THREE.Mesh(this.bodyGeo, this.bodyMat);
-    this.bodyMesh.castShadow = !!quality?.shadows;
-    attach(this.bodyMesh);
+    // A voxel body is meshed in slabs so a hit can rebuild one of them rather
+    // than the car — see `VoxBody`. `bodyMesh` stays pointed at the first slab
+    // so everything that reaches for it, from the garage's hide-body switch to
+    // the shadow flag, still finds a mesh.
+    if (vox && hullLampGeo?.voxSource) {
+      this.voxBody = new VoxBody(hullLampGeo.voxSource, (geo) => {
+        const m = new THREE.Mesh(geo, this.bodyMat);
+        m.castShadow = !!quality?.shadows;
+        return m;
+      }, { body: new THREE.Color(body) });
+      this.bodyMesh = this.voxBody.meshes[0];
+      attach(this.voxBody.group);
+    } else {
+      this.bodyMesh = new THREE.Mesh(this.bodyGeo, this.bodyMat);
+      this.bodyMesh.castShadow = !!quality?.shadows;
+      attach(this.bodyMesh);
+    }
 
     this.glassGeo = mergeGeometries(glass);
     this.glassGeo?.translate(0, -wheelR, 0);
@@ -2918,6 +2958,48 @@ export class VehicleMesh {
     return this;
   }
 
+  /**
+   * Every mesh the bodywork is drawn with.
+   *
+   * A voxel body is eight slabs, a generated one is a single mesh, and anything
+   * that wants to hide, measure or raycast "the body" wants all of them.
+   */
+  get bodyParts() {
+    return this.voxBody ? this.voxBody.meshes.filter(Boolean)
+      : (this.bodyMesh ? [this.bodyMesh] : []);
+  }
+
+  /**
+   * Knock cells out of the body where something hit it.
+   *
+   * Takes a point in world space and gives back the cubes that came off, in
+   * world space, ready to be thrown. Null when this car is not a voxel body,
+   * which is the whole of the check a caller needs to make.
+   *
+   * @param radius  metres of damage; a scrape takes a few cells, a head-on
+   *                takes a fistful
+   */
+  chipAt(x, y, z, radius = 0.22, max = 20) {
+    if (!this.voxBody) return null;
+    const root = this.hullRoot ?? this.group;
+    root.updateMatrixWorld();
+    const local = root.worldToLocal(new THREE.Vector3(x, y, z));
+    const cells = this.voxBody.chip(local.x, local.y, local.z, radius, max);
+    if (!cells.length) return null;
+    this.voxBody.flush();
+    // Back into the world, where the debris lives: a piece that has left the
+    // car does not turn with it.
+    const at = new THREE.Vector3();
+    const scale = root.getWorldScale(new THREE.Vector3());
+    for (const c of cells) {
+      at.set(c.x, c.y, c.z);
+      root.localToWorld(at);
+      c.x = at.x; c.y = at.y; c.z = at.z;
+      c.size *= (scale.x + scale.y + scale.z) / 3;
+    }
+    return cells;
+  }
+
   dispose() {
     this.cabinMat?.dispose();
     this.cabin?.geometry.dispose();
@@ -2942,6 +3024,8 @@ export class VehicleMesh {
     if (!shared) {
       own.push(this.bodyGeo, this.lampFront?.geometry, this.lampRear?.geometry);
     } else {
+      // Slabs are this car's own, cut from this car's own copy of the grid.
+      this.voxBody?.dispose();
       // Its own container, holding borrowed attributes: disposing the container
       // is right and does not touch them.
       this.bodyGeo?.deleteAttribute('position');

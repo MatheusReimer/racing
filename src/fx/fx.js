@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ParticleSystem, TireMarks, PRESETS } from './particles.js';
+import { Debris } from './debris.js';
 import { clamp01, lerp } from '../core/math.js';
 import { DAMAGE_STATES, damageLevel } from '../vehicle/chassis.js';
 
@@ -35,6 +36,10 @@ export class FX {
       clear: () => { this.additive.clear(); this.alphaCloud.clear(); },
     };
     this.marks = new TireMarks(scene, quality.tireMarkSegments ?? 700);
+    // Cells knocked off a voxel body, tumbling. These are the car's own cubes
+    // in the car's own colours, not a generic spark, which is the whole reason
+    // they read as the car coming apart rather than as an effect playing.
+    this.debris = new Debris(scene, Math.round((quality.particleBudget ?? 1200) * 0.25));
     this.unsubscribe = [];
 
     // Live projectile and trap markers, keyed by the simulation object's id.
@@ -58,6 +63,10 @@ export class FX {
       if (e.strength > 9) {
         this.particles.emit('smoke', e.x, e.y + 0.3, e.z, 5, { speed: 2.5 });
       }
+    });
+
+    on('fx:chips', (e) => {
+      this.debris.burst(e.cells, e.vx, e.vy, e.vz);
     });
 
     on('fx:explosion', (e) => {
@@ -164,8 +173,9 @@ export class FX {
    * @param racers  every live competitor
    * @param combat  the CombatSystem, for live projectile positions
    */
-  update(dt, racers, combat, cameraPos = null) {
+  update(dt, racers, combat, cameraPos = null, groundAt = null) {
     this.particles.update(dt);
+    this.debris.update(dt, groundAt);
 
     for (const r of racers) {
       if (!r.alive) continue;
@@ -325,6 +335,7 @@ export class FX {
 
   clear() {
     this.particles.clear();
+    this.debris.clear();
     this.marks.clear();
     for (const [, m] of this.markers) { this.scene.remove(m.mesh); m.mat.dispose(); }
     this.markers.clear();
@@ -339,6 +350,7 @@ export class FX {
     this.additive.dispose();
     this.alphaCloud.dispose();
     this.marks.dispose();
+    this.debris.dispose();
     this._sphere.dispose();
     this._ringGeo.dispose();
   }

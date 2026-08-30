@@ -156,7 +156,22 @@ export function coarsen(vox) {
  * and what colour they are, and pulls maximal same-coloured rectangles out of
  * it. A door skin comes out as one quad rather than four hundred.
  */
-export function voxGeometry(vox, { body = null, accent = null, emitMask = false } = {}) {
+/**
+ * How many pieces a body is cut into along its length.
+ *
+ * Rebuilding a whole car costs 91 to 237 ms, which is not a thing that can
+ * happen when somebody hits a wall. Rebuilding an eighth of one is about
+ * fifteen, and a car is only ever damaged in one place at a time — so the body
+ * is meshed in slabs and a hit rebuilds the slab it landed in.
+ *
+ * The cost is draw calls: eight per car instead of one. Six racers is
+ * forty-eight, which this renderer will not notice, and it is the price of a
+ * panel that can lose pieces.
+ */
+export const CHUNKS = 8;
+
+export function voxGeometry(vox, { body = null, accent = null, emitMask = false,
+  chunk = -1, chunks = CHUNKS } = {}) {
   const { nx, ny, nz, step, ox, oy, oz, at, palette, paint } = vox;
   // The car's own colour, where the bake said the game may put one.
   //
@@ -181,6 +196,10 @@ export function voxGeometry(vox, { body = null, accent = null, emitMask = false 
     x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz
       ? 0 : at[x + nx * (y + ny * z)]);
 
+  // Which slab this call is for, along z. -1 means the whole body.
+  const zFrom = chunk < 0 ? 0 : Math.floor((nz * chunk) / chunks);
+  const zTo = chunk < 0 ? nz : Math.floor((nz * (chunk + 1)) / chunks);
+
   for (let axis = 0; axis < 3; axis++) {
     const u = (axis + 1) % 3;
     const v = (axis + 2) % 3;
@@ -189,10 +208,24 @@ export function voxGeometry(vox, { body = null, accent = null, emitMask = false 
     const off = [0, 0, 0];
 
     for (let dir = -1; dir <= 1; dir += 2) {
-      for (let slice = 0; slice < dim[axis]; slice++) {
+      // The slab, expressed in whichever of this sweep's three indices happens
+      // to be z. Masking out-of-slab cells is not enough on its own: the work
+      // is in walking the grid, so the walk itself is what has to shrink.
+      const lo = [0, 0, 0];
+      const hi = [dim[0], dim[1], dim[2]];
+      lo[2] = zFrom;
+      hi[2] = zTo;
+      const sliceFrom = axis === 2 ? zFrom : 0;
+      const sliceTo = axis === 2 ? zTo : dim[axis];
+      const aFrom = u === 2 ? zFrom : 0;
+      const aTo = u === 2 ? zTo : dim[u];
+      const bFrom = v === 2 ? zFrom : 0;
+      const bTo = v === 2 ? zTo : dim[v];
+
+      for (let slice = sliceFrom; slice < sliceTo; slice++) {
         // What is exposed on this slice, and in what colour.
-        for (let b = 0; b < dim[v]; b++) {
-          for (let a = 0; a < dim[u]; a++) {
+        for (let b = bFrom; b < bTo; b++) {
+          for (let a = aFrom; a < aTo; a++) {
             cell[axis] = slice; cell[u] = a; cell[v] = b;
             const here = solid(cell[0], cell[1], cell[2]);
             off[axis] = slice + dir; off[u] = a; off[v] = b;
@@ -202,14 +235,14 @@ export function voxGeometry(vox, { body = null, accent = null, emitMask = false 
         }
 
         // And out of it, the biggest rectangles that are all one colour.
-        for (let b = 0; b < dim[v]; b++) {
-          for (let a = 0; a < dim[u];) {
+        for (let b = bFrom; b < bTo; b++) {
+          for (let a = aFrom; a < aTo;) {
             const c = mask[b * dim[u] + a];
             if (!c) { a++; continue; }
             let w = 1;
-            while (a + w < dim[u] && mask[b * dim[u] + a + w] === c) w++;
+            while (a + w < aTo && mask[b * dim[u] + a + w] === c) w++;
             let h = 1;
-            grow: while (b + h < dim[v]) {
+            grow: while (b + h < bTo) {
               for (let k = 0; k < w; k++) {
                 if (mask[(b + h) * dim[u] + a + k] !== c) break grow;
               }
@@ -270,4 +303,164 @@ export function voxGeometry(vox, { body = null, accent = null, emitMask = false 
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
   return geo;
+}
+
+/**
+ * A voxel body that can lose pieces.
+ *
+ * This is the thing the whole change of look is for. A decimated body could
+ * only ever be *repainted* when it was hurt — scorch marks and a dimmer lamp —
+ * because its triangles describe a surface and a surface cannot have a bite
+ * taken out of it. A body of cells can simply stop having some, and the cells
+ * it stops having are cubes that can fall on the road.
+ *
+ * Meshed in slabs so a hit costs one slab's rebuild — about 26 ms on the RX-7
+ * — rather than the whole car's 91 to 237.
+ */
+export class VoxBody {
+  /**
+   * @param vox   parsed `.vox`
+   * @param make  (geometry, chunkIndex) => Mesh, so the caller owns materials
+   * @param opts  passed to `voxGeometry`; `body` is the paint colour
+   */
+  constructor(vox, make, opts = {}) {
+    this.vox = vox;
+    this.opts = opts;
+    this.make = make;
+    this.group = new THREE.Group();
+    this.meshes = [];
+    this.dirty = new Set();
+    for (let c = 0; c < CHUNKS; c++) {
+      const mesh = make(voxGeometry(vox, { ...opts, chunk: c }), c);
+      this.meshes.push(mesh);
+      if (mesh) this.group.add(mesh);
+    }
+  }
+
+  /** Which slab a cell index belongs to. */
+  chunkOf(cell) {
+    const z = (cell / (this.vox.nx * this.vox.ny)) | 0;
+    return Math.min(CHUNKS - 1, Math.floor((z * CHUNKS) / this.vox.nz));
+  }
+
+  /**
+   * Knock a hole in the body around a point, in the body's own coordinates.
+   *
+   * The hole is every cell inside the radius, because a dent the size of one
+   * cell is 2 cm across on a 4 m car and nobody will ever see it. The *debris*
+   * is coarser than the hole: cells are grouped onto a lattice `clump` cells
+   * wide and each group falls as one cube. A body cell is confetti; a block of
+   * eight is a piece of bodywork, which is what a car sheds when it is hit.
+   *
+   * @param max    ceiling on cubes, not on cells — a big hit still opens a big
+   *               hole, it just does not fill the screen with pieces
+   * @returns the cubes that came off, as `{ x, y, z, r, g, b, size }` in body
+   *          space, in the colour of the panel they came off rather than a
+   *          generic grey chip
+   */
+  chip(px, py, pz, radius, max = 24, clump = 4) {
+    const { nx, ny, nz, step, ox, oy, oz, at, palette, paint } = this.vox;
+    // A chip off a painted panel is the colour the car is, not the colour its
+    // author modelled. The same rule the body itself draws by.
+    const body = this.opts.body;
+    const gx = Math.floor((px - ox) / step);
+    const gy = Math.floor((py - oy) / step);
+    const gz = Math.floor((pz - oz) / step);
+    const r = Math.max(1, Math.round(radius / step));
+
+    // One bucket per lattice cell touched, keyed on the lattice coordinate.
+    const groups = new Map();
+    let gone = 0;
+    const sweep = (reach) => {
+      for (let dz = -reach; dz <= reach; dz++) {
+        for (let dy = -reach; dy <= reach; dy++) {
+          for (let dx = -reach; dx <= reach; dx++) {
+            if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
+            const x = gx + dx;
+            const y = gy + dy;
+            const z = gz + dz;
+            if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) continue;
+            const cell = x + nx * (y + ny * z);
+            const c = at[cell];
+            if (!c) continue;
+            at[cell] = 0;
+            gone++;
+            this.dirty.add(this.chunkOf(cell));
+
+            const lx = Math.floor(x / clump);
+            const ly = Math.floor(y / clump);
+            const lz = Math.floor(z / clump);
+            const key = lx + 4096 * (ly + 4096 * lz);
+            let g = groups.get(key);
+            if (!g) {
+              g = { n: 0, x: 0, y: 0, z: 0, r: 0, g: 0, b: 0 };
+              groups.set(key, g);
+            }
+            const painted = body && paint && paint[cell];
+            g.n++;
+            g.x += x; g.y += y; g.z += z;
+            g.r += painted ? body.r : palette[(c - 1) * 3];
+            g.g += painted ? body.g : palette[(c - 1) * 3 + 1];
+            g.b += painted ? body.b : palette[(c - 1) * 3 + 2];
+          }
+        }
+      }
+    };
+
+    sweep(r);
+    // A contact point is where two collision *volumes* met, and a car is not
+    // its bounding box: a nose-in to a barrier can report a point that sits in
+    // the air just past the bumper. Rather than have a hard knock do nothing at
+    // all, reach further once. Twice the radius and no more — beyond that the
+    // hole stops being where the hit was.
+    if (!gone) sweep(r * 2);
+    this.vox.count -= gone;
+
+    // The fullest blocks first: a lattice cell that held two cells of bodywork
+    // was a corner clipped, and if something has to be dropped it is that.
+    const out = [];
+    for (const g of groups.values()) {
+      out.push({
+        x: ox + (g.x / g.n + 0.5) * step,
+        y: oy + (g.y / g.n + 0.5) * step,
+        z: oz + (g.z / g.n + 0.5) * step,
+        r: g.r / g.n, g: g.g / g.n, b: g.b / g.n,
+        // A block that was only part full falls as the size it actually was.
+        size: step * clump * Math.cbrt(g.n / (clump ** 3)),
+        n: g.n,
+      });
+    }
+    out.sort((a, b) => b.n - a.n);
+    return out.slice(0, max);
+  }
+
+  /**
+   * Rebuild whatever a chip dirtied. Separate from `chip` so several hits in
+   * one step cost one rebuild, and so the caller decides when to pay it.
+   *
+   * @returns how many slabs were rebuilt
+   */
+  flush() {
+    if (!this.dirty.size) return 0;
+    const n = this.dirty.size;
+    for (const c of this.dirty) {
+      const old = this.meshes[c];
+      const geo = voxGeometry(this.vox, { ...this.opts, chunk: c });
+      if (old) {
+        old.geometry.dispose();
+        old.geometry = geo;
+      } else {
+        const mesh = this.make(geo, c);
+        this.meshes[c] = mesh;
+        if (mesh) this.group.add(mesh);
+      }
+    }
+    this.dirty.clear();
+    return n;
+  }
+
+  dispose() {
+    for (const m of this.meshes) m?.geometry.dispose();
+    this.group.clear();
+  }
 }

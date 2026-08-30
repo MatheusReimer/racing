@@ -131,7 +131,8 @@ for (const [label, ids] of [
       continue;
     }
 
-    const body = new THREE.Box3().setFromObject(mesh.bodyMesh);
+    const body = new THREE.Box3();
+    for (const m of mesh.bodyParts) body.union(new THREE.Box3().setFromObject(m));
     const cab = new THREE.Box3().setFromObject(mesh.cabin);
     const outside = (box) => Math.max(
       cab.max.x - box.max.x, box.min.x - cab.min.x,

@@ -63,13 +63,15 @@ const v = new THREE.Vector3();
  * never there. Walking the vertices costs a few million transforms in a probe
  * that runs in a second, and it answers the question actually being asked.
  */
-function lowestPoint(mesh) {
-  const a = mesh.geometry.attributes.position;
-  mesh.updateMatrixWorld(true);
+function lowestPoint(parts) {
   let lo = Infinity;
-  for (let i = 0; i < a.count; i++) {
-    v.fromBufferAttribute(a, i).applyMatrix4(mesh.matrixWorld);
-    if (v.y < lo) lo = v.y;
+  for (const mesh of parts) {
+    const a = mesh.geometry.attributes.position;
+    mesh.updateMatrixWorld(true);
+    for (let i = 0; i < a.count; i++) {
+      v.fromBufferAttribute(a, i).applyMatrix4(mesh.matrixWorld);
+      if (v.y < lo) lo = v.y;
+    }
   }
   return lo;
 }
@@ -93,7 +95,7 @@ for (const v of VEHICLES) {
       box.setFromObject(w.pivot);
       worstWheel = Math.max(worstWheel, Math.abs(box.min.y));
     }
-    const lo = lowestPoint(mesh.bodyMesh);
+    const lo = lowestPoint(mesh.bodyParts);
     worstBody = Math.min(worstBody, lo);
     if (pitch === 0 && roll === 0) restBody = lo;
   }

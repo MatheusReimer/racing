@@ -12,6 +12,22 @@ import { ContactShadows } from '../fx/contact.js';
 import { findCorners, cornerName } from '../track/preview.js';
 import { TRAFFIC_FOOTPRINTS } from './trafficmesh.js';
 
+/**
+ * How hard a knock has to be before a car sheds cells, in metres per second of
+ * closing speed. Below this it is a scrape, and a car that loses a piece every
+ * time it brushes a barrier is a car that arrives at the flag as a chassis.
+ */
+const CHIP_SPEED = 7;
+
+/**
+ * How long a car has to go without shedding, in milliseconds.
+ *
+ * A car scraping along a barrier reports a hit every step, and each one costs
+ * a slab rebuild — about 10 ms. Without a floor on the interval a long scrape
+ * is a long stutter, and the car arrives at the corner as a skeleton.
+ */
+const CHIP_COOLDOWN = 380;
+
 export { makeDefaultRivalBuild } from './sim.js';
 
 // The presentation layer over RaceSim: scene, meshes, sky, camera.
@@ -65,10 +81,16 @@ export class Race extends RaceSim {
 
     // The base constructor already created the racers; give them bodies.
     this.meshes = new Map();
+    /** When each car last shed a piece, so a scrape is not a stutter. */
+    this._chipped = new Map();
     for (const racer of this.racers) this._buildMesh(racer);
 
     // Simulation -> presentation. These callbacks are the only channel.
     this.onBarrierHit = (racer, dirX, dirZ, approach) => {
+      // The car loses pieces whether or not it is the player's; only the
+      // camera cares whose it is.
+      this._chip(racer, racer.body.x - dirX * 0.7, racer.body.y + 0.5,
+        racer.body.z - dirZ * 0.7, approach);
       if (!racer.isPlayer) return;
       this.camera.impact(dirX, dirZ, approach);
       this.events?.emit('fx:impact', {
@@ -78,6 +100,10 @@ export class Race extends RaceSim {
     };
 
     this.onCarHit = (a, b, nx, nz, approach) => {
+      const mx = (a.body.x + b.body.x) / 2;
+      const mz = (a.body.z + b.body.z) / 2;
+      this._chip(a, mx, 0.6, mz, approach);
+      this._chip(b, mx, 0.6, mz, approach);
       if (a.isPlayer) this.camera.impact(-nx, -nz, approach * 0.8);
       if (b.isPlayer) this.camera.impact(nx, nz, approach * 0.8);
       this.events?.emit('fx:impact', {
@@ -90,11 +116,51 @@ export class Race extends RaceSim {
       this.events?.emit('fx:propSmashed', { prop, racer, speed });
     };
     this.onPropHit = (prop, racer, speed) => {
+      this._chip(racer, prop.x, prop.y + 0.5, prop.z, speed);
       if (racer.isPlayer) this.camera.impact(0, 0, speed * 0.7);
       this.events?.emit('fx:impact', {
         x: prop.x, y: prop.y + 0.6, z: prop.z, strength: speed, kind: 'prop',
       });
     };
+
+    /**
+     * Take a bite out of a car where it was hit, and throw the pieces.
+     *
+     * Only a real knock does it. A car scraping a wall at walking pace should
+     * not shed its wing, and a threshold here is cheaper than one in every
+     * caller.
+     */
+    this._chip = (racer, x, y, z, strength) => {
+      if (strength < CHIP_SPEED) return;
+      const now = performance.now();
+      if (now - (this._chipped.get(racer) ?? -1e9) < CHIP_COOLDOWN) return;
+      const mesh = this.meshes?.get(racer) ?? racer.mesh;
+      if (!mesh?.chipAt) return;
+      const hard = Math.min(1, (strength - CHIP_SPEED) / 22);
+      const cells = mesh.chipAt(x, y, z, 0.14 + hard * 0.18,
+        Math.round(4 + hard * 18));
+      if (!cells) return;
+      this._chipped.set(racer, now);
+      this.events?.emit('fx:chips', {
+        cells,
+        vx: racer.body.vx * 0.35,
+        vy: 1.0 + hard * 2.0,
+        vz: racer.body.vz * 0.35,
+      });
+    };
+
+    // A weapon hit takes a piece out too. Combat reports the victim and the
+    // damage but not where it landed — a rocket does not have a contact point
+    // the way a barrier does — so it lands somewhere on the car, which is what
+    // it looks like anyway.
+    this._offHit = this.events?.on('fx:hit', (e) => {
+      if (!e.racer?.alive || e.amount < 4) return;
+      const b = e.racer.body;
+      const a = Math.random() * Math.PI * 2;
+      const reach = (e.racer.halfLength ?? 2) * 0.7;
+      this._chip(e.racer, b.x + Math.cos(a) * reach, b.y + 0.55,
+        b.z + Math.sin(a) * reach, CHIP_SPEED + e.amount);
+    }) ?? null;
 
     this.onWreck = (killer, victim) => {
       this.events?.emit('fx:explosion', {
@@ -160,7 +226,8 @@ export class Race extends RaceSim {
     this.contact.update(this.racers, this.traffic,
       (c) => this.meshes.get(c)?.footprint ?? TRAFFIC_FOOTPRINTS[c.kind ?? 0],
       this._groundAt, this.sky.material.uniforms.uSunDir.value);
-    this.fx.update(dt, this.racers, this.combat, this.camera.camera.position);
+    this.fx.update(dt, this.racers, this.combat, this.camera.camera.position,
+      this._groundAt);
     this.sky.update(dt, this.camera.camera.position);
     return this.camera.camera;
   }
@@ -217,6 +284,7 @@ export class Race extends RaceSim {
   }
 
   dispose() {
+    this._offHit?.();
     this.contact.dispose();
     this.lighting?.dispose();
     this.fx.dispose();

@@ -171,7 +171,10 @@ console.log('Damage states are visible, and cost nothing to hold\n');
     mesh.setDamage(0);
     // The bodywork, not the group: the group carries an underglow plane wider
     // than the car, which would make any panel look well behaved.
-    const body = bounds(mesh.bodyMesh);
+    // The whole of the bodywork: a voxel car is drawn in slabs, and one slab
+    // is a slice of the car, not the car.
+    const body = new THREE.Box3();
+    for (const m of mesh.bodyParts) body.union(bounds(m));
     for (const piece of [mesh.torn.bonnet, mesh.torn.bumper]) {
       const b = bounds(piece);
       const past = Math.max(b.max.z - body.max.z, body.min.z - b.min.z,
