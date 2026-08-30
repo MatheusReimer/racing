@@ -201,7 +201,10 @@ export class Sky {
     // the palette's own note on the city says "the moon is the key", and a moon
     // painted anywhere else leaves the shadows pointing at nothing. The sun's
     // disc is switched off when there is one, so the two do not overlap.
-    const moon = p.moon;
+    // A stripped biome gets no moon either. It is the last object in the frame
+    // once the road goes, and it is drawn in the dome's shader rather than as
+    // an object, so removing every mesh in the scene would not have touched it.
+    const moon = biome.stripped ? null : p.moon;
     u.uMoonStrength.value = moon ? (moon.strength ?? 1) : 0;
     u.uSunStrength.value = moon ? 0 : 1;
     if (moon) {

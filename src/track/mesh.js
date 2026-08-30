@@ -357,14 +357,26 @@ export class TrackMesh {
     paintMarkings(this.roadMat, pal, track);
     this.materials.push(this.roadMat);
 
-    const roadGeo = buildRibbon(track.path, track.length, (s) => track.halfWidthAt(s), {});
-    const road = new THREE.Mesh(roadGeo, this.roadMat);
-    road.receiveShadow = !!quality?.shadows;
-    road.matrixAutoUpdate = false;
-    this.group.add(road);
+    // A stripped biome draws no track at all — not the ribbon, not the pit
+    // lane, not the barriers, not the start line. The materials above are
+    // still built because `dispose` and the marking painter expect them, and
+    // an empty group is cheaper than a special case in five other places.
+    //
+    // Only the drawing goes. `track` itself is untouched: the path, the widths,
+    // the branches and `groundAt` are all still there, so the car still drives
+    // a circuit and the simulation cannot tell the difference. What is gone is
+    // every triangle of it.
+    const roadGeo = biome.stripped
+      ? null : buildRibbon(track.path, track.length, (s) => track.halfWidthAt(s), {});
+    if (roadGeo) {
+      const road = new THREE.Mesh(roadGeo, this.roadMat);
+      road.receiveShadow = !!quality?.shadows;
+      road.matrixAutoUpdate = false;
+      this.group.add(road);
+    }
 
     // --- branches ---
-    for (const br of track.branches) {
+    for (const br of (biome.stripped ? [] : track.branches)) {
       const g = buildRibbon(br.path, br.path.length, () => br.halfWidth, {
         isBranch: br.isPit ? 2 : true, closed: false, lift: BRANCH_LIFT,
       });
@@ -382,7 +394,7 @@ export class TrackMesh {
     });
     this.materials.push(this.barrierMat);
 
-    for (const side of [-1, 1]) {
+    for (const side of (biome.stripped ? [] : [-1, 1])) {
       const g = buildBarrier(
         track, track.length,
         (s) => side * (track.halfWidthAt(s) + BARRIER_RAIL_OFFSET),
@@ -431,7 +443,7 @@ export class TrackMesh {
     }
 
     // --- start line ---
-    this.group.add(buildStartLine(track));
+    if (!biome.stripped) this.group.add(buildStartLine(track));
 
     this.group.updateMatrixWorld(true);
   }

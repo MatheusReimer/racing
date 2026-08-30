@@ -83,6 +83,15 @@ export function generateProps(rng, track, biome, opts = {}) {
   const props = [];
   const L = track.length;
 
+  // Nothing at all in a stripped biome.
+  //
+  // Emptying its tables was not enough: the gantries over the start line and
+  // the pit lane's workshop, crates and barrels are placed by dedicated passes
+  // that never consult a table, so seven objects were still standing in an
+  // otherwise empty city. Returning early is the only way to say "none" that
+  // those passes cannot talk their way out of.
+  if (biome.stripped) return props;
+
   // Keep the grid and the run-up to the start line clear.
   const nearStart = (s) => {
     const d = Math.abs(track.path.deltaAlong(track.startS, s));
