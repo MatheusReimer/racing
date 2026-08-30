@@ -16,7 +16,57 @@ import { ROOM_W, ROOM_D, WALL_H, WALL_T, DOOR_W } from '../track/house.js';
 // is the ratio the outdoor world already reads as coherent.
 
 /** Metres per cell for the shell. */
-const CELL = 0.45;
+const CELL = 0.9;
+
+/**
+ * How many cubes in a run share a shade.
+ *
+ * The room did not read as cubes and the cube *size* was not why — a box is a
+ * box at any cell size, and rendering the kitchen at 1.4 m cubes only made it a
+ * cruder box. The car reads as voxel because it is a curved thing approximated
+ * by cubes, so its surface steps and you can count the steps. A wall is
+ * genuinely flat, so nothing steps and the grid is invisible.
+ *
+ * So the lattice is shown rather than implied: every cube of a large flat
+ * surface takes one of a few shades, chosen from its own coordinates. Two
+ * things stop that costing everything. The shades are close enough together to
+ * read as one material rather than as noise, and the pattern is coherent over
+ * `SPECKLE` cubes, so the mesher still merges runs instead of emitting six
+ * faces per cube.
+ */
+const SPECKLE = 2;
+// Far enough apart to read from a car at speed, close enough together to be
+// one material rather than a chequerboard. At +-4.5% it was invisible from the
+// driving camera and only showed in a still.
+const SHADES = [1.0, 0.925, 1.075, 0.962];
+
+/** A stable shade index for a cube, from where the cube is. */
+function speckleOf(x, y, z) {
+  const i = Math.floor(x / SPECKLE);
+  const j = Math.floor(y / SPECKLE);
+  const k = Math.floor(z / SPECKLE);
+  let h = (i * 374761393 + j * 668265263 + k * 2147483647) | 0;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  return ((h ^ (h >>> 16)) >>> 0) % SHADES.length;
+}
+
+/**
+ * Fill a range with the same colour in a few shades, cube by cube.
+ *
+ * The expensive way to write a box, used only on the surfaces big enough that
+ * a flat fill is what gives the room away as not-cubes: floors, and walls.
+ */
+function speckle(C, x0, y0, z0, x1, y1, z1, hex) {
+  const v = SHADES.map((k) => C.colour(shade(hex, k)));
+  for (let z = z0; z < z1; z += SPECKLE) {
+    for (let y = y0; y < y1; y += SPECKLE) {
+      for (let x = x0; x < x1; x += SPECKLE) {
+        C.box(x, y, z, Math.min(x1, x + SPECKLE), Math.min(y1, y + SPECKLE),
+          Math.min(z1, z + SPECKLE), v[speckleOf(x, y, z)]);
+      }
+    }
+  }
+}
 
 /**
  * What each floor is made of.
@@ -58,7 +108,7 @@ function floor(C, spec, x0, x1, z0, z1, FLOOR_D) {
       const alt = long
         ? (Math.floor(z / 4) + Math.floor(x / step)) % 3 === 0
         : (Math.floor(x / step) + Math.floor(z / step)) % 2 === 0;
-      C.box(x, 0, z, xd, FLOOR_D, zd, alt ? a : b);
+      speckle(C, x, 0, z, xd, FLOOR_D, zd, alt ? spec.a : spec.b);
       if (spec.grout) {
         C.box(xd, 0, z, Math.min(x1, xd + spec.grout), FLOOR_D, zd, line);
         if (!long) C.box(x, 0, zd, xd, FLOOR_D, Math.min(z1, zd + spec.grout), line);
@@ -114,8 +164,8 @@ function buildRoom(theme, doors, palette, rng, place, clear) {
     // flat colour is what a wall looks like when it has been painted in a
     // renderer; two shades at cell scale is what it looks like in a photograph.
     for (let y = ay0; y < ay1; y += 6) {
-      C.box(ax0, y, az0, ax1, Math.min(ay1, y + 6), az1,
-        (y / 6) % 2 ? cWall : cWallAlt);
+      speckle(C, ax0, y, az0, ax1, Math.min(ay1, y + 6), az1,
+        (y / 6) % 2 ? wallHue : shade(wallHue, 0.94));
     }
     C.box(ax0, FLOOR_D, az0, ax1, FLOOR_D + 3, az1, cSkirt);
   };
