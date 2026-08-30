@@ -17,6 +17,23 @@ import { clamp01, lerp } from '../core/math.js';
 // simulation would need, and it keeps particles able to read the same physics
 // values the rest of the game uses.
 
+// Particles, in cells.
+//
+// The world is cubes, the light on it is cubes, and the smoke coming off a
+// locked tyre was a soft round blob — which at the moment of a crash is most
+// of what is on screen. So a particle is drawn as a block of cells rather than
+// as a gradient.
+//
+// The cell is in *world* metres, not in the sprite, and that is the part that
+// makes it read: a puff two metres across breaks into a coarse grid of squares
+// and a spark thirty centimetres across is a single one, so the same cube size
+// runs through the whole effect and matches the bodywork it came off. Sampling
+// the sprite once per cell rather than per fragment is what turns the gradient
+// into those squares; quantising the result is what stops each square being an
+// imperceptibly different shade from its neighbour.
+const PARTICLE_CELL = 0.28;
+const PARTICLE_LEVELS = 4.0;
+
 const PARTICLE_VERT = /* glsl */`
 attribute float size;
 attribute float alpha;
@@ -25,8 +42,13 @@ uniform float uFogNear;
 uniform float uFogFar;
 varying float vAlpha;
 varying vec3 vTint;
+varying float vCells;
 void main() {
   vTint = tint;
+  // How many cells across this particle is. Carried to the fragment so a big
+  // puff breaks into a grid and a small spark stays one square — the cube is
+  // the fixed thing, not the number of them.
+  vCells = max(1.0, floor(size / ${PARTICLE_CELL.toFixed(2)} + 0.5));
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   float dist = -mv.z;
 
@@ -43,7 +65,10 @@ void main() {
 
   vAlpha = alpha * near * far;
 
-  gl_PointSize = clamp(size * (300.0 / max(dist, 0.1)), 1.0, 90.0);
+  // Size snapped to whole cells, so particles come in cube counts rather than
+  // in a continuum: three sparks side by side are the same size, and a puff
+  // growing over its life grows a cell at a time.
+  gl_PointSize = clamp(vCells * ${PARTICLE_CELL.toFixed(2)} * (300.0 / max(dist, 0.1)), 1.0, 90.0);
   gl_Position = projectionMatrix * mv;
 }`;
 
@@ -51,10 +76,22 @@ const PARTICLE_FRAG = /* glsl */`
 uniform sampler2D uSprite;
 varying float vAlpha;
 varying vec3 vTint;
+varying float vCells;
 void main() {
-  vec4 tex = texture2D(uSprite, gl_PointCoord);
-  if (tex.a * vAlpha < 0.004) discard;
-  gl_FragColor = vec4(vTint, tex.a * vAlpha);
+  // The centre of the cell this fragment is in, sampled once for the whole
+  // cell. One cell across and the particle is a single flat square, which is
+  // what a spark should be.
+  vec2 q = (floor(gl_PointCoord * vCells) + 0.5) / vCells;
+  // The *shape* is stepped, and the particle's own opacity is applied after.
+  // Stepping the product instead quantises the distance fade with it, which
+  // makes a receding effect pop between four levels rather than fade — and it
+  // rounds smoke's 0.17 opacity up to 0.25, a fifty per cent denser cloud
+  // arrived at by accident.
+  float t = texture2D(uSprite, q).a;
+  t = floor(t * ${PARTICLE_LEVELS.toFixed(1)} + 0.5) / ${PARTICLE_LEVELS.toFixed(1)};
+  float a = t * vAlpha;
+  if (a < 0.004) discard;
+  gl_FragColor = vec4(vTint, a);
 }`;
 
 /**

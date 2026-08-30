@@ -118,14 +118,17 @@ float shapeAt(vec2 p) {
 void main() {
   // The centre of the light cube this fragment is inside.
   vec2 q = (floor(vCorner / vCell) + 0.5) * vCell;
-  float f = shapeAt(q) * vFade;
 
   // Stepped, and the bottom step is dropped rather than dimmed: a cube either
   // has light in it or it does not, and a ring of near-black cubes round the
   // edge is a smudge with corners.
-  f = floor(f * ${LIGHT_LEVELS.toFixed(1)} + 0.5) / ${LIGHT_LEVELS.toFixed(1)};
+  //
+  // The *shape* is what gets stepped. The distance fade is applied after it,
+  // because folding the two together quantises the fade as well and a light
+  // then pops between five levels as you drive away from it.
+  float f = floor(shapeAt(q) * ${LIGHT_LEVELS.toFixed(1)} + 0.5) / ${LIGHT_LEVELS.toFixed(1)};
   if (f <= 0.0) discard;
-  gl_FragColor = vec4(vTint * f, 1.0);
+  gl_FragColor = vec4(vTint * f * vFade, 1.0);
 }`;
 
 const HALO_VERT = /* glsl */`
@@ -165,10 +168,10 @@ void main() {
   // The centre of the cell this fragment is in, sampled once for the whole
   // cell so the sprite's gradient comes out as blocks.
   vec2 q = (floor(gl_PointCoord * ${HALO_CELLS.toFixed(1)}) + 0.5) / ${HALO_CELLS.toFixed(1)};
-  float a = texture2D(uSprite, q).a * vFade;
+  float a = texture2D(uSprite, q).a;
   a = floor(a * ${LIGHT_LEVELS.toFixed(1)} + 0.5) / ${LIGHT_LEVELS.toFixed(1)};
   if (a <= 0.0) discard;
-  gl_FragColor = vec4(vTint * a, 1.0);
+  gl_FragColor = vec4(vTint * a * vFade, 1.0);
 }`;
 
 /**
