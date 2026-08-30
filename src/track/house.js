@@ -29,7 +29,10 @@ import { clamp } from '../core/math.js';
 /** Metres at 1:10, so these read as centimetres of a real house times ten. */
 export const ROOM_W = 46;      // 4.6 m across
 export const ROOM_D = 40;      // 4.0 m deep
-export const DOOR_W = 9;       // 0.9 m — one car and not much else
+// 1.3 m — a wide door, and deliberately so. At 90 cm the opening was the
+// narrowest thing on the circuit by a long way and every lap was eight moments
+// of threading a needle. The house is exaggerated; the doors are double.
+export const DOOR_W = 13;
 export const WALL_H = 26;      // 2.6 m ceiling
 export const WALL_T = 2.2;     // a wall you can see the thickness of
 
@@ -95,6 +98,44 @@ function doorway(a, b, bias) {
 }
 
 /**
+ * Take the wiggle out, without moving the doors.
+ *
+ * The route is assembled from pieces — a sampled arc, three collinear points
+ * through a door, another arc — and where two pieces meet the direction
+ * changes over a couple of metres. The spline through that has a kink at the
+ * scale of its own points, and it does not read as a corner: it reads as the
+ * line being nervous.
+ *
+ * It was also invisible to every measurement until the right one was taken.
+ * The minimum corner radius came out 5.3 m for *every* combination of room
+ * size, door width, ring size, bulge and street width that was swept — which
+ * is the tell, because a number that ignores every input is not measuring the
+ * inputs. Measuring the same circuits with a wider curvature window gave 3.3,
+ * 5.6, 8.1, 13.0, 21.2, 28.8 metres for windows of 4 to 45: the "radius" was
+ * tracking the window. A real corner does not do that — the wasteland's
+ * minimum sits at 79 m however it is measured.
+ *
+ * So: Laplacian smoothing, with the door points pinned. Everything else drifts
+ * toward the average of its neighbours and the kinks disappear; the doors do
+ * not move, because a route that misses the opening is not a route.
+ */
+function smooth(pts, passes) {
+  const out = pts.map((p) => ({ ...p }));
+  const n = out.length;
+  for (let k = 0; k < passes; k++) {
+    const prev = out.map((p) => ({ ...p }));
+    for (let i = 0; i < n; i++) {
+      if (out[i].anchor) continue;
+      const a = prev[(i - 1 + n) % n];
+      const b = prev[(i + 1) % n];
+      out[i].x = (a.x + b.x + prev[i].x * 2) / 4;
+      out[i].z = (a.z + b.z + prev[i].z * 2) / 4;
+    }
+  }
+  return out;
+}
+
+/**
  * Re-space a control polyline evenly.
  *
  * The spline wiggles at the scale of its own control spacing, and this route
@@ -129,15 +170,21 @@ function resample(pts, step) {
  *          put walls and floors around it
  */
 export function generateHouseLayout(rng, opts = {}) {
-  // A ring of sixteen to twenty rooms.
+  // A ring of twenty-four to twenty-eight rooms.
+  //
+  // Bigger than a house, and the reason is the lap. Smoothing the route is
+  // what fixed the kinks, and it also flattens the very bulge that was making
+  // the lap long — raising the sweep does not help, because the smoothing
+  // takes it straight back out. The only thing left that lengthens a lap is
+  // more rooms in the ring.
   //
   // Fewer is more house-like and produced laps of 690 to 900 metres, which is
   // a third of what every other circuit runs — a lap the player is round
   // before the field has sorted itself out. The ring has to be big enough that
   // a lap is a lap, and at 1:10 a twenty-room ring is a house about twenty-six
   // metres across, which is a large house rather than an impossible one.
-  const cols = opts.cols ?? rng.int(5, 6);
-  const rows = opts.rows ?? rng.int(5, 6);
+  const cols = opts.cols ?? rng.int(7, 8);
+  const rows = opts.rows ?? rng.int(7, 8);
   const cells = ringCells(rows, cols);
 
   // Deal the themes round the ring in order, starting somewhere different each
@@ -204,7 +251,13 @@ export function generateHouseLayout(rng, opts = {}) {
     const sumX = iux + oux, sumZ = iuz + ouz;
     const sumLen = Math.hypot(sumX, sumZ);
 
-    const swing = Math.min(ROOM_W, ROOM_D) * 0.36;
+    // The bulge is what makes the lap long enough. Straightening it right out
+    // is tempting — fewer curves is the brief — but a route that runs door to
+    // door in a straight line makes a lap of 715 m, and the shortest circuit
+    // anywhere else in the game is 949. This is the compromise: enough of a
+    // sweep through each room to be worth driving, smoothed afterwards so it
+    // is a sweep and not a kink.
+    const swing = Math.min(ROOM_W, ROOM_D) * 0.52;
     let mxr; let mzr;
     if (sumLen > 0.35) {
       // A corner room: the doors point somewhere in common, so bulge the
@@ -287,13 +340,20 @@ export function generateHouseLayout(rng, opts = {}) {
         x: d.x - mx + d.nx * reach * k * sgn,
         y: 0,
         z: d.z - mz + d.nz * reach * k * sgn,
+        // Pinned through the smoothing pass: the route has to go through the
+        // opening, square, whatever the rest of the line does.
+        // Only the opening itself is pinned. Pinning the approach and exit
+        // points too held three metres of straight line rigid against the
+        // smoothing on either side of every door, and the join to the room's
+        // arc stayed a kink: 18 corners a lap against 15, for no gain.
+        anchor: k === 0,
       });
     }
     prev = d;
   }
 
   return {
-    controls: resample(controls, 14),
+    controls: resample(smooth(controls, 60), 9),
     rooms: rooms.map((r) => ({ ...r, x: r.x - mx, z: r.z - mz })),
     doorways,
     rows,

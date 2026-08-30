@@ -765,7 +765,10 @@ function common(C, F, doors, place, rng, palette) {
  */
 function carveRoute(C, FLOOR_D, track, room) {
   if (!track?.path) return;
-  const MARGIN = 1.4;
+  // Half a car of clearance on top of the road's own width, and the road is
+  // wider than it was. A wing mirror clipping a fridge nobody can see the edge
+  // of is worse than a fridge that sits slightly further back than it looks.
+  const MARGIN = 2.6;
   const proj = { s: 0, dist: 0, side: 0 };
   for (let ix = 0; ix < C.nx; ix++) {
     const wx = room.x + C.ox + (ix + 0.5) * C.step;

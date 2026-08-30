@@ -237,7 +237,7 @@ export const BIOMES = [
     // track in a house actually is: a marked route, with the rest of the floor
     // drivable and slower.
     trackChaos: 0.30,
-    trackWidth: 9,
+    trackWidth: 14,
     elevation: 0,
     offTrack: 'gravel',
 
