@@ -51,6 +51,54 @@ difference between unshippable and ordinary, before greedy meshing merges the
 coplanar runs — and a car is mostly large flat panels, which is the best case
 for greedy meshing.
 
+## Stage 1 — bake bodies — **done**
+
+`npm run vox` (`tools/voxelize.mjs`), which drives `bake.html` +
+`src/dev/bake.js`. Seven `.vox` in `public/bodies/`, 258–470 KB each, 2.5 MB
+against the 6.5 MB of `.bin` they replace. 0.3–2.4 s a car.
+
+**It bakes in the browser, not in Node**, which is the one place this departs
+from the plan below. The canvas problem is real — measured, three of the seven
+have their paint in a texture and would come out white without one: the Quattro
+is 98% white by material factor, the S15 69%, the Impreza 50%. But every visual
+probe in this project already drives a headless Chromium and Playwright is
+already a dependency, so baking there costs no new dependency, no image decoder,
+and no second version of code that has already been looked at on all seven cars.
+`voxelGrid()` was split out of `voxel()` so the viewer and the bake walk the
+same grid.
+
+### Orientation, which the plan did not mention and needed the most care
+
+The bake emits the game's frame — nose at +Z, right flank at +X, ground at zero,
+centred, scaled to the length the game uses. `decimate.mjs` did this from flags
+on the command line and **those flags are lost**, so the two that matter are
+measured instead: the long axis from the bounds, and which end is the nose by
+two independent tests, with the surer one deciding.
+
+- **The cabin.** A greenhouse sits behind the middle on every car ever built,
+  and `bake` asserts one colour for all glass, so the windows are findable in
+  the merged geometry by colour alone. This is the stronger idea and it is not
+  always available: the RX-7's greenhouse sits dead centre, so it reports no
+  opinion rather than a coin toss.
+- **The side view**, matched against the `.bin` hull the game already ships and
+  trusts. As a one-dimensional area profile this was 0.57 against 0.55 on the
+  RX-7 — not a decision. Read in two dimensions, along the length *and* up the
+  height, it is 0.088 there and 0.2–0.4 everywhere else. A bonnet is long and
+  low and a roof is short and high; the 1-D version threw exactly that away.
+
+Both are reported per car, and a bake where they disagree says so. They *do*
+disagree on the Impreza — the file names all 86 materials `Meshpart12Mtl`, so
+its glass comes from an opacity band rather than a name, and a wrong guess
+moved the centroid. The cabin put it on the grid backwards; the side view
+flipped it, by 0.412 against 0.302, and is right.
+
+**Verified by eye, not only by number.** `bake.html?show=1` renders straight
+down the right flank, where a car in the game's frame shows its nose on the
+*left* — every car, no interpretation. That picture is what caught the Impreza,
+and the numbers did not.
+
+### The original plan for this stage, kept for the reasoning
+
 ## Stage 1 — bake bodies offline
 
 New `tools/voxelize.mjs`, beside `decimate.mjs`, reusing `tools/lib/model.mjs`
@@ -65,10 +113,9 @@ decimated coordinates.
 Bake offline rather than at load because the browser path needs the 30–75 MB
 reference, which is gitignored and never ships, and takes about 1.5 s a car.
 
-> **Open question.** `bake()` samples textures through a `<canvas>`. Node has no
-> canvas. Either decode the glTF's PNG/JPEG images with a dependency, or extract
-> the base-colour textures to disk as a bake step. Settle this first — it gates
-> the whole stage, and four of the seven cars are white without it.
+> **Open question — settled by not answering it.** `bake()` samples textures
+> through a `<canvas>` and Node has none. Rather than decode images in Node, the
+> bake runs in the headless Chromium this project already drives. See above.
 
 ## Stage 2 — draw them affordably
 

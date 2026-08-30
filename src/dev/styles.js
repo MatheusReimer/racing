@@ -22,6 +22,9 @@ import { CLS, classify } from '../../tools/lib/classify.mjs';
 
 /** What a window is painted, whatever the reference thinks it is. */
 const GLASS = new THREE.Color(0x2b3a52);
+// Exported so the bake can find the windows again in the merged geometry: the
+// colour is asserted, so it is also a label.
+export const GLASS_RGB = [GLASS.r, GLASS.g, GLASS.b];
 
 /** sRGB byte to linear float. A texture is sRGB; a vertex colour is not. */
 const S2L = new Float32Array(256);
@@ -364,7 +367,18 @@ export function arredondado(collapsed, { pairs = 8, lambda = 0.55, mu = -0.58 } 
 // shell, so 46 cells along the car is about 4,700 cubes and 145 is about ten
 // times that.
 
-export function voxel(geo, { cells = 145, shrink = 0.94 } = {}) {
+/**
+ * The grid itself, without a mesh around it.
+ *
+ * Split out so the same walk serves the viewer and the offline bake. The bake
+ * wants occupancy and colour; the viewer wants cubes. Making the bake reproduce
+ * this walk in another language would mean two versions of the one thing anyone
+ * has actually looked at.
+ *
+ * @returns { nx, ny, nz, step, ox, oy, oz, hits, acc } — `acc` is summed colour
+ *          per cell and `hits` the sample count, so a colour is `acc / hits`.
+ */
+export function voxelGrid(geo, { cells = 145 } = {}) {
   const pos = geo.attributes.position.array;
   const col = geo.attributes.color.array;
   const idx = geo.index.array;
@@ -411,6 +425,13 @@ export function voxel(geo, { cells = 145, shrink = 0.94 } = {}) {
       }
     }
   }
+
+  return { nx, ny, nz, step, ox, oy, oz, hits, acc };
+}
+
+/** Cubes, for looking at. */
+export function voxel(geo, { cells = 145, shrink = 0.94 } = {}) {
+  const { nx, ny, nz, step, ox, oy, oz, hits, acc } = voxelGrid(geo, { cells });
 
   let filled = 0;
   for (let i = 0; i < hits.length; i++) if (hits[i]) filled++;
