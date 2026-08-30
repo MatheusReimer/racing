@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>O carro, em quatro peles</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #14161a; color: #dfe4ec;
+    font: 13px/1.5 ui-sans-serif, system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  #hud { position: fixed; top: 12px; left: 12px; background: rgba(10,14,20,.86);
+    border: 1px solid #232b38; border-radius: 8px; padding: 12px 14px; width: 292px; }
+  #hud h1 { font-size: 13px; margin: 0 0 8px; letter-spacing: .10em; text-transform: uppercase; }
+  select { font: inherit; background: #161c26; color: inherit;
+    border: 1px solid #2b3442; border-radius: 5px; padding: 4px 8px; width: 100%; }
+  #what { color: #8894a8; margin-top: 9px; }
+  .skins { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-top: 9px; }
+  .skins b { display: block; text-align: center; padding: 5px 0; border-radius: 5px;
+    border: 1px solid #2b3442; font-weight: 500; cursor: pointer; }
+  .skins b.on { outline: 2px solid #4fa3e3; }
+  #nums { margin-top: 6px; }
+  #nums b { color: #dfe4ec; font-weight: 600; }
+  #say { margin-top: 9px; min-height: 18px; color: #6fd08a; }
+  #say.bad { color: #e2685f; }
+</style>
+<div id="hud">
+  <h1>O carro, em quatro peles</h1>
+  <select id="car"></select>
+  <div id="what">—</div>
+  <div class="skins" id="skins"></div>
+  <div id="nums">—</div>
+  <div id="say"></div>
+</div>
+<script type="module" src="/src/dev/raw.js"></script>
