@@ -250,12 +250,16 @@ export function generateProps(rng, track, biome, opts = {}) {
   // reading as one extruded ribbon.
   if (biome.city) {
     const front = PROP_TYPES.facade?.frontage;
-    if (front) {
-      // A stretch of one kind of building at a time — offices, then terraces,
-      // then a mall — rather than a fresh draw per plot. See `CITY_FRONTAGES`
-      // for why the run length is the part that does the work.
-      const kinds = Object.entries(CITY_FRONTAGES)
-        .filter(([name]) => PROP_TYPES[name]?.frontage);
+    // A stretch of one kind of building at a time — offices, then terraces,
+    // then a mall — rather than a fresh draw per plot. See `CITY_FRONTAGES`
+    // for why the run length is the part that does the work.
+    const kinds = Object.entries(CITY_FRONTAGES)
+      .filter(([name]) => PROP_TYPES[name]?.frontage);
+    // A city with no frontage types configured builds no frontages. It used to
+    // read `kinds[0][0]` in the fallthrough and throw, which meant the table
+    // could never be emptied — not to strip the city for a rebuild, and not by
+    // a biome that simply wants bare road.
+    if (front && kinds.length) {
       const totalWeight = kinds.reduce((t, [, k]) => t + k.weight, 0);
       const drawKind = () => {
         let r = rng.range(0, totalWeight);

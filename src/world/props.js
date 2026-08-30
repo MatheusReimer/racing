@@ -258,11 +258,30 @@ export const PROP_TYPES = {
  * you go round the lap, and coming back to a stretch you recognise is what
  * turns a circuit into a place.
  */
+// ===========================================================================
+// THE CITY IS STRIPPED
+//
+// Everything downtown places is commented out below, deliberately, so the city
+// can be rebuilt from an empty street rather than adjusted on top of what was
+// there. Uncommenting the two blocks marked STRIPPED restores it exactly.
+//
+// What was wrong with it, so the rebuild does not repeat it: the frontages were
+// never the problem. Measured on one lap of downtown, the street had 63
+// facades, 62 townhouses, 41 tenements and 6 malls standing on it, every one at
+// detail level 0 — windows cut, clutter bolted on, shopfronts glazed. What
+// buried them was `building`: 216 of them, 87 close enough to read, and
+// `voxBlock` is deliberately a plain slab with no windows at any level because
+// it was written for the horizon. It was weighted 3 in the scenery table, the
+// highest of anything there, which put the least detailed object in the game
+// between the player and the most detailed ones.
+// ===========================================================================
+
+/** STRIPPED — the city's frontage mix. */
 export const CITY_FRONTAGES = {
-  facade: { weight: 3.0, run: [2, 4] },      // commercial: the default street
-  tenement: { weight: 2.2, run: [2, 5] },    // the cheap end of it
-  townhouse: { weight: 2.0, run: [3, 6] },   // residential, and the longest runs
-  mall: { weight: 0.9, run: [1, 2] },        // rare, and it interrupts
+  // facade: { weight: 3.0, run: [2, 4] },      // commercial: the default street
+  // tenement: { weight: 2.2, run: [2, 5] },    // the cheap end of it
+  // townhouse: { weight: 2.0, run: [3, 6] },   // residential, and the longest runs
+  // mall: { weight: 0.9, run: [1, 2] },        // rare, and it interrupts
 };
 
 /** Which types each biome uses, and how heavily. */
@@ -287,13 +306,20 @@ export const BIOME_PROPS = {
     scenery: { pine: 4, snow_bank: 3, pole: 2, shack: 1 },
     horizon: { ridge: 3, building: 1 },
   },
+  // STRIPPED — see the note above `CITY_FRONTAGES`.
   downtown: {
+    stripped: true,
     trackside: {
-      streetlight: 4, neon_sign: 3, traffic_light: 3,
-      jersey_barrier: 3, dumpster: 2, bus_stop: 2, marker: 1,
+      // streetlight: 4, neon_sign: 3, traffic_light: 3,
+      // jersey_barrier: 3, dumpster: 2, bus_stop: 2, marker: 1,
     },
-    scenery: { building: 3, billboard: 2.5, palm: 2, pole: 1, shack: 1, workshop: 1.2, hospital: 0.8 },
-    horizon: { building: 5, crane: 1, hospital: 0.5 },
+    scenery: {
+      // building: 3, billboard: 2.5, palm: 2, pole: 1, shack: 1,
+      // workshop: 1.2, hospital: 0.8,
+    },
+    horizon: {
+      // building: 5, crane: 1, hospital: 0.5,
+    },
   },
 
   inferno: {

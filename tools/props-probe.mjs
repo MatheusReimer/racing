@@ -286,6 +286,19 @@ for (const biome of BIOMES) {
   // invisible in the same column.
   for (const p of props) byLod[Math.min(p.lod ?? 0, byLod.length - 1)]++;
 
+  // A biome whose tables are commented out is not a broken biome.
+  //
+  // Downtown is stripped on purpose while the city is rebuilt, and every check
+  // below would fire on it — sparse, nothing destructible, no horizon. Said as
+  // "stripped" rather than passed off as ok, so the suite reports the state of
+  // the world honestly and nobody mistakes an empty city for a working one.
+  const spec = BIOME_PROPS[biome.id] || {};
+  if (spec.stripped) {
+    console.log(`  ${biome.id.padEnd(11)} ${String(props.length).padStart(4)} props  `
+      + 'STRIPPED — tables commented out, nothing placed by intent');
+    continue;
+  }
+
   const bad = [];
   if (props.length < 120) bad.push('too sparse');
   if (onGrid > 0) bad.push(`${onGrid} props on the starting grid`);
