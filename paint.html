@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Marcar o carro</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0e14; color: #dfe4ec;
+    font: 13px/1.5 ui-sans-serif, system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  #hud { position: fixed; top: 12px; left: 12px; background: rgba(10,14,20,.86);
+    border: 1px solid #232b38; border-radius: 8px; padding: 12px 14px; width: 268px; }
+  #hud h1 { font-size: 13px; margin: 0 0 8px; letter-spacing: .10em; text-transform: uppercase; }
+  select, button { font: inherit; background: #161c26; color: inherit;
+    border: 1px solid #2b3442; border-radius: 5px; padding: 4px 8px; }
+  button { cursor: pointer; }
+  .kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin: 9px 0; }
+  .kinds b { display: block; text-align: center; padding: 5px 0; border-radius: 5px;
+    border: 1px solid #2b3442; font-weight: 500; cursor: pointer; }
+  .kinds b.on { outline: 2px solid #4fa3e3; }
+  #keys { color: #8894a8; font-size: 12px; margin-top: 9px; }
+  #keys kbd { background: #1a212c; border: 1px solid #2b3442; border-radius: 3px;
+    padding: 0 4px; font: inherit; }
+  #say { margin-top: 9px; min-height: 18px; color: #6fd08a; }
+  #say.bad { color: #e2685f; }
+</style>
+<div id="hud">
+  <h1>Marcar o carro</h1>
+  <select id="car"></select>
+  <div class="kinds" id="kinds"></div>
+  <div>raio <b id="rad">8</b> cm &nbsp; espelho <b id="mir">sim</b> &nbsp; marcas <b id="cnt">0</b></div>
+  <div id="keys">
+    <kbd>clique</kbd> marca &nbsp; <kbd>shift+clique</kbd> apaga<br>
+    <kbd>1</kbd>…<kbd>6</kbd> o que é &nbsp; <kbd>[</kbd> <kbd>]</kbd> raio<br>
+    <kbd>M</kbd> espelho &nbsp; <kbd>Z</kbd> desfaz &nbsp; <kbd>S</kbd> salvar
+  </div>
+  <div id="say"></div>
+</div>
+<script type="module" src="/src/dev/paint.js"></script>

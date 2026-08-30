@@ -20,6 +20,8 @@
 // constraint on the whole game now that their surfaces are in it.
 // refs/README.txt carries the provenance.
 
+import { loadMarks } from './marks.js';
+
 export const HULL_NAMES = ['hatch', 'coupe', 'rotary', 'gt', 'roadster', 'rally', 'beetle'];
 const MAGIC = 0x524c4852;
 
@@ -79,5 +81,7 @@ export async function loadHulls(base = 'bodies/') {
     return [n, parseHull(await res.arrayBuffer())];
   }));
   for (const [n, hull] of got) HULLS[n] = hull;
+  // The hand marks that go with them. A body with none is the normal case.
+  await loadMarks(HULL_NAMES);
   return HULLS;
 }

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { HULLS } from '../data/bodies/index.js';
 import { clamp, clamp01, lerp, wrapAngle, angleDelta } from '../core/math.js';
+import { MARKS, applyMarks } from '../data/bodies/marks.js';
 
 // Procedural vehicle geometry.
 //
@@ -534,6 +535,12 @@ function synthLamps(hull) {
  */
 const hullCache = new WeakMap();
 
+/** Throw away what was cut, so an editor can see a change to the marks. */
+export function clearHullCache(hull = null) {
+  if (hull) hullCache.delete(hull);
+  else for (const h of Object.values(HULLS)) hullCache.delete(h);
+}
+
 /**
  * Make the two halves of a car agree about what each face is.
  *
@@ -737,6 +744,32 @@ function hullShared(hull) {
   const classes = symmetriseClasses(hull);
   const n = classes.length;
 
+  // And then whatever a person said, which wins.
+  //
+  // Everything above is the code guessing from material names and colours, and
+  // on some references that is all it can do. A mark is somebody having looked
+  // at the car, so it goes last and it overrides.
+  // Which body this is. Every loading path fills `HULLS`, and not all of them
+  // stamp a name on the hull, so the registry is the reliable answer.
+  const bodyName = hull.name
+    ?? Object.keys(HULLS).find((k) => HULLS[k] === hull);
+  if (bodyName && MARKS[bodyName]?.length) {
+    const cx = new Float32Array(n);
+    const cy = new Float32Array(n);
+    const cz = new Float32Array(n);
+    for (let t = 0; t < n; t++) {
+      let x = 0;
+      let y = 0;
+      let z = 0;
+      for (let k = 0; k < 3; k++) {
+        const v = indices[t * 3 + k] * 3;
+        x += positions[v]; y += positions[v + 1]; z += positions[v + 2];
+      }
+      cx[t] = x / 3; cy[t] = y / 3; cz[t] = z / 3;
+    }
+    applyMarks(classes, { cx, cy, cz }, MARKS[bodyName]);
+  }
+
   const CENTRE_BIAS = 0.02;
   const bodyIdx = [];
   // Kept alongside, because the greenhouse rule below removes faces from the
@@ -751,6 +784,10 @@ function hullShared(hull) {
     const p1 = indices[t * 3 + 1];
     const p2 = indices[t * 3 + 2];
     const midZ = (positions[p0 * 3 + 2] + positions[p1 * 3 + 2] + positions[p2 * 3 + 2]) / 3;
+    // Class 5 is a face somebody marked as not being there. The decimator
+    // never emits it — it drops INSIDE meshes before it starts — so it is free
+    // to mean this, and a removed face simply joins no mesh.
+    if (classes[t] === 5) continue;
     if (classes[t] === 4) (midZ > hull.length * CENTRE_BIAS ? front : rear).push(p0, p1, p2);
     // Glass leaves the body.
     //
