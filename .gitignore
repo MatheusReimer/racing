@@ -8,4 +8,10 @@ shots/
 tools/_*.mjs
 
 # reference models: rulers for tools/silhouette.mjs, never shipped
-refs/
+# `refs/*` and not `refs/`, because git will not re-include a file whose parent
+# directory is excluded, and the line below has to work: that directory was lost
+# once already and the provenance went with it. Ignoring other people's models
+# is right; ignoring the note that says which models they are is the same
+# mistake set up to happen twice.
+refs/*
+!refs/README.txt
