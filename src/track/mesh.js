@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { buildBlockTerrain, terrainRoll } from './terrain.js';
 import { paintMarkings } from './markings.js';
 import { asphaltTexture, groundTexture, roadNormal } from '../materials/noise.js';
 import { BARRIER_RAIL_OFFSET, ROAD_LIFT, BRANCH_LIFT } from './track.js';
@@ -261,21 +262,23 @@ function buildBarrier(track, lengthOf, offsetAt, accent, closed = true) {
  * which is what makes the faceted style work on terrain as well as on props.
  * Shared with the distant ground so the two cannot disagree at the seam.
  */
-export function terrainRoll(x, z) {
-  return Math.sin((x + z) * 0.0075) * 1.30
-    + Math.sin(x * 0.021) * Math.cos(z * 0.025) * 1.00
-    + Math.sin(x * 0.047 - z * 0.033) * 0.42
-    + Math.cos(x * 0.088 + z * 0.071) * 0.20;
-}
 
 // Dense where the eye can resolve it, sparse where fog is already taking over.
 // Going denser than this all the way out cost roughly a quarter of the low
 // tier's real-time headroom for detail that sits behind fog: vertex count, not
 // extent, is what the ground charges for.
+// Cut back to the near band. Everything past it is blocks now — see
+// `terrain.js` — and a ribbon that still reached five hundred metres would be
+// a smooth sheet lying underneath them, showing through every gap and fighting
+// them for depth wherever the two agreed to within a centimetre.
+//
+// The outermost column is `NEAR_BAND`: the blocks start exactly where this
+// stops, and quantise their heights downward so the seam is a step down rather
+// than a wall.
 const VERGE_PROFILE = [
-  -560, -320, -200, -130, -96, -72, -54, -40, -30, -22,
+  -46, -38, -30, -22, -15, -9,
   0,
-  22, 30, 40, 54, 72, 96, 130, 200, 320, 560,
+  9, 15, 22, 30, 38, 46,
 ];
 
 /**
@@ -285,10 +288,13 @@ const VERGE_PROFILE = [
  * The centre column is at an even index and the profile is symmetric, so taking
  * every 2nd or 3rd entry keeps 0 and both extremes without special cases.
  */
-function vergeProfile(detail, drawDistance) {
-  const stride = detail >= 0.95 ? 1 : detail >= 0.65 ? 2 : 3;
-  const limit = Math.max(260, drawDistance ?? 1000);
-  return VERGE_PROFILE.filter((v, i) => i % stride === 0 && Math.abs(v) <= limit * 1.15);
+function vergeProfile(detail) {
+  // The far columns are gone, so there is nothing left to clip against the
+  // draw distance: forty-six metres is inside every tier's far plane. What is
+  // left to trade is how finely the near band is cut, and the outermost column
+  // has to survive whatever stride is chosen or the blocks start in mid-air.
+  const stride = detail >= 0.95 ? 1 : 2;
+  return VERGE_PROFILE.filter((v, i) => i % stride === 0 || Math.abs(v) === 46);
 }
 
 function buildVerge(track, biome, quality = {}) {
@@ -304,7 +310,7 @@ function buildVerge(track, biome, quality = {}) {
   // invisible in the mesh, because there were no vertices to carry it. Beyond
   // 260 m it became a flat 2.6 km sheet, and at these fog densities that sheet
   // is still 60% visible.
-  const profile = vergeProfile(detail, quality.drawDistance);
+  const profile = vergeProfile(detail);
   const cols = profile.length;
 
   const pos = new Float32Array(rings * cols * 3);
@@ -539,6 +545,13 @@ export class TrackMesh {
     verge.matrixAutoUpdate = false;
     verge.renderOrder = -10;
     this.group.add(verge);
+
+    // And the blocks, from where the ribbon stops out to the fog.
+    const blocks = new THREE.Mesh(buildBlockTerrain(track, biome, quality), this.groundMat);
+    blocks.receiveShadow = !!quality?.shadows;
+    blocks.matrixAutoUpdate = false;
+    blocks.renderOrder = -15;
+    this.group.add(blocks);
 
     const backdrop = new THREE.Mesh(buildBackdrop(track, biome), this.groundMat);
     backdrop.matrixAutoUpdate = false;

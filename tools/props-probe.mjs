@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 // Validates every prop generator.
 //
 // A NaN vertex produces one console warning and otherwise vanishes: the prop is
@@ -50,7 +51,36 @@ for (const [name, def] of Object.entries(PROP_TYPES)) {
     // Props are authored standing on the ground plane.
     if (Number.isFinite(minY) && minY < -0.6) bad.push(`sinks to y=${minY.toFixed(2)}`);
     if (!geo.attributes.color) bad.push('no vertex colours');
-    if (geo.index) bad.push('indexed — normals will be smoothed across facets');
+    // Indexed is not the question; *shared* is.
+    //
+    // This used to reject any indexed geometry, on the reasoning that
+    // `computeVertexNormals` averages across everything sharing a vertex and
+    // so softens a facet. True of a merged smooth mesh, and false of a voxel
+    // one: the greedy mesher emits four fresh vertices per quad and shares
+    // none between quads, so every normal is its own face's. The buildings are
+    // meshed that way now, and rejecting them for it would be rejecting them
+    // for being cheap. So ask the real question — does any vertex belong to
+    // two faces that disagree about which way they point.
+    if (geo.index) {
+      const seen = new Map();
+      const ix = geo.index.array;
+      const P = geo.attributes.position.array;
+      let smeared = 0;
+      const ax = new THREE.Vector3(), bx = new THREE.Vector3(), nrm = new THREE.Vector3();
+      const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
+      for (let t = 0; t < ix.length; t += 3) {
+        va.fromArray(P, ix[t] * 3); vb.fromArray(P, ix[t + 1] * 3); vc.fromArray(P, ix[t + 2] * 3);
+        ax.subVectors(vb, va); bx.subVectors(vc, va);
+        nrm.crossVectors(ax, bx).normalize();
+        for (let k = 0; k < 3; k++) {
+          const v = ix[t + k];
+          const had = seen.get(v);
+          if (!had) seen.set(v, nrm.clone());
+          else if (had.dot(nrm) < 0.999) smeared++;
+        }
+      }
+      if (smeared) bad.push(`${smeared} vertices shared across facets — normals will smooth`);
+    }
 
     tris += triCount(geo);
     geo.dispose();
@@ -383,8 +413,43 @@ console.log('every prop generator is valid and every biome is populated');
     disposePropLibrary(lib);
   }
   if (bad.length) problems++;
+  // Zero panes is not a pass.
+  //
+  // This was written against glass boxes stuck to the outside of a wall, where
+  // a pane could genuinely end up with nothing behind it and you would see
+  // through the building. A voxel window cannot: it is a cell of glass at the
+  // bottom of a hole in a solid mass, so there is wall behind it by
+  // construction, and the test finds nothing to test. Said plainly rather than
+  // reported as a green tick, because a check that silently stops checking is
+  // worse than no check.
   console.log(`  ${glassSeen} panes checked, ${bad.length} with no wall within ${REACH} m`
-    .padEnd(52) + (bad.length ? `FAIL ${bad.slice(0, 4).join('; ')}` : 'ok'));
+    .padEnd(52) + (bad.length ? `FAIL ${bad.slice(0, 4).join('; ')}`
+      : glassSeen ? 'ok' : 'n/a — voxel windows are holes in solid'));
+}
+
+// --- a prop that says it glows has to glow ---------------------------------
+//
+// The lit pass is built from the body's layout now, and a layout missing one
+// field builds a canvas three cells across, clips every window away and hands
+// back nothing. Four frontage types went dark exactly that way, and the street
+// still rendered: still had windows, still had street lamps, still had a mall.
+// It just had nobody home, and nothing in this suite could tell.
+{
+  console.log('\nEverything that says it glows, glows\n');
+  for (const biome of BIOMES) {
+    const lib = buildPropLibrary(biome, 11);
+    const dark = [];
+    for (const [name, entry] of Object.entries(lib)) {
+      if (name.startsWith('__') || !entry.def?.glow) continue;
+      // The near level only: a distant prop may drop its lit pass, and several
+      // deliberately do.
+      if (!entry.glowLevels?.[0]?.length) dark.push(name);
+    }
+    if (dark.length) problems++;
+    console.log(`  ${biome.id.padEnd(11)} `
+      + (dark.length ? `FAIL — dark: ${dark.join(', ')}` : 'every lit prop is lit'));
+    disposePropLibrary(lib);
+  }
 }
 
 /** The soup, unchanged — named so the intent at the call site reads. */

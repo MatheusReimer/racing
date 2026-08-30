@@ -1,4 +1,5 @@
 import { PROP_TYPES, BIOME_PROPS, CITY_FRONTAGES } from './props.js';
+import { surfaceAt } from '../track/terrain.js';
 import { BARRIER_RAIL_OFFSET } from '../track/track.js';
 import { clamp, clamp01, lerp, wrap, TAU } from '../core/math.js';
 
@@ -214,7 +215,9 @@ export function generateProps(rng, track, biome, opts = {}) {
       type,
       variant: rng.int(0, 2),
       x: p.x,
-      y: p.y,
+      // Not `p.y`. That is the road plane extended sideways, and the ground
+      // two hundred metres out is nowhere near it — see `surfaceAt`.
+      y: surfaceAt(track, biome, p.x, p.z, off, lateral),
       z: p.z,
       yaw,
       scale,
