@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { buildBlockTerrain, buildBlockVerge, terrainRoll } from './terrain.js';
+import { buildHouse } from '../world/rooms.js';
+import { RNG } from '../core/rng.js';
 import { paintMarkings } from './markings.js';
 import { asphaltTexture, groundTexture, roadNormal } from '../materials/noise.js';
 import { BARRIER_RAIL_OFFSET, ROAD_LIFT, BRANCH_LIFT } from './track.js';
@@ -366,7 +368,11 @@ export class TrackMesh {
     // the branches and `groundAt` are all still there, so the car still drives
     // a circuit and the simulation cannot tell the difference. What is gone is
     // every triangle of it.
-    const roadGeo = biome.stripped
+    // Indoors there is no road. The floor is the surface the car drives on and
+    // the route across it is marked by what is standing beside it, not by a
+    // strip of tarmac laid over the tiles — which is what this looked like
+    // when it drew both: a kitchen with a B-road through it.
+    const roadGeo = (biome.stripped || biome.indoor)
       ? null : buildRibbon(track.path, track.length, (s) => track.halfWidthAt(s), {});
     if (roadGeo) {
       const road = new THREE.Mesh(roadGeo, this.roadMat);
@@ -376,7 +382,7 @@ export class TrackMesh {
     }
 
     // --- branches ---
-    for (const br of (biome.stripped ? [] : track.branches)) {
+    for (const br of ((biome.stripped || biome.indoor) ? [] : track.branches)) {
       const g = buildRibbon(br.path, br.path.length, () => br.halfWidth, {
         isBranch: br.isPit ? 2 : true, closed: false, lift: BRANCH_LIFT,
       });
@@ -440,6 +446,19 @@ export class TrackMesh {
       backdrop.matrixAutoUpdate = false;
       backdrop.renderOrder = -20;
       this.group.add(backdrop);
+    }
+
+    // --- the house itself ---
+    //
+    // Floors and walls, built from the same room ring the centreline was
+    // threaded through so the two cannot drift apart. Indoors this is what the
+    // verge and the barriers are outdoors: it is the container, not scenery.
+    if (biome.indoor && track.layout?.rooms) {
+      this.house = buildHouse(track, biome, new RNG(`house:${biome.id}`));
+      if (this.house) {
+        this.group.add(this.house);
+        this.materials.push(this.house.userData.material);
+      }
     }
 
     // --- start line ---

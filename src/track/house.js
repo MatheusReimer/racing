@@ -257,7 +257,12 @@ export function generateHouseLayout(rng, opts = {}) {
     }
 
     bias = -bias;
-    doorways.push({ x: d.x - mx, z: d.z - mz });
+    // Which two rooms it joins, so the shell builder knows which wall to cut
+    // the opening in rather than guessing from the position.
+    doorways.push({
+      x: d.x - mx, z: d.z - mz, nx: d.nx, nz: d.nz,
+      a: a.cell, b: b.cell,
+    });
 
     // Straight through the opening.
     //

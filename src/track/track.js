@@ -705,6 +705,11 @@ function finishTrack(rng, biome, opts, controls, extra = {}) {
 
   return new Track({
     path,
+    // The layout the centreline came from, kept rather than thrown away: a
+    // house has to build its floors and walls around the same rooms the route
+    // was threaded through, and rediscovering them from the spline afterwards
+    // would be inventing them a second time.
+    layout: extra.layout ?? null,
     length: path.length,
     widthProfile,
     baseWidth,
