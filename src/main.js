@@ -545,6 +545,12 @@ await loadHulls();
 if (new URLSearchParams(location.search).has('vox')) {
   const { loadVox } = await import('./data/bodies/index.js');
   await loadVox();
+  // And the world with them: props are built from six primitives and every one
+  // of them lands in `mergeFaceted`, so that is where the grid is applied.
+  const [{ useVoxelWorld }, { voxelise }] = await Promise.all([
+    import('./world/shapes.js'), import('./world/voxelise.js'),
+  ]);
+  useVoxelWorld(voxelise);
 }
 // And cut them, so the first race does not pay for it on the grid.
 warmHulls(HULLS);

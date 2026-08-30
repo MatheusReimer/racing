@@ -170,6 +170,17 @@ export function loftSections(sections, color, opts = {}) {
  * re-index: welding would let Three average normals across facets on the next
  * `computeVertexNormals`, which is the one thing this whole module avoids.
  */
+/**
+ * Whether the world is being built on the grid.
+ *
+ * Set once at boot, the same way the cars are: the caller decides and nothing
+ * below here has to carry a style flag. `mergeFaceted` is the single funnel
+ * every prop's parts pass through on their way to being one geometry, so it is
+ * the one place this has to be asked.
+ */
+let voxelWorld = null;
+export function useVoxelWorld(fn) { voxelWorld = fn; }
+
 export function mergeFaceted(list) {
   const live = list.filter(Boolean);
   if (live.length === 0) return null;
@@ -200,7 +211,7 @@ export function mergeFaceted(list) {
   out.setAttribute('color', new THREE.BufferAttribute(col, 3));
   out.computeBoundingSphere();
   for (const g of live) g.dispose();
-  return out;
+  return voxelWorld ? voxelWorld(out) : out;
 }
 
 export function triCount(geo) {
