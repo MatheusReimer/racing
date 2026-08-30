@@ -22,6 +22,21 @@ import { voxGeometry } from '../vehicle/voxmesh.js';
 /** Metres. Small enough that a barrel is a barrel, large enough to afford. */
 export const WORLD_CELL = 0.15;
 
+// A building cannot be put on this grid by sampling it, and it was tried.
+//
+// At 0.15 m a shopping mall is 191,874 triangles and a hospital 256,186 —
+// unshippable instanced across a city. Growing the cell with the object brings
+// that to 1,680 and 5,236, which is affordable, and photographed side by side
+// with the originals **the buildings are identical**. They were already boxes;
+// sampling the surface of a box gives back the same box with more vertices, and
+// the cost was 60% more triangles for nothing anybody could see.
+//
+// At any cell fine enough to actually *look* voxel — 0.25 m, say — a mall is
+// 69,000 triangles and a city of them is not drawable. So the route is not
+// sampling at all: it is generating buildings on the grid in the first place,
+// which is what the plan means by rewriting the primitives as voxel builders,
+// and it is a real piece of work rather than a threshold.
+
 /**
  * Not everything goes on the grid, and the measurement is why.
  *
@@ -57,13 +72,15 @@ export function voxelise(geo, { cell = WORLD_CELL, maxCells = 6e6, maxTris = 200
       if (pos[i + k] > b[k + 3]) b[k + 3] = pos[i + k];
     }
   }
+  const step = cell;
+
   // A cell of margin either side, so a face flush with the bound still lands.
-  const ox = b[0] - cell;
-  const oy = b[1] - cell;
-  const oz = b[2] - cell;
-  const nx = Math.ceil((b[3] - b[0]) / cell) + 3;
-  const ny = Math.ceil((b[4] - b[1]) / cell) + 3;
-  const nz = Math.ceil((b[5] - b[2]) / cell) + 3;
+  const ox = b[0] - step;
+  const oy = b[1] - step;
+  const oz = b[2] - step;
+  const nx = Math.ceil((b[3] - b[0]) / step) + 3;
+  const ny = Math.ceil((b[4] - b[1]) / step) + 3;
+  const nz = Math.ceil((b[5] - b[2]) / step) + 3;
   if (nx * ny * nz > maxCells) return geo;
 
   const acc = new Float32Array(nx * ny * nz * 3);
@@ -79,20 +96,20 @@ export function voxelise(geo, { cell = WORLD_CELL, maxCells = 6e6, maxTris = 200
       Math.abs(pos[c2] - pos[c1]) + Math.abs(pos[c2 + 1] - pos[c1 + 1]) + Math.abs(pos[c2 + 2] - pos[c1 + 2]),
       Math.abs(pos[a] - pos[c2]) + Math.abs(pos[a + 1] - pos[c2 + 1]) + Math.abs(pos[a + 2] - pos[c2 + 2]),
     );
-    // Enough samples that no cell the triangle crosses is stepped over.
-    const m = Math.min(64, Math.max(1, Math.ceil((span / cell) * 1.5)));
+    // Enough samples that no step the triangle crosses is stepped over.
+    const m = Math.min(64, Math.max(1, Math.ceil((span / step) * 1.5)));
     for (let i = 0; i <= m; i++) {
       for (let j = 0; j <= m - i; j++) {
         const u = i / m;
         const v = j / m;
         const w = 1 - u - v;
-        const x = ((pos[a] * w + pos[c1] * u + pos[c2] * v) - ox) / cell | 0;
-        const y = ((pos[a + 1] * w + pos[c1 + 1] * u + pos[c2 + 1] * v) - oy) / cell | 0;
-        const z = ((pos[a + 2] * w + pos[c1 + 2] * u + pos[c2 + 2] * v) - oz) / cell | 0;
+        const x = ((pos[a] * w + pos[c1] * u + pos[c2] * v) - ox) / step | 0;
+        const y = ((pos[a + 1] * w + pos[c1 + 1] * u + pos[c2 + 1] * v) - oy) / step | 0;
+        const z = ((pos[a + 2] * w + pos[c1 + 2] * u + pos[c2 + 2] * v) - oz) / step | 0;
         if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) continue;
-        const cellI = x + nx * (y + ny * z);
-        hits[cellI]++;
-        const o = cellI * 3;
+        const stepI = x + nx * (y + ny * z);
+        hits[stepI]++;
+        const o = stepI * 3;
         if (col) {
           acc[o] += col[a] * w + col[c1] * u + col[c2] * v;
           acc[o + 1] += col[a + 1] * w + col[c1 + 1] * u + col[c2 + 1] * v;
@@ -127,7 +144,7 @@ export function voxelise(geo, { cell = WORLD_CELL, maxCells = 6e6, maxTris = 200
   if (!filled) return geo;
 
   const out = voxGeometry({
-    nx, ny, nz, step: cell, ox, oy, oz,
+    nx, ny, nz, step, ox, oy, oz,
     at: grid, palette: Float32Array.from(palette), paint: null, count: filled,
   });
   if (out.index.count / 3 > maxTris) { out.dispose(); return geo; }
