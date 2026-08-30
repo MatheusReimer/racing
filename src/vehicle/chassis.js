@@ -542,6 +542,43 @@ export function clearHullCache(hull = null) {
 }
 
 /**
+ * The centre of every face, in the body's own coordinates.
+ *
+ * Three passes want this — the symmetry pass, the marks, and the editor that
+ * writes the marks — and they have to agree on it exactly, because a mark is a
+ * box and a face is either inside it or is not.
+ */
+export function faceCentres(hull) {
+  const { positions, indices, classes } = hull;
+  const n = classes.length;
+  const cx = new Float32Array(n);
+  const cy = new Float32Array(n);
+  const cz = new Float32Array(n);
+  for (let t = 0; t < n; t++) {
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    for (let k = 0; k < 3; k++) {
+      const v = indices[t * 3 + k] * 3;
+      x += positions[v]; y += positions[v + 1]; z += positions[v + 2];
+    }
+    cx[t] = x / 3; cy[t] = y / 3; cz[t] = z / 3;
+  }
+  return { cx, cy, cz };
+}
+
+/**
+ * What each face of a hull ended up being, marks and all.
+ *
+ * The editor needs the answer the car was actually built from — "why is this
+ * strip grey?" — and the cut keeps it, so this is a lookup rather than a second
+ * run of the passes.
+ */
+export function hullClasses(hull) {
+  return hullShared(hull).classes;
+}
+
+/**
  * Make the two halves of a car agree about what each face is.
  *
  * A car is symmetric. Cut it down the middle and the two halves are the same
@@ -576,19 +613,7 @@ export function symmetriseClasses(hull) {
   const PAIR = 0.06;
   const VOTE = 0.05;
 
-  const cx = new Float32Array(n);
-  const cy = new Float32Array(n);
-  const cz = new Float32Array(n);
-  for (let t = 0; t < n; t++) {
-    let x = 0;
-    let y = 0;
-    let z = 0;
-    for (let k = 0; k < 3; k++) {
-      const v = indices[t * 3 + k] * 3;
-      x += positions[v]; y += positions[v + 1]; z += positions[v + 2];
-    }
-    cx[t] = x / 3; cy[t] = y / 3; cz[t] = z / 3;
-  }
+  const { cx, cy, cz } = faceCentres(hull);
 
   // A grid over the *folded* car — |x| — so a face and its mirror land in the
   // same cell and the pairing is a local lookup rather than a search.
@@ -754,20 +779,7 @@ function hullShared(hull) {
   const bodyName = hull.name
     ?? Object.keys(HULLS).find((k) => HULLS[k] === hull);
   if (bodyName && MARKS[bodyName]?.length) {
-    const cx = new Float32Array(n);
-    const cy = new Float32Array(n);
-    const cz = new Float32Array(n);
-    for (let t = 0; t < n; t++) {
-      let x = 0;
-      let y = 0;
-      let z = 0;
-      for (let k = 0; k < 3; k++) {
-        const v = indices[t * 3 + k] * 3;
-        x += positions[v]; y += positions[v + 1]; z += positions[v + 2];
-      }
-      cx[t] = x / 3; cy[t] = y / 3; cz[t] = z / 3;
-    }
-    applyMarks(classes, { cx, cy, cz }, MARKS[bodyName]);
+    applyMarks(classes, faceCentres(hull), MARKS[bodyName]);
   }
 
   const CENTRE_BIAS = 0.02;
@@ -816,6 +828,10 @@ function hullShared(hull) {
 
   const bodyGeo = cut(bodyIdx);
   const shared = {
+    // What every face of the hull ended up being, marks and all — kept so the
+    // editor can answer "why is this strip grey?" without running the passes
+    // a second time and hoping it gets the same answer.
+    classes,
     glass: glassIdx.length ? cut(glassIdx) : null,
     // The class of each surviving triangle, in the order they were cut, so a
     // per-car colour array can be filled without walking the hull again.

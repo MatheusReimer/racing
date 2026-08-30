@@ -6,15 +6,17 @@
     font: 13px/1.5 ui-sans-serif, system-ui, sans-serif; overflow: hidden; }
   canvas { display: block; }
   #hud { position: fixed; top: 12px; left: 12px; background: rgba(10,14,20,.86);
-    border: 1px solid #232b38; border-radius: 8px; padding: 12px 14px; width: 268px; }
+    border: 1px solid #232b38; border-radius: 8px; padding: 12px 14px; width: 292px; }
   #hud h1 { font-size: 13px; margin: 0 0 8px; letter-spacing: .10em; text-transform: uppercase; }
-  select, button { font: inherit; background: #161c26; color: inherit;
-    border: 1px solid #2b3442; border-radius: 5px; padding: 4px 8px; }
-  button { cursor: pointer; }
-  .kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin: 9px 0; }
+  select { font: inherit; background: #161c26; color: inherit;
+    border: 1px solid #2b3442; border-radius: 5px; padding: 4px 8px; width: 100%; }
+  .lbl { color: #8894a8; margin: 9px 0 4px; }
+  .kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
   .kinds b { display: block; text-align: center; padding: 5px 0; border-radius: 5px;
     border: 1px solid #2b3442; font-weight: 500; cursor: pointer; }
   .kinds b.on { outline: 2px solid #4fa3e3; }
+  #nums { margin-top: 9px; }
+  #hist { color: #8894a8; font-size: 12px; margin-top: 5px; }
   #keys { color: #8894a8; font-size: 12px; margin-top: 9px; }
   #keys kbd { background: #1a212c; border: 1px solid #2b3442; border-radius: 3px;
     padding: 0 4px; font: inherit; }
@@ -24,11 +26,16 @@
 <div id="hud">
   <h1>Marcar o carro</h1>
   <select id="car"></select>
-  <div class="kinds" id="kinds"></div>
-  <div>raio <b id="rad">8</b> cm &nbsp; espelho <b id="mir">sim</b> &nbsp; marcas <b id="cnt">0</b></div>
+  <div class="lbl">o que a caixa procura &nbsp; <kbd>D</kbd> &nbsp; <kbd>alt+clique</kbd> pega do carro</div>
+  <div class="kinds" id="from"></div>
+  <div class="lbl">no que vira &nbsp; <kbd>1</kbd>…<kbd>6</kbd></div>
+  <div class="kinds" id="to"></div>
+  <div id="nums">folga <b id="pad">2</b> cm &nbsp; espelho <b id="mir">sim</b>
+    &nbsp; caixas <b id="cnt">0</b> &nbsp; aqui <b id="here">—</b></div>
+  <div id="hist"></div>
   <div id="keys">
-    <kbd>clique</kbd> marca &nbsp; <kbd>shift+clique</kbd> apaga<br>
-    <kbd>1</kbd>…<kbd>6</kbd> o que é &nbsp; <kbd>[</kbd> <kbd>]</kbd> raio<br>
+    <kbd>clique</kbd> canto, <kbd>clique</kbd> canto oposto &nbsp; <kbd>Esc</kbd> cancela<br>
+    <kbd>shift+clique</kbd> apaga a caixa &nbsp; <kbd>[</kbd> <kbd>]</kbd> folga<br>
     <kbd>M</kbd> espelho &nbsp; <kbd>Z</kbd> desfaz &nbsp; <kbd>S</kbd> salvar
   </div>
   <div id="say"></div>

@@ -22,7 +22,13 @@ function markWriter() {
             if (!/^[a-z0-9_]{1,32}$/.test(name ?? '')) throw new Error('bad name');
             if (!Array.isArray(marks)) throw new Error('marks must be a list');
             mkdirSync('public/marks', { recursive: true });
-            writeFileSync(`public/marks/${name}.json`, `${JSON.stringify(marks, null, 2)}\n`);
+            // One mark per line. Pretty-printing puts a crate's six numbers on
+            // six lines, and a file of those is unreadable as a diff — which is
+            // half of why a mark is a box in space rather than a face list.
+            const text = marks.length
+              ? `[\n${marks.map((m) => `  ${JSON.stringify(m)}`).join(',\n')}\n]\n`
+              : '[]\n';
+            writeFileSync(`public/marks/${name}.json`, text);
             res.setHeader('content-type', 'application/json');
             res.end(JSON.stringify({ ok: true, wrote: marks.length }));
           } catch (e) {
