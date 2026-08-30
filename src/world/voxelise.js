@@ -13,29 +13,39 @@ import { voxGeometry } from '../vehicle/voxmesh.js';
 // car: it is a surface, sampled onto cells, with the buried faces dropped and
 // the flat runs merged.
 //
-// The cell is **fixed in metres**, and that is the whole of the look. Cars
-// derive theirs from their own length, because a car is always about four
-// metres and its cubes come out the same size anyway. The world does not: a
-// barrel is half a metre and a facade is forty, and a cell scaled to each would
-// give them different-sized cubes and no style at all.
+// The cell is a floor in metres and a target in cells — see `TARGET_CELLS`.
+// Everything small enough shares one cube size, which is what gives the look
+// its coherence; only the things too large to afford that grow, and those are
+// seen from far enough away that it does not read.
 
 /** Metres. Small enough that a barrel is a barrel, large enough to afford. */
 export const WORLD_CELL = 0.15;
 
-// A building cannot be put on this grid by sampling it, and it was tried.
-//
-// At 0.15 m a shopping mall is 191,874 triangles and a hospital 256,186 —
-// unshippable instanced across a city. Growing the cell with the object brings
-// that to 1,680 and 5,236, which is affordable, and photographed side by side
-// with the originals **the buildings are identical**. They were already boxes;
-// sampling the surface of a box gives back the same box with more vertices, and
-// the cost was 60% more triangles for nothing anybody could see.
-//
-// At any cell fine enough to actually *look* voxel — 0.25 m, say — a mall is
-// 69,000 triangles and a city of them is not drawable. So the route is not
-// sampling at all: it is generating buildings on the grid in the first place,
-// which is what the plan means by rewriting the primitives as voxel builders,
-// and it is a real piece of work rather than a threshold.
+/**
+ * How many cells across the biggest thing gets, and why a building's cubes are
+ * bigger than a barrel's.
+ *
+ * One cell everywhere is the ideal, and the cost forbids it: a facade is forty
+ * metres and at 0.15 m that is a grid of thirty million cells. So the cell
+ * grows with the object, to a fixed number across it. The cubes are then not
+ * the same size in *metres* — but a facade is seen from fifty metres and a
+ * barrel from five, so they come out much closer to the same size on the
+ * screen, which is where anybody actually looks.
+ *
+ * This was tried once and reverted on a measurement that was wrong: with the
+ * sampler leaving holes, a building meshed to the same shape at sixty per cent
+ * more triangles, so it looked like the grid bought nothing. With the sampling
+ * fixed a facade is 2,158 triangles against 396 and a boulder 3,022 against
+ * 180 — and the boulder is visibly a boulder made of cubes.
+ *
+ * The buildings still change least, and that is honest: a wall on a grid looks
+ * like a wall. What they buy is coherence. A smooth building standing next to
+ * a voxel barrel is the thing that reads as wrong.
+ */
+export const TARGET_CELLS = 100;
+
+/** The cell an object of this size gets. */
+export const cellFor = (maxDim) => Math.max(WORLD_CELL, maxDim / TARGET_CELLS);
 
 /**
  * Not everything goes on the grid, and the measurement is why.
@@ -56,7 +66,7 @@ export const WORLD_CELL = 0.15;
  * @param maxTris  give up above this and keep the original
  * @returns a new geometry, or the one passed in
  */
-export function voxelise(geo, { cell = WORLD_CELL, maxCells = 6e6, maxTris = 20000 } = {}) {
+export function voxelise(geo, { cell = null, maxCells = 8e6, maxTris = 30000 } = {}) {
   const posAttr = geo.attributes?.position;
   if (!posAttr) return geo;
   const pos = posAttr.array;
@@ -72,7 +82,8 @@ export function voxelise(geo, { cell = WORLD_CELL, maxCells = 6e6, maxTris = 200
       if (pos[i + k] > b[k + 3]) b[k + 3] = pos[i + k];
     }
   }
-  const step = cell;
+  // Scaled to the object unless the caller insisted.
+  const step = cell ?? cellFor(Math.max(b[3] - b[0], b[4] - b[1], b[5] - b[2]));
 
   // A cell of margin either side, so a face flush with the bound still lands.
   const ox = b[0] - step;
@@ -96,8 +107,16 @@ export function voxelise(geo, { cell = WORLD_CELL, maxCells = 6e6, maxTris = 200
       Math.abs(pos[c2] - pos[c1]) + Math.abs(pos[c2 + 1] - pos[c1 + 1]) + Math.abs(pos[c2 + 2] - pos[c1 + 2]),
       Math.abs(pos[a] - pos[c2]) + Math.abs(pos[a + 1] - pos[c2 + 1]) + Math.abs(pos[a + 2] - pos[c2 + 2]),
     );
-    // Enough samples that no step the triangle crosses is stepped over.
-    const m = Math.min(64, Math.max(1, Math.ceil((span / step) * 1.5)));
+    // Enough samples that no cell the triangle crosses is stepped over — and the
+    // ceiling matters far more than it looks. At 64 a shopping mall's wall, two
+    // triangles thirty-seven metres across, was sampled every 58 cm onto a
+    // 15 cm grid: the shell came out full of holes, and a hole isolates every
+    // cell around it, so nothing merges and every face is exposed. That mall
+    // meshed to 220,656 triangles. At 256 it is 1,040. The greedy mesher was
+    // never the problem. Higher is not better either — at 1,024 it is 3,358,
+    // because the extra samples catch stray cells at the edges of triangles
+    // and those fragment the runs the merge depends on.
+    const m = Math.min(256, Math.max(1, Math.ceil((span / step) * 1.5)));
     for (let i = 0; i <= m; i++) {
       for (let j = 0; j <= m - i; j++) {
         const u = i / m;

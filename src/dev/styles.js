@@ -429,7 +429,16 @@ export function voxelGrid(geo, { cells = 145 } = {}) {
       Math.abs(cx - bx) + Math.abs(cy - by) + Math.abs(cz - bz),
       Math.abs(ax - cx) + Math.abs(ay - cy) + Math.abs(az - cz),
     );
-    const m = Math.min(32, Math.max(1, Math.ceil((span / step) * 1.5)));
+    // Enough samples that no cell the triangle crosses is stepped over — and the
+    // ceiling matters far more than it looks. At 64 a shopping mall's wall, two
+    // triangles thirty-seven metres across, was sampled every 58 cm onto a
+    // 15 cm grid: the shell came out full of holes, and a hole isolates every
+    // cell around it, so nothing merges and every face is exposed. That mall
+    // meshed to 220,656 triangles. At 256 it is 1,040. The greedy mesher was
+    // never the problem. Higher is not better either — at 1,024 it is 3,358,
+    // because the extra samples catch stray cells at the edges of triangles
+    // and those fragment the runs the merge depends on.
+    const m = Math.min(256, Math.max(1, Math.ceil((span / step) * 1.5)));
     for (let i = 0; i <= m; i++) {
       for (let j = 0; j <= m - i; j++) {
         const u = i / m, v = j / m, w = 1 - u - v;
