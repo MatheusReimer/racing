@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { voxGeometry } from '../vehicle/voxmesh.js';
 
 // A grid you can draw on.
@@ -67,13 +68,21 @@ export class VoxCanvas {
   /**
    * A palette slot for this colour, deduped.
    *
+   * Takes a number or anything `THREE.Color` reads, because the biome palettes
+   * are CSS strings — `'#b9cddc'` — and a string shifted right by sixteen is
+   * zero. Every colour taken straight from a palette was therefore black, and
+   * only the ones that happened to pass through `mix` or `shade` first, which
+   * normalise on the way through, came out right. A snow bank came out the
+   * colour of coal.
+   *
    * @returns the value stored in a cell: an index plus one, because zero is
    *          empty and there is no way around that.
    */
   colour(hex) {
-    const r = ((hex >> 16) & 255) / 255;
-    const g = ((hex >> 8) & 255) / 255;
-    const b = (hex & 255) / 255;
+    const n = typeof hex === 'number' ? hex : new THREE.Color(hex).getHex();
+    const r = ((n >> 16) & 255) / 255;
+    const g = ((n >> 8) & 255) / 255;
+    const b = (n & 255) / 255;
     const qr = Math.round(r * QUANT);
     const qg = Math.round(g * QUANT);
     const qb = Math.round(b * QUANT);
@@ -162,4 +171,100 @@ export const CELL_LADDER = [0.15, 0.25, 0.4, 0.6];
 export function cellFor(maxDim) {
   for (const c of CELL_LADDER) if (maxDim / c <= 110) return c;
   return CELL_LADDER[CELL_LADDER.length - 1];
+}
+
+// ---------------------------------------------------------------------------
+// Compositions
+//
+// Everything below is `box` called in a loop. They are here rather than as
+// methods because they are not primitives — a caller can always write the loop
+// — and because keeping the class to one primitive is what makes it possible
+// to reason about what a canvas costs.
+// ---------------------------------------------------------------------------
+
+/**
+ * A filled disc in the x/z plane, one course tall.
+ *
+ * The shape half the trackside furniture is: barrels, tyres, drums, oil
+ * tanks. A voxel disc is not a polygon with a segment count — it is every cell
+ * whose centre falls inside the radius — which is why these come out looking
+ * turned rather than faceted.
+ */
+export function disc(C, cx, cz, r, y0, y1, v) {
+  const ri = Math.max(1, Math.round(r));
+  for (let dz = -ri; dz <= ri; dz++) {
+    // Half-chord at this row, so each row is one `box` rather than r² of them.
+    const half = Math.floor(Math.sqrt(Math.max(0, ri * ri - dz * dz)) + 0.4);
+    if (half < 0) continue;
+    C.box(cx - half, y0, cz + dz, cx + half + 1, y1, cz + dz + 1, v);
+  }
+}
+
+/** A ring: a disc with a smaller disc taken back out of it. */
+export function ring(C, cx, cz, rOuter, rInner, y0, y1, v) {
+  disc(C, cx, cz, rOuter, y0, y1, v);
+  disc(C, cx, cz, rInner, y0, y1, 0);
+}
+
+/**
+ * A lumpy blob: a rock.
+ *
+ * A radius that wobbles with direction, evaluated per cell. Sampling a smooth
+ * rock onto a grid gives a stepped smooth rock, which is a fair result and a
+ * soft one; deciding the radius per cell instead lets the lumps be a cell deep,
+ * which is the scale the rest of the world is built at.
+ *
+ * @param lobes  how many bulges go round it — few and it is an egg, many and
+ *               it is gravel
+ */
+export function blob(C, cx, cy, cz, r, rng, colours, { lobes = 4, squash = 0.72 } = {}) {
+  const ri = Math.max(2, Math.round(r));
+  // Fixed wobble per instance, so the shape is coherent rather than noise.
+  const a = [];
+  for (let i = 0; i < 6; i++) a.push(rng.range(-0.22, 0.22));
+  for (let dz = -ri; dz <= ri; dz++) {
+    for (let dy = -ri; dy <= ri; dy++) {
+      for (let dx = -ri; dx <= ri; dx++) {
+        const y = dy / squash;
+        const d = Math.sqrt(dx * dx + y * y + dz * dz);
+        if (d < 0.001) { C.box(cx, cy, cz, cx + 1, cy + 1, cz + 1, colours[0]); continue; }
+        const th = Math.atan2(dz, dx);
+        const ph = Math.asin(Math.max(-1, Math.min(1, y / d)));
+        const wob = 1
+          + a[0] * Math.sin(th * lobes) + a[1] * Math.cos(ph * lobes)
+          + a[2] * Math.sin(th * 2 + ph * 3) + a[3] * Math.cos(th * 3 - ph * 2)
+          + a[4] * Math.sin(ph * 5) + a[5] * Math.cos(th * 5);
+        if (d > ri * wob) continue;
+        const yy = cy + dy;
+        if (yy < 0) continue;
+        // Banded by height, which is how a rock reads: lit on top, dark in the
+        // cracks, and it keeps long runs of one colour for the mesher.
+        const band = Math.min(colours.length - 1,
+          Math.max(0, Math.floor(((dy + ri) / (2 * ri)) * colours.length)));
+        C.box(cx + dx, yy, cz + dz, cx + dx + 1, yy + 1, cz + dz + 1, colours[band]);
+      }
+    }
+  }
+}
+
+/**
+ * A lattice: a box frame with its middle punched out on a pitch.
+ *
+ * Cranes, gantries and pylons are all this. Punching holes rather than
+ * assembling members means the result is always closed and always one piece,
+ * and a hole is a `box` of zeroes.
+ */
+export function lattice(C, x0, y0, z0, x1, y1, z1, v, pitch = 4) {
+  C.box(x0, y0, z0, x1, y1, z1, v);
+  const along = x1 - x0 > y1 - y0 ? 'x' : 'y';
+  const n = Math.floor(((along === 'x' ? x1 - x0 : y1 - y0)) / pitch);
+  for (let i = 0; i < n; i++) {
+    if (along === 'x') {
+      const a = x0 + 1 + i * pitch;
+      C.box(a, y0 + 1, z0 - 1, a + pitch - 2, y1 - 1, z1 + 1, 0);
+    } else {
+      const a = y0 + 1 + i * pitch;
+      C.box(x0 - 1, a, z0 + 1, x1 + 1, a + pitch - 2, z1 - 1, 0);
+    }
+  }
 }

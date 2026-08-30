@@ -239,7 +239,14 @@ function buildLights(spec) {
     parts.push(boxOf(0.22, 0.12, 0.06, 0xff2a1e, { x: ix * w * 0.34, y, z: -l / 2 - 0.02 }));
     parts.push(boxOf(0.24, 0.12, 0.06, 0xfff0d0, { x: ix * w * 0.34, y, z: l / 2 + 0.02 }));
   }
-  return mergeFaceted(parts);
+  // Explicitly off the world funnel, like every other merge in this file.
+  //
+  // It used to rely on the funnel's global detail level being whatever the
+  // last prop happened to leave it at, which was a bug waiting for the props
+  // to stop setting it — and they have: nothing in the world is sampled any
+  // more, so the global would have sat at the horizon level and lamps would
+  // have been meshed at eight times the cell they want.
+  return mergeFaceted(parts, { voxel: false });
 }
 
 export class TrafficMesh {
@@ -251,7 +258,8 @@ export class TrafficMesh {
     const built = BODIES.map((b) => buildBody(b, rng));
     this.bodyGeos = built.map((x) => x.body);
     // Glass rides with the lamps, on the unlit material.
-    this.lightGeos = BODIES.map((b, i) => mergeFaceted([buildLights(b), built[i].glass]));
+    this.lightGeos = BODIES.map((b, i) => mergeFaceted([buildLights(b), built[i].glass],
+      { voxel: false }));
 
     // Lit like the cars you are racing, not like scenery.
     //

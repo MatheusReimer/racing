@@ -547,15 +547,14 @@ await loadHulls();
 if (!new URLSearchParams(location.search).has('smooth')) {
   const { loadVox } = await import('./data/bodies/index.js');
   await loadVox();
-  // And the world with them: props are built from six primitives and every one
-  // of them lands in `mergeFaceted`, so that is where the grid is applied.
-  const [{ useVoxelWorld }, { voxelise }] = await Promise.all([
-    import('./world/shapes.js'), import('./world/voxelise.js'),
+  // The world needs nothing here: every prop and every building is drawn on
+  // the grid by its own generator rather than sampled onto one afterwards.
+  // Traffic is the last thing that is still sampled, because a civilian car is
+  // built from the same primitives the racers' bolt-ons are, and it asks for
+  // the grid once, at its own cell. See `trafficmesh.js`.
+  const [{ voxelise }, { useVoxelTraffic }] = await Promise.all([
+    import('./world/voxelise.js'), import('./race/trafficmesh.js'),
   ]);
-  useVoxelWorld(voxelise);
-  // Traffic merges three times before it is done, so it opts out of the funnel
-  // and asks for the grid once, at its own cell. See `trafficmesh.js`.
-  const { useVoxelTraffic } = await import('./race/trafficmesh.js');
   useVoxelTraffic(voxelise);
 }
 // And cut them, so the first race does not pay for it on the grid.

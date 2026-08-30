@@ -171,44 +171,27 @@ export function loftSections(sections, color, opts = {}) {
  * `computeVertexNormals`, which is the one thing this whole module avoids.
  */
 /**
- * Whether the world is being built on the grid.
+ * The world sampler is gone.
  *
- * Set once at boot, the same way the cars are: the caller decides and nothing
- * below here has to carry a style flag. `mergeFaceted` is the single funnel
- * every prop's parts pass through on their way to being one geometry, so it is
- * the one place this has to be asked.
+ * There used to be a hook here: every prop's parts passed through
+ * `mergeFaceted` on their way to being one geometry, and the world's grid was
+ * applied at that funnel. It was the right shape for the question at the time
+ * — how do you voxelise two hundred and forty-one builder calls without
+ * rewriting them — and the answer turned out to be that you cannot. Sampling a
+ * shape onto a grid gives back the shape you gave it, and the shapes were
+ * drawn for a smooth renderer.
+ *
+ * So every one of them was rewritten to be drawn *on* the grid instead — see
+ * `buildings.js`, `street.js`, `yard.js`, `nature.js` — and nothing reaches
+ * this file for voxelising any more. `opts.voxel` survives as an accepted and
+ * ignored option only because traffic still passes it, and traffic passing it
+ * is what documents that it does not want it.
  */
-let voxelWorld = null;
-export function useVoxelWorld(fn) { voxelWorld = fn; }
 
-/**
- * How coarse the grid is for what is being built right now.
- *
- * 0 at the kerb, 3 at the horizon — the same ladder `LODS` already walks. A
- * prop two hundred metres away does not need 15 cm cubes, and the cost of a
- * grid goes with the square of how fine it is, so this is where the world
- * becomes affordable to *draw* rather than merely to build.
- *
- * Set around a build rather than passed through it: `mergeFaceted` is called
- * from inside two hundred and forty-one builder calls and none of them should
- * have to know the grid exists.
- */
-let voxelDetail = 0;
-export function setVoxelDetail(d) { voxelDetail = d; }
-
-/**
- * @param opts.voxel  false for an intermediate merge.
- *
- * A builder that merges twice — parts, then parts-with-parts — would otherwise
- * put the result through the grid twice, and a grid of a grid is a coarser
- * grid. Traffic did exactly that, three times over, and came out as a block.
- */
 export function mergeFaceted(list, opts = {}) {
   const live = list.filter(Boolean);
   if (live.length === 0) return null;
-  if (live.length === 1) {
-    return voxelWorld && opts.voxel !== false ? voxelWorld(live[0], voxelDetail) : live[0];
-  }
+  if (live.length === 1) return live[0];
 
   let total = 0;
   for (const g of live) total += g.attributes.position.count;
@@ -235,7 +218,7 @@ export function mergeFaceted(list, opts = {}) {
   out.setAttribute('color', new THREE.BufferAttribute(col, 3));
   out.computeBoundingSphere();
   for (const g of live) g.dispose();
-  return voxelWorld && opts.voxel !== false ? voxelWorld(out, voxelDetail) : out;
+  return out;
 }
 
 export function triCount(geo) {

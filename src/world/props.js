@@ -1,8 +1,5 @@
 import * as THREE from 'three';
-import {
-  boxOf, prism, cone, rock, extrude, loftSections,
-  mergeFaceted, triCount, facetedMaterial, shade, mix, setVoxelDetail,
-} from './shapes.js';
+import { triCount, facetedMaterial } from './shapes.js';
 import { RNG } from '../core/rng.js';
 import {
   voxFacade, voxMall, voxTownhouse, voxTenement, voxBlock,
@@ -14,6 +11,14 @@ import {
   voxStreetlight, voxTrafficLight, voxNeonSign, voxBillboard, voxBusStop,
   voxJerseyBarrier, voxDumpster, voxContainer, voxCrate, voxMarker,
 } from './street.js';
+import {
+  voxRock, voxBoulder, voxPine, voxDeadTree, voxCactus, voxPalm, voxBones,
+  voxIceBlock, voxSnowBank,
+} from './nature.js';
+import {
+  voxBarrel, voxTyreStack, voxPole, voxWreck, voxShack, voxBrazier,
+  voxGantry, voxCrane, voxPipes,
+} from './yard.js';
 import { lerp, TAU } from '../core/math.js';
 
 // The things that make a track a place.
@@ -62,514 +67,9 @@ export const LODS = [
   { id: 3, sides: 0.40, fine: false },  // horizon, read as silhouette
 ];
 
-/** Segment count for this detail level. */
-function S(n, ctx) {
-  return Math.max(3, Math.round(n * (ctx?.sides ?? 1)));
-}
 
-/** Subdivision level for `rock`, which counts differently. */
-function Dt(n, ctx) {
-  const k = ctx?.sides ?? 1;
-  return k >= 0.95 ? n : k >= 0.55 ? Math.max(0, n - 1) : 0;
-}
 
-// ---------------------------------------------------------------------------
-// Universal track furniture
-// ---------------------------------------------------------------------------
 
-function tyreStack(rng, pal, ctx = {}) {
-  const fine = ctx.fine !== false;
-  const parts = [];
-  const n = rng.int(3, 5);
-  for (let i = 0; i < n; i++) {
-    const r = 0.55 + rng.spread(0.05);
-    parts.push(prism(S(18, ctx), r, r * 0.94, 0.30, i % 2 ? 0x1b1d21 : 0x24272c, {
-      y: i * 0.28, rotY: rng.range(0, TAU), rng, variation: 0.1,
-    }));
-    // Tread blocks around the crown, and the wheel visible in the middle.
-    for (let k = 0; fine && k < 12; k++) {
-      const a = (k / 12) * TAU;
-      parts.push(boxOf(0.1, 0.2, 0.07, 0x101216, {
-        x: Math.cos(a) * (r + 0.02), z: Math.sin(a) * (r + 0.02),
-        y: i * 0.28 + 0.15, rotY: -a, rng,
-      }));
-    }
-    parts.push(prism(S(12, ctx), r * 0.42, r * 0.42, 0.16,
-      shade(pal.accent, 0.5), { y: i * 0.28 + 0.07, rng }));
-  }
-  // A painted top tyre reads as deliberate rather than as litter.
-  parts.push(prism(S(18, ctx), 0.5, 0.5, 0.12, pal.accent, { y: n * 0.28, rng }));
-  return mergeFaceted(parts);
-}
-
-function barrel(rng, pal, ctx = {}) {
-  const parts = [];
-  // The vestigial `color` parameter that used to sit in this slot took the
-  // context object instead, and `new THREE.Color({...})` returns white without
-  // complaining — so every barrel on every track has been rendering white
-  // rather than red or green. Nothing ever passed a colour; the parameter is
-  // gone rather than reordered.
-  const c = rng.bool(0.5) ? 0xb5462f : 0x4a6b52;
-  parts.push(prism(S(18, ctx), 0.42, 0.42, 1.05, c, { rng, variation: 0.1 }));
-  // Rolling hoops.
-  for (const y of [0.26, 0.74]) {
-    parts.push(prism(S(18, ctx), 0.46, 0.46, 0.08, shade(c, 0.6), { y, rng }));
-  }
-  parts.push(prism(S(18, ctx), 0.38, 0.34, 0.07, shade(c, 1.25), { y: 1.03, rng }));
-  // Rim lip, bung, and a label band. A barrel is a cylinder until it has the
-  // three things that say which way up it goes — and none of the three survive
-  // a hundred metres, so they are built only for the near level.
-  if (ctx.fine === false) return mergeFaceted(parts);
-  parts.push(prism(S(18, ctx), 0.44, 0.44, 0.05, shade(c, 0.55), { y: 1.0, rng }));
-  parts.push(prism(S(18, ctx), 0.44, 0.44, 0.05, shade(c, 0.55), { y: 0.0, rng }));
-  parts.push(prism(S(8, ctx), 0.09, 0.09, 0.05, shade(c, 0.45), { x: 0.18, y: 1.09, rng }));
-  parts.push(prism(S(18, ctx), 0.425, 0.425, 0.26, shade(c, 1.35), { y: 0.44, rng, variation: 0.05 }));
-  for (let i = 0; i < 3; i++) {
-    parts.push(boxOf(0.07, 0.16, 0.03, shade(c, 0.4), {
-      x: -0.1 + i * 0.1, y: 0.57, z: 0.415, rng,
-    }));
-  }
-  return mergeFaceted(parts);
-}
-
-function gantry(rng, pal, ctx = {}) {
-  const fine = ctx.fine !== false;
-  const parts = [];
-  // Built to a nominal 11 m half-width and scaled per instance by PropsMesh,
-  // because every builder receives the same (rng, palette, ctx) signature —
-  // reading a third argument that is actually the context object produced NaN
-  // geometry and a bounding-sphere warning with no other symptom.
-  const NOMINAL_HALF_WIDTH = 11;
-  const span = NOMINAL_HALF_WIDTH * 2 + 4;
-  const h = 6.2;
-  for (const side of [-1, 1]) {
-    const x = side * (span / 2);
-    parts.push(prism(S(10, ctx), 0.34, 0.26, h, 0x4a5057, { x, rng }));
-    parts.push(boxOf(1.2, 0.3, 1.2, 0x3a4046, { x, y: 0.15, rng }));
-  }
-  // A truss, not a plank. This is the biggest structure over the road and it
-  // was a single box spanning twenty-six metres.
-  parts.push(boxOf(span, 0.22, 0.3, 0x565c64, { y: h + 0.42, rng }));
-  parts.push(boxOf(span, 0.22, 0.3, 0x565c64, { y: h - 0.34, rng }));
-  const bays = fine ? 22 : 8;
-  for (let i = 0; i < bays; i++) {
-    const x = lerp(-span / 2 + 0.4, span / 2 - 0.4, i / (bays - 1));
-    parts.push(boxOf(0.12, 0.78, 0.16, 0x4d535a, { x, y: h + 0.04, rng }));
-    // Built at the origin, rotated, then placed: `boxOf` applies its offset
-    // before returning, so rotating the result swings it about the world
-    // origin instead of about itself.
-    const d = boxOf(0.1, 1.05, 0.14, 0x474d54, { rng });
-    d.rotateZ(i % 2 ? 0.62 : -0.62);
-    d.translate(x, h + 0.04, 0);
-    parts.push(d);
-  }
-  parts.push(boxOf(span * 0.9, 0.7, 0.16, pal.accent, { y: h - 0.5, z: 0.3, rng }));
-  // Lamp housings.
-  for (let i = 0; i < 5; i++) {
-    parts.push(boxOf(0.5, 0.34, 0.34, 0x2a2e33, {
-      x: lerp(-span * 0.36, span * 0.36, i / 4), y: h - 0.95, rng,
-    }));
-  }
-  return mergeFaceted(parts);
-}
-
-// ---------------------------------------------------------------------------
-// Biome props
-// ---------------------------------------------------------------------------
-
-function wreck(rng, pal, ctx = {}) {
-  // A stripped car body: the loft primitive, rusted and sagging.
-  const L = 4.2 + rng.range(0, 0.8);
-  const W = 1.9;
-  const rust = mix(0x7a4a30, 0x59493f, rng.next());
-  const parts = [];
-  parts.push(loftSections([
-    { z: L * 0.5, w: W * 0.6, h: 0.5, y: 0.55 },
-    { z: L * 0.2, w: W * 0.95, h: 0.7, y: 0.6 },
-    { z: -L * 0.15, w: W, h: 0.72, y: 0.58 },
-    { z: -L * 0.5, w: W * 0.7, h: 0.5, y: 0.5 },
-  ], rust, { rng, variation: 0.12 }));
-  // Roof, sometimes caved in.
-  if (rng.bool(0.6)) {
-    parts.push(loftSections([
-      { z: L * 0.1, w: W * 0.6, h: 0.1, y: 0.95 },
-      { z: -L * 0.25, w: W * 0.62, h: 0.45, y: 1.05 + rng.spread(0.12) },
-    ], shade(rust, 0.8), { rng }));
-  }
-  // Whatever wheels are left.
-  for (const [ix, iz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
-    if (rng.bool(0.3)) continue;
-    parts.push(prism(S(14, ctx), 0.34, 0.34, 0.24, 0x1a1c20, {
-      x: ix * (W * 0.5 - 0.05), y: 0.34, z: iz * L * 0.3, rng,
-    }));
-  }
-  // Bumpers, an exposed chassis rail, and a stripped engine bay. A wreck is
-  // read by what is missing from it.
-  if (ctx.fine === false) return mergeFaceted(parts);
-  for (const iz of [1, -1]) {
-    parts.push(boxOf(W * 0.92, 0.16, 0.14, shade(rust, 0.7), {
-      y: 0.5, z: iz * (L * 0.5 + 0.05), rng, variation: 0.16,
-    }));
-  }
-  for (const ix of [-1, 1]) {
-    parts.push(boxOf(0.12, 0.14, L * 0.86, shade(rust, 0.62), {
-      x: ix * W * 0.3, y: 0.34, rng,
-    }));
-  }
-  parts.push(boxOf(W * 0.55, 0.35, 0.8, 0x2e2a26, { y: 0.62, z: L * 0.24, rng }));
-  for (let i = 0; i < 4; i++) {
-    parts.push(prism(S(8, ctx), 0.09, 0.09, 0.3, 0x3a352f, {
-      x: -W * 0.2 + i * (W * 0.4 / 3), y: 0.8, z: L * 0.24, rng,
-    }));
-  }
-  parts.push(boxOf(W * 0.86, 0.1, 0.1, shade(rust, 0.55), { y: 0.92, z: L * 0.02, rng }));
-  return mergeFaceted(parts);
-}
-
-function shack(rng, pal, ctx = {}) {
-  const w = 3.4 + rng.range(0, 2);
-  const d = 3.0 + rng.range(0, 1.6);
-  const h = 2.4 + rng.range(0, 0.8);
-  const wall = mix(pal.prop, 0x6b5a48, rng.next());
-  const parts = [boxOf(w, h, d, wall, { y: h / 2, rng, variation: 0.1 })];
-  // Lean-to roof.
-  parts.push(extrude([[-w / 2 - 0.3, -d / 2 - 0.3], [w / 2 + 0.3, -d / 2 - 0.3],
-    [w / 2 + 0.3, d / 2 + 0.3], [-w / 2 - 0.3, d / 2 + 0.3]], 0.18,
-    shade(wall, 0.65), { y: h, rng }));
-  // Corrugation, and a door.
-  if (ctx.fine === false) return mergeFaceted(parts);
-  for (let i = 0; i < 6; i++) {
-    parts.push(boxOf(0.1, h, 0.06, shade(wall, 0.82), {
-      x: -w / 2 + 0.4 + i * (w / 6), z: d / 2 + 0.02, y: h / 2, rng,
-    }));
-  }
-  parts.push(boxOf(0.9, 1.8, 0.08, 0x2b2622, { y: 0.9, z: d / 2 + 0.05, rng }));
-  // A window, a flue, and ribs across the roof. Silhouette does most of the
-  // work at this distance and a plain box has none.
-  parts.push(boxOf(0.7, 0.6, 0.06, 0x14181c, { x: w * 0.28, y: h * 0.62, z: d / 2 + 0.04, rng }));
-  parts.push(boxOf(0.8, 0.07, 0.07, shade(wall, 0.6), { x: w * 0.28, y: h * 0.62, z: d / 2 + 0.07, rng }));
-  parts.push(prism(S(10, ctx), 0.16, 0.14, 1.2, 0x33302c, { x: -w * 0.3, y: h, z: -d * 0.2, rng }));
-  parts.push(prism(S(10, ctx), 0.22, 0.22, 0.12, 0x26241f, { x: -w * 0.3, y: h + 1.2, z: -d * 0.2, rng }));
-  for (let i = 0; i < 7; i++) {
-    parts.push(boxOf(0.08, 0.06, d + 0.6, shade(wall, 0.52), {
-      x: -w / 2 + 0.3 + i * ((w - 0.6) / 6), y: h + 0.2, rng,
-    }));
-  }
-  for (const ix of [-1, 1]) {
-    parts.push(boxOf(0.12, h, 0.12, shade(wall, 0.58), {
-      x: ix * (w / 2 - 0.06), y: h / 2, z: d / 2 - 0.06, rng,
-    }));
-  }
-  return mergeFaceted(parts);
-}
-
-function pole(rng, pal, withLamp, ctx = {}) {
-  const h = 7 + rng.range(0, 3);
-  const parts = [prism(S(10, ctx), 0.16, 0.11, h, 0x4c4740, { rng, variation: 0.08 })];
-  parts.push(boxOf(2.2, 0.14, 0.14, 0x4c4740, { y: h - 0.6, rng }));
-  parts.push(boxOf(1.6, 0.12, 0.12, 0x4c4740, { y: h - 1.3, rng }));
-  // Insulators on each cross-arm, and a brace under the top one.
-  for (const y of [h - 0.6, h - 1.3]) {
-    const reach = y > h - 1 ? 1.0 : 0.7;
-    for (const ix of [-reach, 0, reach]) {
-      parts.push(prism(S(8, ctx), 0.075, 0.055, 0.18, 0x8f9aa2, { x: ix, y: y + 0.07, rng }));
-    }
-  }
-  for (const ix of [-1, 1]) {
-    const b = boxOf(0.7, 0.08, 0.08, 0x4c4740, { rng });
-    b.rotateZ(ix * 0.7);
-    b.translate(ix * 0.45, h - 0.95, 0);
-    parts.push(b);
-  }
-  if (withLamp) {
-    parts.push(boxOf(0.5, 0.2, 0.9, 0x33383e, { x: 0.9, y: h - 0.85, rng }));
-    parts.push(prism(S(10, ctx), 0.3, 0.26, 0.7, 0x3b4046, { x: -0.35, y: h * 0.45, rng }));
-  }
-  return mergeFaceted(parts);
-}
-
-function deadTree(rng, pal, ctx = {}) {
-  const h = 3.5 + rng.range(0, 2.5);
-  const bark = mix(0x4a3c30, 0x3a2f26, rng.next());
-  const parts = [prism(S(10, ctx), 0.28, 0.14, h, bark, { rng, variation: 0.12 })];
-  const branches = rng.int(3, 6);
-  for (let i = 0; i < branches; i++) {
-    const g = prism(S(9, ctx), 0.09, 0.04, 1.2 + rng.range(0, 1.2), bark, { rng });
-    g.rotateZ(rng.range(0.6, 1.2) * (rng.bool() ? 1 : -1));
-    g.rotateY(rng.range(0, TAU));
-    g.translate(0, h * rng.range(0.5, 0.92), 0);
-    parts.push(g);
-  }
-  // Twigs, and roots flaring into the ground so the trunk is not a peg.
-  for (let i = 0; (ctx.fine !== false) && i < 7; i++) {
-    const t = prism(S(5, ctx), 0.04, 0.015, 0.5 + rng.range(0, 0.5), bark, { rng });
-    t.rotateZ(rng.range(0.9, 1.5) * (rng.bool() ? 1 : -1));
-    t.rotateY(rng.range(0, TAU));
-    t.translate(0, h * rng.range(0.6, 0.98), 0);
-    parts.push(t);
-  }
-  for (let i = 0; (ctx.fine !== false) && i < 5; i++) {
-    const a = (i / 5) * TAU + rng.spread(0.3);
-    const r = prism(S(5, ctx), 0.11, 0.04, 0.55, bark, { rng });
-    r.rotateZ(1.25);
-    r.rotateY(a);
-    r.translate(0, 0.08, 0);
-    parts.push(r);
-  }
-  return mergeFaceted(parts);
-}
-
-function pine(rng, pal, ctx = {}) {
-  const h = 6 + rng.range(0, 5);
-  const trunk = 0x3d3228;
-  const needle = mix(0x24503a, 0x1b3d2c, rng.next());
-  const parts = [prism(S(10, ctx), 0.24, 0.16, h * 0.35, trunk, { rng })];
-  // Stacked cones, narrowing upward.
-  const tiers = rng.int(3, 5);
-  for (let i = 0; i < tiers; i++) {
-    const t = i / tiers;
-    parts.push(cone(S(12, ctx), lerp(1.9, 0.5, t), h * 0.34, needle, {
-      y: h * (0.22 + t * 0.62), rng, variation: 0.1,
-    }));
-    // Sprigs breaking the cone's outline, so it is a tree and not a party hat.
-    const sprigs = ctx.fine === false ? 0 : 5;
-    for (let k = 0; k < sprigs; k++) {
-      const a = rng.range(0, TAU);
-      const rr = lerp(1.9, 0.5, t) * rng.range(0.75, 1.05);
-      const g = cone(S(6, ctx), 0.3, 0.9, shade(needle, 1.12), { rng, variation: 0.12 });
-      g.rotateZ(1.15);
-      g.rotateY(a);
-      g.translate(Math.cos(a) * rr, h * (0.24 + t * 0.62), Math.sin(a) * rr);
-      parts.push(g);
-    }
-  }
-  return mergeFaceted(parts);
-}
-
-function cactus(rng, pal, ctx = {}) {
-  const green = mix(0x4a7a4a, 0x3a6238, rng.next());
-  const h = 2.6 + rng.range(0, 2);
-  const parts = [prism(S(14, ctx), 0.36, 0.30, h, green, { rng, variation: 0.1 })];
-  // Flutes down the trunk. A saguaro is ribbed, and it is the ribs that catch
-  // the low sun this biome is lit by.
-  for (let i = 0; (ctx.fine !== false) && i < 10; i++) {
-    const a = (i / 10) * TAU;
-    parts.push(boxOf(0.07, h * 0.94, 0.07, shade(green, 0.78), {
-      x: Math.cos(a) * 0.33, z: Math.sin(a) * 0.33, y: h * 0.47, rotY: -a, rng,
-    }));
-  }
-  const arms = rng.int(1, 3);
-  for (let i = 0; i < arms; i++) {
-    const side = rng.bool() ? 1 : -1;
-    const ay = h * rng.range(0.4, 0.7);
-    parts.push(prism(S(12, ctx), 0.2, 0.18, 0.9, green, { x: side * 0.5, y: ay, rng }));
-    parts.push(prism(S(12, ctx), 0.19, 0.17, 1.0 + rng.range(0, 0.6), green, {
-      x: side * 0.75, y: ay + 0.4, rng,
-    }));
-  }
-  return mergeFaceted(parts);
-}
-
-function crane(rng, pal, ctx = {}) {
-  const h = 14 + rng.range(0, 8);
-  const parts = [];
-  // Lattice tower: four legs plus cross-bracing, which is what makes it read.
-  for (const ix of [-1, 1]) for (const iz of [-1, 1]) {
-    parts.push(prism(S(6, ctx), 0.16, 0.12, h, 0xc4a02e, { x: ix * 0.8, z: iz * 0.8, rng }));
-  }
-  const braceStep = ctx.fine === false ? 4 : 2;
-  for (let i = 0; i < Math.floor(h / braceStep); i++) {
-    const y = 1 + i * braceStep;
-    // Build at the origin, rotate, then place. This previously offset the box
-    // first and rotated it about the world origin, then translated by `y` again
-    // through `y - (y - 0)` — which is `y` written so it looks like a
-    // correction. The bracing landed nowhere near the legs it braces.
-    for (const iz of [-1, 1]) {
-      const g = boxOf(2.3, 0.1, 0.1, 0xa8882a, { rng });
-      g.rotateZ(i % 2 ? 0.72 : -0.72);
-      g.translate(0, y, iz * 0.8);
-      parts.push(g);
-    }
-    for (const ix of [-1, 1]) {
-      const g = boxOf(0.1, 0.1, 2.3, 0xa8882a, { rng });
-      g.rotateX(i % 2 ? -0.72 : 0.72);
-      g.translate(ix * 0.8, y, 0);
-      parts.push(g);
-    }
-    parts.push(boxOf(1.72, 0.09, 0.09, 0x9c7f26, { y: y + 1, z: 0.8, rng }));
-    parts.push(boxOf(1.72, 0.09, 0.09, 0x9c7f26, { y: y + 1, z: -0.8, rng }));
-  }
-  // Jib and counterweight.
-  parts.push(boxOf(16, 0.22, 0.28, 0xc4a02e, { x: 4, y: h + 0.3, rng }));
-  parts.push(boxOf(16, 0.22, 0.28, 0xc4a02e, { x: 4, y: h - 0.3, rng }));
-  for (let i = 0; (ctx.fine !== false) && i < 16; i++) {
-    const x = -4 + i * (16 / 15);
-    const d = boxOf(0.08, 0.85, 0.12, 0xa8882a, { rng });
-    d.rotateZ(i % 2 ? 0.55 : -0.55);
-    d.translate(x, h, 0);
-    parts.push(d);
-  }
-  parts.push(boxOf(3, 1.2, 1.6, 0x53575c, { x: -3.5, y: h - 0.2, rng }));
-  parts.push(boxOf(0.16, 3.2, 0.16, 0x33363a, { x: 9, y: h - 1.7, rng }));
-  parts.push(boxOf(0.7, 0.7, 0.7, 0x8a8f95, { x: 9, y: h - 3.4, rng }));
-  return mergeFaceted(parts);
-}
-
-function pipes(rng, pal, ctx = {}) {
-  const parts = [];
-  const n = rng.int(2, 4);
-  for (let i = 0; i < n; i++) {
-    const r = 0.3 + rng.range(0, 0.25);
-    const len = 8 + rng.range(0, 10);
-    const g = prism(S(14, ctx), r, r, len, mix(0x6a6f76, 0x55595f, rng.next()), { rng });
-    g.rotateZ(Math.PI / 2);
-    g.translate(0, 0.7 + i * (r * 2 + 0.25), 0);
-    parts.push(g);
-    // Saddle supports.
-    for (const sx of [-len * 0.35, len * 0.35]) {
-      parts.push(boxOf(0.3, 0.7 + i * 0.7, 0.3, 0x4a4e53, { x: sx, y: (0.7 + i * 0.7) / 2, rng }));
-      // Saddle strap over the pipe it carries.
-      const strap = prism(S(14, ctx), r + 0.06, r + 0.06, 0.12, 0x3f4348, { rng });
-      strap.rotateZ(Math.PI / 2);
-      strap.translate(sx, 0.7 + i * (r * 2 + 0.25), 0);
-      parts.push(strap);
-    }
-    // Flanges at both ends, and a valve wheel on one pipe.
-    for (const sx of [-len / 2, len / 2]) {
-      const flange = prism(S(16, ctx), r + 0.12, r + 0.12, 0.14, 0x7a8088, { rng });
-      flange.rotateZ(Math.PI / 2);
-      flange.translate(sx, 0.7 + i * (r * 2 + 0.25), 0);
-      parts.push(flange);
-    }
-    if (i === 0) {
-      parts.push(prism(S(10, ctx), 0.09, 0.09, 0.55, 0x8a9098, {
-        y: 0.7 + r, rng,
-      }));
-      parts.push(prism(S(16, ctx), 0.34, 0.34, 0.07, 0xb5462f, { y: 1.25 + r, rng }));
-    }
-  }
-  return mergeFaceted(parts);
-}
-
-function brazier(rng, pal, ctx = {}) {
-  const parts = [];
-  parts.push(prism(S(10, ctx), 0.5, 0.34, 1.6, 0x2e2320, { rng }));
-  parts.push(prism(S(14, ctx), 0.8, 0.95, 0.7, 0x3d2d26, { y: 1.5, rng }));
-  // Coals: emissive is added separately by the renderer, so this is the shape.
-  parts.push(prism(S(14, ctx), 0.8, 0.7, 0.2, 0xff5a1e, { y: 2.0, rng, variation: 0.2 }));
-  // Splayed legs, a rim, and rivets — an iron object, not a stack of discs.
-  if (ctx.fine === false) return mergeFaceted(parts);
-  for (let i = 0; i < 3; i++) {
-    const a = (i / 3) * TAU;
-    const g = prism(S(6, ctx), 0.11, 0.07, 1.7, 0x241b19, { rng });
-    g.rotateZ(0.18);
-    g.rotateY(a);
-    parts.push(g);
-  }
-  parts.push(prism(S(14, ctx), 0.98, 0.98, 0.12, 0x33261f, { y: 2.12, rng }));
-  for (let i = 0; i < 10; i++) {
-    const a = (i / 10) * TAU;
-    parts.push(prism(S(6, ctx), 0.06, 0.06, 0.05, 0x26201c, {
-      x: Math.cos(a) * 0.92, z: Math.sin(a) * 0.92, y: 1.78, rng,
-    }));
-  }
-  for (let i = 0; i < 6; i++) {
-    const a = rng.range(0, TAU);
-    const r = rng.range(0, 0.5);
-    const coal = rock(0.16 + rng.range(0, 0.1), 0xff7a2e, rng, { detail: Dt(0, ctx), squash: 0.8 });
-    coal.translate(Math.cos(a) * r, 2.1, Math.sin(a) * r);
-    parts.push(coal);
-  }
-  return mergeFaceted(parts);
-}
-
-function iceBlock(rng, pal, ctx = {}) {
-  const s = 1.2 + rng.range(0, 1.6);
-  const g = rock(s, mix(0xa8cadb, 0x8fb4c9, rng.next()), rng, {
-    detail: Dt(1, ctx), jitter: 0.4, squash: 0.9,
-  });
-  return g;
-}
-
-function snowBank(rng, pal, ctx = {}) {
-  const parts = [];
-  const n = rng.int(2, 4);
-  for (let i = 0; i < n; i++) {
-    parts.push(rock(1.4 + rng.range(0, 1.4), mix(0xe8f2f8, 0xcbdde8, rng.next()), rng, {
-      detail: Dt(1, ctx), jitter: 0.28, squash: 0.42,
-    }));
-    const g = parts[parts.length - 1];
-    g.translate(rng.spread(2.2), 0, rng.spread(2.2));
-  }
-  return mergeFaceted(parts);
-}
-
-function bones(rng, pal, ctx = {}) {
-  const parts = [];
-  const bone = 0xd8d0bc;
-  // Ribcage: an arc of tapering prisms.
-  const ribs = rng.int(4, 7);
-  for (let i = 0; i < ribs; i++) {
-    const t = i / (ribs - 1);
-    const g = prism(S(9, ctx), 0.11, 0.07, 1.6 + Math.sin(t * Math.PI) * 1.2, bone, { rng });
-    g.rotateZ(lerp(-0.5, 0.5, t));
-    g.translate(0, 0, -1.8 + t * 3.6);
-    parts.push(g);
-  }
-  parts.push(prism(S(10, ctx), 0.22, 0.18, 4.0, shade(bone, 0.92), { rotY: 0, y: 0.2, rng })
-    .rotateZ(Math.PI / 2));
-  // A skull and a couple of scattered limbs turn an arc of sticks into a
-  // carcass, which is the only reason this prop exists.
-  if (ctx.fine === false) return mergeFaceted(parts);
-  const skull = prism(S(12, ctx), 0.42, 0.30, 0.75, bone, { rng, variation: 0.06 });
-  skull.rotateZ(Math.PI / 2);
-  skull.translate(0, 0.42, 2.3);
-  parts.push(skull);
-  const snout = prism(S(10, ctx), 0.26, 0.16, 0.6, shade(bone, 0.88), { rng });
-  snout.rotateZ(Math.PI / 2);
-  snout.translate(0, 0.3, 2.85);
-  parts.push(snout);
-  for (const [dz, ang] of [[-2.3, 0.5], [-1.6, -0.9], [2.0, 1.2]]) {
-    const g = prism(S(9, ctx), 0.13, 0.09, 1.5 + rng.range(0, 0.6), bone, { rng });
-    // Lay it flat, then spin it in the ground plane. Adding the angle to the Z
-    // rotation instead tips the bone out of horizontal and buries one end —
-    // it sank 1.8 m under the map.
-    g.rotateZ(Math.PI / 2);
-    g.rotateY(ang);
-    g.translate(rng.spread(0.8), 0.14, dz);
-    parts.push(g);
-    const knuckle = prism(S(8, ctx), 0.19, 0.19, 0.22, bone, { rng });
-    knuckle.translate(rng.spread(0.8), 0.16, dz + 0.7);
-    parts.push(knuckle);
-  }
-  return mergeFaceted(parts);
-}
-
-function palm(rng, pal, ctx = {}) {
-  const h = 6 + rng.range(0, 4);
-  const trunk = 0x5a4c3a;
-  const parts = [];
-  // Leaning trunk, in segments.
-  const segs = ctx.fine === false ? 3 : 6;
-  let lean = 0;
-  for (let i = 0; i < segs; i++) {
-    const t = i / segs;
-    lean += rng.spread(0.05);
-    parts.push(prism(S(8, ctx), 0.26 - t * 0.12, 0.24 - t * 0.12, h / segs, trunk, {
-      x: lean * h * 0.35, y: (h / segs) * i, rng, variation: 0.08,
-    }));
-  }
-  const frondN = ctx.fine === false ? 5 : 9;
-  for (let i = 0; i < frondN; i++) {
-    const a = (i / frondN) * TAU;
-    const f = boxOf(2.4, 0.08, 0.42, 0x2f5a34, { rng, variation: 0.14 });
-    f.rotateZ(-0.42);
-    f.rotateY(a);
-    f.translate(lean * h * 0.35 + Math.cos(a) * 1.0, h - 0.2, Math.sin(a) * 1.0);
-    parts.push(f);
-  }
-  return mergeFaceted(parts);
-}
 
 /**
  * A street frontage: one building in a continuous row.
@@ -620,12 +120,12 @@ function palm(rng, pal, ctx = {}) {
  * and Impact come to decide navigation, as the design brief asks.
  */
 export const PROP_TYPES = {
-  tyre_stack: { build: tyreStack, place: TRACKSIDE, radius: 0.75, footprint: 0.9, toughness: 60, height: 1.4 },
-  barrel: { build: barrel, place: TRACKSIDE, radius: 0.5, footprint: 0.6, toughness: 40, height: 1.1 },
+  tyre_stack: { build: voxTyreStack, place: TRACKSIDE, radius: 0.75, footprint: 0.9, toughness: 60, height: 1.4 },
+  barrel: { build: voxBarrel, place: TRACKSIDE, radius: 0.5, footprint: 1.0, toughness: 40, height: 1.2 },
   crate: { build: voxCrate, place: TRACKSIDE, radius: 0.6, footprint: 1.3, toughness: 55, height: 1.1 },
   marker: { build: voxMarker, place: TRACKSIDE, radius: 0.35, footprint: 0.7, toughness: 25, height: 2.2 },
 
-  gantry: { build: gantry, place: SCENERY, radius: 0, toughness: null, height: 6.5, spanning: true },
+  gantry: { build: voxGantry, place: SCENERY, radius: 0, toughness: null, height: 6.5, spanning: true },
   // `footprint` is how much room a prop needs, which is not `radius`.
   //
   // `radius` is what a car collides against, and scenery has none — a building
@@ -637,34 +137,32 @@ export const PROP_TYPES = {
   // at the largest each generator builds.
   grandstand: { build: voxGrandstand, place: SCENERY, radius: 0, footprint: 18.0, toughness: null, height: 8 },
 
-  wreck: { build: wreck, place: TRACKSIDE, radius: 1.6, footprint: 3.5, toughness: 190, height: 1.2 },
-  shack: { build: shack, place: SCENERY, radius: 2.4, footprint: 3.5, toughness: null, height: 3 },
+  wreck: { build: voxWreck, place: TRACKSIDE, radius: 1.6, footprint: 3.5, toughness: 190, height: 1.2 },
+  shack: { build: voxShack, place: SCENERY, radius: 2.4, footprint: 3.5, toughness: null, height: 3 },
   pole: {
-    build: (r, p, c) => pole(r, p, r.bool(0.4), c),
+    build: voxPole,
     place: SCENERY, radius: 0.3, footprint: 0.2, toughness: null, height: 8,
   },
-  dead_tree: { build: deadTree, place: SCENERY, radius: 0.4, footprint: 0.7, toughness: 140, height: 5 },
+  dead_tree: { build: voxDeadTree, place: SCENERY, radius: 0.4, footprint: 0.7, toughness: 140, height: 5 },
   rock: {
-    build: (r, p, c) => rock(1.1 + r.range(0, 1.8), mix(p.prop, 0x6a6258, r.next()), r,
-      { detail: Dt(1, c) }),
+    build: voxRock,
     place: TRACKSIDE, radius: 1.3, footprint: 4.4, toughness: null, height: 1.6,
   },
   boulder: {
-    build: (r, p, c) => rock(2.6 + r.range(0, 2.2), mix(p.prop, 0x585048, r.next()), r,
-      { detail: Dt(2, c) }),
+    build: voxBoulder,
     place: SCENERY, radius: 3.0, footprint: 8.1, toughness: null, height: 3.4,
   },
 
-  pine: { build: pine, place: SCENERY, radius: 0.6, footprint: 3.7, toughness: 150, height: 9 },
-  ice_block: { build: iceBlock, place: TRACKSIDE, radius: 1.2, footprint: 5.0, toughness: 80, height: 1.8 },
-  snow_bank: { build: snowBank, place: SCENERY, radius: 2.2, footprint: 6.8, toughness: null, height: 1.2 },
+  pine: { build: voxPine, place: SCENERY, radius: 0.6, footprint: 3.7, toughness: 150, height: 9 },
+  ice_block: { build: voxIceBlock, place: TRACKSIDE, radius: 1.2, footprint: 5.0, toughness: 80, height: 1.8 },
+  snow_bank: { build: voxSnowBank, place: SCENERY, radius: 2.2, footprint: 6.8, toughness: null, height: 1.2 },
 
-  cactus: { build: cactus, place: TRACKSIDE, radius: 0.45, footprint: 1.3, toughness: 35, height: 4 },
-  bones: { build: bones, place: SCENERY, radius: 1.8, footprint: 5.7, toughness: null, height: 1.4 },
+  cactus: { build: voxCactus, place: TRACKSIDE, radius: 0.45, footprint: 2.0, toughness: 35, height: 5 },
+  bones: { build: voxBones, place: SCENERY, radius: 1.8, footprint: 5.7, toughness: null, height: 1.4 },
 
   container: { build: voxContainer, place: TRACKSIDE, radius: 3.1, footprint: 4.3, toughness: 320, height: 2.6 },
-  crane: { build: crane, place: SCENERY, radius: 1.6, footprint: 1.3, toughness: null, height: 20 },
-  pipes: { build: pipes, place: SCENERY, radius: 1.0, footprint: 22.0, toughness: null, height: 2.5 },
+  crane: { build: voxCrane, place: SCENERY, radius: 1.6, footprint: 2.0, toughness: null, height: 26 },
+  pipes: { build: voxPipes, place: SCENERY, radius: 1.0, footprint: 22.0, toughness: null, height: 2.5 },
 
   spire: { build: voxSpire, place: SCENERY, radius: 1.6, footprint: 4.0, toughness: null, height: 19 },
   streetlight: {
@@ -686,7 +184,7 @@ export const PROP_TYPES = {
     build: voxJerseyBarrier, place: TRACKSIDE, radius: 1.6, footprint: 2.0, toughness: 260, height: 1,
   },
   dumpster: { build: voxDumpster, place: TRACKSIDE, radius: 1.2, footprint: 2.2, toughness: 90, height: 1.6 },
-  palm: { build: palm, place: SCENERY, radius: 0.4, footprint: 0.6, toughness: 120, height: 9 },
+  palm: { build: voxPalm, place: SCENERY, radius: 0.4, footprint: 0.6, toughness: 120, height: 9 },
 
   // --- frontages ---
   //
@@ -746,7 +244,7 @@ export const PROP_TYPES = {
   building: { build: voxBlock, place: SCENERY, radius: 0, footprint: 19.6, toughness: null, height: 40, horizon: true },
   ridge: { build: voxRidge, place: SCENERY, radius: 0, footprint: 32.0, toughness: null, height: 26, horizon: true },
 
-  brazier: { build: brazier, place: TRACKSIDE, radius: 0.9, footprint: 1.3, toughness: 90, height: 2.2, emissive: 0xff5a1e },
+  brazier: { build: voxBrazier, glow: voxBrazier.glow, place: TRACKSIDE, radius: 0.9, footprint: 1.3, toughness: 90, height: 2.2, emissive: 0xff5a1e },
 };
 
 /**
@@ -846,11 +344,6 @@ export function buildPropLibrary(biome, seed = 1) {
     const levels = [];
     const glowLevels = def.glow ? [] : null;
     for (const lod of LODS) {
-      // Tell the grid how far away this level will be drawn from. On the
-      // faceted route this does nothing at all; the native voxel builders read
-      // `ctx.lod` instead, because their answer is a coarser cell and not a
-      // coarser sample.
-      setVoxelDetail(lod.id);
       const rng = new RNG(`${seed}:prop:${name}`);
       const glowRng = new RNG(`${seed}:glow:${name}`);
       const count = def.spanning ? 1 : (lod.id === 0 ? VARIANTS : lod.id === 1 ? 2 : 1);
