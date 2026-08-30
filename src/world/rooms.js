@@ -202,7 +202,14 @@ function buildRoom(theme, doors, palette, rng, place, clear) {
   fixtures(C, theme, FLOOR_D, rng, palette);
   clear?.(C, FLOOR_D);
 
-  return C.geometry();
+  // How many cubes this room is actually made of, carried on the geometry.
+  //
+  // The triangle count is what the GPU is billed for and the cube count is
+  // what the room *is*; the ratio between them is the only measure of whether
+  // the greedy mesher is doing its job, and it was not being recorded anywhere.
+  const geo = C.geometry();
+  geo.userData.cubes = C.count;
+  return geo;
 }
 
 /**

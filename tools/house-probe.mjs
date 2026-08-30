@@ -25,8 +25,8 @@ const biome = BIOME_BY_ID.house;
 let problems = 0;
 
 console.log('The house is drivable\n');
-console.log('  seed   rooms   on the street   doors missed   worst door offset');
-console.log('  ' + '-'.repeat(64));
+console.log('  seed  rooms      cubes  triangles  on street  doors missed  worst door');
+console.log('  ' + '-'.repeat(74));
 
 for (let seed = 0; seed < 5; seed++) {
   const track = generateTrack(new RNG(`house:${seed}`), biome, { difficulty: 1 });
@@ -71,8 +71,23 @@ for (let seed = 0; seed < 5; seed++) {
 
   const ok = intruders === 0 && missed === 0;
   if (!ok) problems++;
-  console.log(`  ${String(seed).padStart(4)}   ${String(group.children.length).padStart(5)}   `
-    + `${String(intruders).padStart(6)} verts   ${String(missed).padStart(6)} of ${track.layout.doorways.length}   `
+  // Cubes *and* triangles.
+  //
+  // The cube count is what the house is; the triangle count is what the GPU is
+  // billed for, because a GPU cannot draw a cube — it draws two triangles per
+  // visible face and nothing else. The ratio between them is the only measure
+  // of whether the greedy mesher is earning its keep: a naive voxel renderer
+  // emits twelve triangles a cube, and a house here emits a third of one.
+  let cubes = 0;
+  let tris = 0;
+  for (const m of group.children) {
+    cubes += m.geometry.userData.cubes ?? 0;
+    const g = m.geometry;
+    tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+  }
+  console.log(`  ${String(seed).padStart(4)}  ${String(group.children.length).padStart(5)}  `
+    + `${String(cubes).padStart(9)}  ${String(tris).padStart(9)}  `
+    + `${String(intruders).padStart(6)}v   ${String(missed).padStart(6)} of ${track.layout.doorways.length}  `
     + `${worstDoor.toFixed(2)} m`
     + (ok ? '' : `   FAIL${worstIn ? ` — ${worstIn.toFixed(2)} m into the road` : ''}`));
 
