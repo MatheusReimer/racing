@@ -306,9 +306,8 @@ export const BIOME_PROPS = {
     scenery: { pine: 4, snow_bank: 3, pole: 2, shack: 1 },
     horizon: { ridge: 3, building: 1 },
   },
-  // STRIPPED — see the note above `CITY_FRONTAGES`.
+  // STRIPPED — the flag itself lives on the biome; see `stripped` in biomes.js.
   downtown: {
-    stripped: true,
     trackside: {
       // streetlight: 4, neon_sign: 3, traffic_light: 3,
       // jersey_barrier: 3, dumpster: 2, bus_stop: 2, marker: 1,

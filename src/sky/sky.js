@@ -240,7 +240,7 @@ export class Sky {
 
     // Distant towers, past anything the scatter can afford to place. On by
     // default where a district is a city; a palette can say otherwise.
-    const wantsSkyline = p.skyline ?? !!biome.city;
+    const wantsSkyline = !biome.stripped && (p.skyline ?? !!biome.city);
     if (wantsSkyline && !this.skyline) {
       this.skyline = new Skyline(this.scene, { seed: `skyline:${biome.id}` });
     } else if (!wantsSkyline && this.skyline) {

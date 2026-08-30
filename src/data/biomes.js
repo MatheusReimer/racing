@@ -196,6 +196,16 @@ export const BIOMES = [
     name: 'Olympic City',
     // Laid out from a block grid rather than harmonics — see track/city.js.
     city: true,
+
+    // Stripped to bare road while the city is rebuilt.
+    //
+    // One flag, read in three places, rather than three commented-out call
+    // sites: the props tables place nothing (`props.js`), the ground surfaces
+    // are not built (`track/mesh.js`), and the sky draws no skyline
+    // (`sky/sky.js`). Deleting this line brings all of it back at once, which
+    // is the property that matters — a strip you cannot undo in one edit is a
+    // deletion wearing a different name.
+    stripped: true,
     tagline: 'Wet asphalt, neon, and traffic that does not know there is a race on.',
     order: 5,
 

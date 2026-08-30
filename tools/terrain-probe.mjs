@@ -86,6 +86,7 @@ for (const biome of BIOMES) {
     + `${ms.toFixed(0).padStart(5)}  ${(intrusion < 0 ? 'none' : `${intrusion.toFixed(1)} m`).padStart(18)}   `
     + `${String(adrift).padStart(5)} of ${onBlocks}`
     + (worstGap ? ` (worst ${worstGap.toFixed(1)} m)` : '')
+    + (biome.stripped ? '   (built, but this biome is stripped and draws none of it)' : '')
     + (ok ? '' : '   FAIL'));
 }
 

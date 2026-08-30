@@ -406,23 +406,29 @@ export class TrackMesh {
     });
     this.materials.push(this.groundMat);
 
-    const verge = new THREE.Mesh(buildBlockVerge(track, biome, quality), this.groundMat);
-    verge.receiveShadow = !!quality?.shadows;
-    verge.matrixAutoUpdate = false;
-    verge.renderOrder = -10;
-    this.group.add(verge);
+    // A stripped biome gets no ground at all: no near band, no blocks, no
+    // backdrop plane. The road is left hanging over nothing, which is the
+    // point — it is the only way to see what the road and the barriers
+    // actually contribute before anything is built back around them.
+    if (!biome.stripped) {
+      const verge = new THREE.Mesh(buildBlockVerge(track, biome, quality), this.groundMat);
+      verge.receiveShadow = !!quality?.shadows;
+      verge.matrixAutoUpdate = false;
+      verge.renderOrder = -10;
+      this.group.add(verge);
 
-    // And the blocks, from where the ribbon stops out to the fog.
-    const blocks = new THREE.Mesh(buildBlockTerrain(track, biome, quality), this.groundMat);
-    blocks.receiveShadow = !!quality?.shadows;
-    blocks.matrixAutoUpdate = false;
-    blocks.renderOrder = -15;
-    this.group.add(blocks);
+      // And the blocks, from where the ribbon stops out to the fog.
+      const blocks = new THREE.Mesh(buildBlockTerrain(track, biome, quality), this.groundMat);
+      blocks.receiveShadow = !!quality?.shadows;
+      blocks.matrixAutoUpdate = false;
+      blocks.renderOrder = -15;
+      this.group.add(blocks);
 
-    const backdrop = new THREE.Mesh(buildBackdrop(track, biome), this.groundMat);
-    backdrop.matrixAutoUpdate = false;
-    backdrop.renderOrder = -20;
-    this.group.add(backdrop);
+      const backdrop = new THREE.Mesh(buildBackdrop(track, biome), this.groundMat);
+      backdrop.matrixAutoUpdate = false;
+      backdrop.renderOrder = -20;
+      this.group.add(backdrop);
+    }
 
     // --- start line ---
     this.group.add(buildStartLine(track));
