@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { parseVox, voxGeometry, coarsen } from '../vehicle/voxmesh.js';
+import { VEHICLES } from '../data/vehicles.js';
 
 const params = new URLSearchParams(location.search);
 const CAR = params.get('car') ?? 'roadster';
@@ -14,7 +15,13 @@ const res = await fetch(`/bodies/${CAR}.vox`);
 if (!res.ok) throw new Error(`sem /bodies/${CAR}.vox`);
 let vox = parseVox(await res.arrayBuffer());
 if (LOD) vox = coarsen(vox);
-const geo = voxGeometry(vox);
+
+// The colour the game gives this car, unless the URL asks for another. Painting
+// is the point of the paintable bit: without it a body is whatever colour its
+// author modelled, and every RX-7 in the game is white.
+const def = VEHICLES.find((v) => v.bodyType === CAR);
+const want = params.get('paint') ?? (params.get('raw') ? null : def?.color);
+const geo = voxGeometry(vox, { body: want ? new THREE.Color(want) : null });
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x11141a);
@@ -54,7 +61,8 @@ document.getElementById('say').textContent =
   `${CAR}${LOD ? ' (grosso)' : ''}: ${geo.index.count / 3} triângulos · `
   + `${vox.count} células · ${b.max.z - b.min.z >= 0 ? '' : ''}`
   + `${(b.max.x - b.min.x).toFixed(2)} x ${(b.max.y - b.min.y).toFixed(2)} x ${(b.max.z - b.min.z).toFixed(2)} m · `
-  + `chão em y=${b.min.y.toFixed(3)}`;
+  + `chão em y=${b.min.y.toFixed(3)}`
+  + (want ? ` · pintado ${want}` : ' · cor do modelo');
 
 renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
 window.__vox = { tris: geo.index.count / 3, cells: vox.count, minY: b.min.y };

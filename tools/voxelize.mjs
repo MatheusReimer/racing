@@ -43,6 +43,7 @@ for (const car of CARS) {
   }
   console.log(`  ${car.padEnd(10)} ${String(report.cells).padStart(7)} cells  `
     + `${String(report.palette).padStart(4)} colours  `
+    + `${String(Math.round((report.paintable / report.cells) * 100)).padStart(3)}% pintavel  `
     + `${report.dims.join('x').padEnd(14)} `
     + `${(report.bytes / 1024).toFixed(0).padStart(5)} KB  `
     + `${report.flipped ? 'FLIP' : '    '} ${String(report.by).padEnd(5)} cabin ${String(report.cabinMargin).padEnd(5)} shape ${String(report.shapeMargin).padEnd(5)} vidro ${String(report.glassVerts).padEnd(7)} ${report.agree ? '' : 'DISCORDAM'}  `

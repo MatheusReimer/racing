@@ -208,13 +208,17 @@ function normalise(geo, hull) {
  * table wider than a cache line.
  */
 function palettise(grid) {
-  const { nx, ny, nz, hits, acc } = grid;
+  const { nx, ny, nz, hits, acc, paint } = grid;
   const index = new Map();
   const palette = [];
   const cells = [];
+  const paintable = [];
   for (let cell = 0; cell < hits.length; cell++) {
     const count = hits[cell];
     if (!count) continue;
+    // Mostly paint, not merely touched by it. A cell on the seam between a
+    // wing and a window belongs to whichever it is more of.
+    paintable.push(paint ? (paint[cell] / count > 0.5 ? 1 : 0) : 0);
     const o = cell * 3;
     const q = (v) => Math.max(0, Math.min(31, Math.round((v / count) * 31)));
     const r = q(acc[o]);
@@ -232,7 +236,7 @@ function palettise(grid) {
     }
     cells.push(cell, at);
   }
-  return { palette, cells, dims: [nx, ny, nz] };
+  return { palette, cells, paintable, dims: [nx, ny, nz] };
 }
 
 /** The file. Little-endian, and shaped like `public/bodies/*.bin` beside it. */
@@ -242,11 +246,16 @@ function encode(grid, pal) {
   const wide = pal.palette.length > 256;
   const stride = 4 + (wide ? 2 : 1);
   const head = 4 + 4 + 6 + 4 + 12 + 2 + 1 + 1;
-  const buf = new ArrayBuffer(head + pal.palette.length * 3 + n * stride);
+  // One bit per cell saying whether the game may paint it, as a run of bytes
+  // after the cells. Nine kilobytes on the biggest body, against stealing a bit
+  // from the palette index — which would work today and cap the palette at 127
+  // on the narrow path, and the Impreza already wants 1,044 colours.
+  const bits = Math.ceil(n / 8);
+  const buf = new ArrayBuffer(head + pal.palette.length * 3 + n * stride + bits);
   const dv = new DataView(buf);
   let p = 0;
   dv.setUint32(p, 0x584f5652, true); p += 4;      // 'RVOX'
-  dv.setUint32(p, 1, true); p += 4;
+  dv.setUint32(p, 2, true); p += 4;
   dv.setUint16(p, nx, true); p += 2;
   dv.setUint16(p, ny, true); p += 2;
   dv.setUint16(p, nz, true); p += 2;
@@ -264,6 +273,11 @@ function encode(grid, pal) {
     dv.setUint32(p, pal.cells[i], true); p += 4;
     if (wide) { dv.setUint16(p, pal.cells[i + 1], true); p += 2; }
     else { dv.setUint8(p, pal.cells[i + 1]); p += 1; }
+  }
+  for (let i = 0; i < n; i += 8) {
+    let byte = 0;
+    for (let k = 0; k < 8 && i + k < n; k++) if (pal.paintable[i + k]) byte |= 1 << k;
+    dv.setUint8(p++, byte);
   }
   return buf;
 }
@@ -305,6 +319,7 @@ const report = {
   other: Number(fit.other.toFixed(3)),
   cells: pal.cells.length / 2,
   palette: pal.palette.length,
+  paintable: pal.paintable.reduce((a, b) => a + b, 0),
   dims: pal.dims,
   step: grid.step,
   bytes: buf.byteLength,

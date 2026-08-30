@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { HULLS } from '../data/bodies/index.js';
+import { HULLS, VOX } from '../data/bodies/index.js';
+import { voxGeometry } from './voxmesh.js';
 import { clamp, clamp01, lerp, wrapAngle, angleDelta } from '../core/math.js';
 import { MARKS, applyMarks } from '../data/bodies/marks.js';
 
@@ -1383,6 +1384,38 @@ function paintHull(shared, byClass, col, damage = 0) {
  * is scaled onto the L and W the build asked for, height following length so a
  * wide build widens the car instead of flattening it.
  */
+/**
+ * A voxel body, shaped like what `hullGeometry` returns so the assembly below
+ * does not have to know which route it took.
+ *
+ * There is no separate glass or lamp mesh: a voxel body has its windows and its
+ * lights *in* it, as cells of their own colour, which is the thing the whole
+ * move to this look is for. The paint comes from the build, on the cells the
+ * bake marked as bodywork — see `voxmesh.js`.
+ */
+function voxBodyGeometry(vox, L, W, color) {
+  const geo = voxGeometry(vox, { body: new THREE.Color(color) });
+  geo.computeBoundingBox();
+  const b = geo.boundingBox;
+  return {
+    body: geo,
+    glass: null,
+    lampFront: null,
+    lampRear: null,
+    lampRearFitted: false,
+    // Size is a scale on the node, as it is for a hull: the buffers are shared
+    // by every car of this body type and moving them would move all of them.
+    scale: [W / (b.max.x - b.min.x), L / (b.max.z - b.min.z), L / (b.max.z - b.min.z)],
+    bounds: {
+      minX: b.min.x, maxX: b.max.x, minY: b.min.y, maxY: b.max.y,
+      minZ: b.min.z, maxZ: b.max.z,
+    },
+    // Damage repaints a decimated hull triangle by triangle. A voxel body will
+    // lose cells instead, which is a better answer and a later one.
+    repaint: null,
+  };
+}
+
 function hullGeometry(hull, L, W, color, accent) {
   const byClass = [color, HULL_GLASS, HULL_DARK, HULL_CHROME, accent ?? 0xfff2d0]
     .map((c) => new THREE.Color(c));
@@ -1795,6 +1828,7 @@ export class VehicleMesh {
     // on screen is the shape that was measured rather than an approximation
     // wearing its accessories.
     const hull = HULLS[profile.bodyType] ?? null;
+    const vox = VOX[profile.bodyType] ?? null;
 
     // How big the car is.
     //
@@ -2301,7 +2335,11 @@ export class VehicleMesh {
       opaque.length = 0;
       glass.length = 0;
       emissive.length = 0;
-      const built = hullGeometry(hull, L, W, body, accent);
+      // The voxel body when one has been loaded, and the decimated one when not.
+      // Whether `VOX` is populated is the switch; see `loadVox`.
+      const built = vox
+        ? voxBodyGeometry(vox, L, W, body)
+        : hullGeometry(hull, L, W, body, accent);
       opaque.push(built.body);
       hullLampGeo = built;
     }

@@ -31,6 +31,31 @@ const MAGIC = 0x524c4852;
 export const HULLS = {};
 
 /**
+ * Voxel bodies, when they have been asked for.
+ *
+ * Empty unless `loadVox` runs, and that is the switch: `chassis.js` takes the
+ * voxel route for a body type that has one and the decimated route for one that
+ * does not, so turning the look on and off is a matter of whether the data was
+ * fetched rather than a flag threaded through the mesh builder.
+ */
+export const VOX = {};
+
+/** Read the voxel bodies. A body without one simply keeps its decimated hull. */
+export async function loadVox(names = HULL_NAMES, base = 'bodies/') {
+  const { parseVox } = await import('../../vehicle/voxmesh.js');
+  await Promise.all(names.map(async (n) => {
+    try {
+      const res = await fetch(`${base}${n}.vox`);
+      if (!res.ok) return;
+      VOX[n] = parseVox(await res.arrayBuffer());
+    } catch {
+      // No voxel body for this one.
+    }
+  }));
+  return VOX;
+}
+
+/**
  * Read one body file. Exported so the headless tools can feed `HULLS` from disk
  * — they run in Node, where there is no relative URL to fetch, and a probe that
  * quietly fell back to the generated route would be testing the wrong car.

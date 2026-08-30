@@ -540,6 +540,12 @@ class Game {
 // Bodies before the first car. `VehicleMesh` is built mid-race when a rival
 // spawns, so it has to stay synchronous; fetching here means it always is.
 await loadHulls();
+// Voxel bodies, on request. `?vox=1` while the look is being brought in; when
+// it lands this becomes the default and the decimated route the fallback.
+if (new URLSearchParams(location.search).has('vox')) {
+  const { loadVox } = await import('./data/bodies/index.js');
+  await loadVox();
+}
 // And cut them, so the first race does not pay for it on the grid.
 warmHulls(HULLS);
 

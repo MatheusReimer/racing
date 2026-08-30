@@ -117,6 +117,16 @@ export function bake(root) {
       ? src.index.clone()
       : new THREE.BufferAttribute(Uint32Array.from({ length: pos.count }, (_, i) => i), 1));
 
+    // And whether this is bodywork the game is allowed to paint.
+    //
+    // A car's identity in this game comes from the build, not from the file:
+    // the RX-7 is red because the game paints it red, and a crate can hand the
+    // player a colour that has to land somewhere. So the bake records which
+    // cells are paint and which are the car — glass, trim, lamps, tyres — and
+    // the mesh decides at build time. Without this the palette wins and every
+    // RX-7 is the white one its author modelled.
+    const paint = new Float32Array(pos.count).fill(cls === CLS.PAINT ? 1 : 0);
+
     // Colour, per vertex, from whichever of the three places this file keeps it.
     const col = new Float32Array(pos.count * 3);
     const tex = cls === CLS.GLASS ? null : (m?.map ? texels(m.map) : null);
@@ -145,6 +155,7 @@ export function bake(root) {
       }
     }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('paint', new THREE.BufferAttribute(paint, 1));
 
     g.applyMatrix4(o.matrixWorld);
     parts.push(g);
@@ -161,21 +172,26 @@ export function bake(root) {
 
   const pos = merged.attributes.position.array;
   const col = merged.attributes.color.array;
+  const pnt = merged.attributes.paint.array;
   const src = merged.index.array;
   const seen = new Map();
   const map = new Int32Array(pos.length / 3);
-  const P = [], C = [];
+  const P = [], C = [], N = [];
   for (let v = 0; v < map.length; v++) {
     const o = v * 3;
+    // Paint is part of the identity of a vertex, not a passenger on it: a
+    // point where a painted panel meets a rubber seal is two vertices, and
+    // welding them would hand the seal to the paint or the other way about.
     const key = `${Math.round(pos[o] / snap)},${Math.round(pos[o + 1] / snap)},`
       + `${Math.round(pos[o + 2] / snap)},${Math.round(col[o] * 255)},`
-      + `${Math.round(col[o + 1] * 255)},${Math.round(col[o + 2] * 255)}`;
+      + `${Math.round(col[o + 1] * 255)},${Math.round(col[o + 2] * 255)},${pnt[v]}`;
     let id = seen.get(key);
     if (id === undefined) {
       id = P.length / 3;
       seen.set(key, id);
       P.push(pos[o], pos[o + 1], pos[o + 2]);
       C.push(col[o], col[o + 1], col[o + 2]);
+      N.push(pnt[v]);
     }
     map[v] = id;
   }
@@ -185,6 +201,7 @@ export function bake(root) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(P), 3));
   g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(C), 3));
+  g.setAttribute('paint', new THREE.BufferAttribute(new Float32Array(N), 1));
   g.setIndex(new THREE.BufferAttribute(idx, 1));
   merged.dispose();
   return g;
@@ -396,6 +413,10 @@ export function voxelGrid(geo, { cells = 145 } = {}) {
   // three million times and a typed array index is the cheap end of that.
   const acc = new Float32Array(nx * ny * nz * 3);
   const hits = new Uint32Array(nx * ny * nz);
+  // How much of each cell came off paintable bodywork, so the bake can say
+  // whether the game may colour it.
+  const pnt = geo.attributes.paint?.array ?? null;
+  const paint = pnt ? new Float32Array(nx * ny * nz) : null;
 
   for (let t = 0; t < idx.length; t += 3) {
     const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3;
@@ -422,11 +443,14 @@ export function voxelGrid(geo, { cells = 145 } = {}) {
         acc[o] += col[a] * w + col[b] * u + col[c] * v;
         acc[o + 1] += col[a + 1] * w + col[b + 1] * u + col[c + 1] * v;
         acc[o + 2] += col[a + 2] * w + col[b + 2] * u + col[c + 2] * v;
+        if (paint) {
+          paint[cell] += pnt[idx[t]] * w + pnt[idx[t + 1]] * u + pnt[idx[t + 2]] * v;
+        }
       }
     }
   }
 
-  return { nx, ny, nz, step, ox, oy, oz, hits, acc };
+  return { nx, ny, nz, step, ox, oy, oz, hits, acc, paint };
 }
 
 /** Cubes, for looking at. */

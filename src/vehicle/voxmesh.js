@@ -25,15 +25,16 @@ const MAGIC = 0x584f5652;
 /**
  * Read one `.vox`.
  *
- * @returns { nx, ny, nz, step, ox, oy, oz, palette, at } — `at` is a dense
- *          index per cell, `0` for empty and `n + 1` for palette entry `n`, so
- *          a neighbour test is one array read and no branch on a sentinel.
+ * @returns { nx, ny, nz, step, ox, oy, oz, palette, at, paint } — `at` is a
+ *          dense index per cell, `0` for empty and `n + 1` for palette entry
+ *          `n`, so a neighbour test is one array read and no branch on a
+ *          sentinel. `paint` marks the cells the game is allowed to colour.
  */
 export function parseVox(buf) {
   const dv = new DataView(buf);
   if (dv.getUint32(0, true) !== MAGIC) throw new Error('not a voxel body');
   const version = dv.getUint32(4, true);
-  if (version !== 1) throw new Error(`voxel body version ${version} is not readable here`);
+  if (version !== 2) throw new Error(`voxel body version ${version} is not readable here`);
   let p = 8;
   const nx = dv.getUint16(p, true); p += 2;
   const ny = dv.getUint16(p, true); p += 2;
@@ -55,16 +56,25 @@ export function parseVox(buf) {
     palette[i * 3 + 2] = srgb(dv.getUint8(p++));
   }
 
+  // Cells, then one bit each saying whether the game may paint them. The count
+  // falls out of the two together rather than being written down twice.
   const stride = 4 + (wide ? 2 : 1);
-  const count = (buf.byteLength - p) / stride;
+  const count = Math.floor(((buf.byteLength - p) * 8) / (stride * 8 + 1));
   const at = new Uint16Array(nx * ny * nz);
+  const order = new Uint32Array(count);
   for (let i = 0; i < count; i++) {
     const cell = dv.getUint32(p, true); p += 4;
     const c = wide ? dv.getUint16(p, true) : dv.getUint8(p);
     p += wide ? 2 : 1;
     at[cell] = c + 1;
+    order[i] = cell;
   }
-  return { nx, ny, nz, step, ox, oy, oz, palette, at, count };
+  const paint = new Uint8Array(nx * ny * nz);
+  for (let i = 0; i < count; i++) {
+    const byte = dv.getUint8(p + (i >> 3));
+    if (byte & (1 << (i & 7))) paint[order[i]] = 1;
+  }
+  return { nx, ny, nz, step, ox, oy, oz, palette, at, paint, count };
 }
 
 const S2L = new Float32Array(256);
@@ -87,6 +97,7 @@ export function coarsen(vox) {
   const ny = Math.ceil(vox.ny / 2);
   const nz = Math.ceil(vox.nz / 2);
   const at = new Uint16Array(nx * ny * nz);
+  const paint = new Uint8Array(nx * ny * nz);
   const tally = new Map();
   for (let z = 0; z < nz; z++) {
     for (let y = 0; y < ny; y++) {
@@ -107,11 +118,34 @@ export function coarsen(vox) {
         let win = 0;
         let best = 0;
         for (const [v, n] of tally) if (n > best) { best = n; win = v; }
-        at[x + nx * (y + ny * z)] = win;
+        const o = x + nx * (y + ny * z);
+        at[o] = win;
+        if (win) {
+          // Paintable if most of what merged into it was. A coarse cell that
+          // straddles a wing and a window goes to whichever it is more of,
+          // exactly as the fine one did at bake time.
+          let yes = 0;
+          let all = 0;
+          for (let dz = 0; dz < 2; dz++) {
+            for (let dy = 0; dy < 2; dy++) {
+              for (let dx = 0; dx < 2; dx++) {
+                const sx = x * 2 + dx;
+                const sy = y * 2 + dy;
+                const sz = z * 2 + dz;
+                if (sx >= vox.nx || sy >= vox.ny || sz >= vox.nz) continue;
+                const q = sx + vox.nx * (sy + vox.ny * sz);
+                if (!vox.at[q]) continue;
+                all++;
+                if (vox.paint[q]) yes++;
+              }
+            }
+          }
+          paint[o] = all && yes * 2 > all ? 1 : 0;
+        }
       }
     }
   }
-  return { ...vox, nx, ny, nz, step: vox.step * 2, at };
+  return { ...vox, nx, ny, nz, step: vox.step * 2, at, paint };
 }
 
 /**
@@ -122,8 +156,15 @@ export function coarsen(vox) {
  * and what colour they are, and pulls maximal same-coloured rectangles out of
  * it. A door skin comes out as one quad rather than four hundred.
  */
-export function voxGeometry(vox) {
-  const { nx, ny, nz, step, ox, oy, oz, at, palette } = vox;
+export function voxGeometry(vox, { body = null, accent = null } = {}) {
+  const { nx, ny, nz, step, ox, oy, oz, at, palette, paint } = vox;
+  // The car's own colour, where the bake said the game may put one.
+  //
+  // A body's identity here comes from the build and not from the file: the
+  // RX-7 is red because the game paints it red, and a crate can hand the
+  // player a colour that has to land somewhere. Without this the palette wins
+  // and every RX-7 is the white one its author modelled.
+  const paintRGB = body ? [body.r, body.g, body.b] : null;
   const dim = [nx, ny, nz];
   const pos = [];
   const col = [];
@@ -192,9 +233,18 @@ export function voxGeometry(vox) {
             const p3 = corner(0, 1);
             const start = pos.length / 3;
             const quad = dir > 0 ? [p0, p1, p2, p3] : [p0, p3, p2, p1];
+            // Every face of a rectangle came off cells of one colour, and a
+            // rectangle is only merged across cells that agreed — so asking
+            // the first is asking all of them.
+            cell[axis] = slice; cell[u] = a; cell[v] = b;
+            const painted = paintRGB && paint
+              && paint[cell[0] + nx * (cell[1] + ny * cell[2])];
+            const rgb = painted
+              ? paintRGB
+              : [palette[(c - 1) * 3], palette[(c - 1) * 3 + 1], palette[(c - 1) * 3 + 2]];
             for (const q of quad) {
               pos.push(q[0], q[1], q[2]);
-              col.push(palette[(c - 1) * 3], palette[(c - 1) * 3 + 1], palette[(c - 1) * 3 + 2]);
+              col.push(rgb[0], rgb[1], rgb[2]);
             }
             idx.push(start, start + 1, start + 2, start, start + 2, start + 3);
             a += w;
