@@ -1,4 +1,12 @@
 import * as THREE from 'three';
+
+/** A hex colour scaled by a factor, clamped, still a hex colour. */
+function scaled(hex, k) {
+  const r = Math.min(255, Math.round(((hex >> 16) & 255) * k));
+  const g = Math.min(255, Math.round(((hex >> 8) & 255) * k));
+  const b = Math.min(255, Math.round((hex & 255) * k));
+  return (r << 16) | (g << 8) | b;
+}
 import { voxGeometry } from '../vehicle/voxmesh.js';
 
 // A grid you can draw on.
@@ -33,6 +41,36 @@ import { voxGeometry } from '../vehicle/voxmesh.js';
  */
 const QUANT = 31;
 
+/**
+ * Making the cubes visible.
+ *
+ * A voxel car reads as cubes and a voxel chair does not, and the reason is not
+ * the cell size — it is that a car is a curved thing approximated by cubes, so
+ * its surface *steps* and you can count the steps, while a chair is genuinely
+ * box-shaped and its faces are flat. Greedy meshing then merges each flat face
+ * into a single quad and the grid disappears completely. The better the mesher
+ * works, the less the thing looks like what it is made of.
+ *
+ * So a canvas can be asked to speckle: every colour becomes a small family of
+ * near-identical shades, and each cube takes one of them according to where it
+ * is. The lattice becomes visible on a flat face without any geometry changing.
+ *
+ * `SPECKLE` is how many cubes share a shade, and it is the cost dial — at 1 the
+ * mesher can merge nothing and every cube is six quads; at 2 it still merges
+ * runs and the grid still reads.
+ */
+const SPECKLE = 2;
+const SHADES = [1.0, 0.925, 1.075, 0.962];
+
+function speckleOf(x, y, z) {
+  const i = Math.floor(x / SPECKLE);
+  const j = Math.floor(y / SPECKLE);
+  const k = Math.floor(z / SPECKLE);
+  let h = (i * 374761393 + j * 668265263 + k * 2147483647) | 0;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  return ((h ^ (h >>> 16)) >>> 0) % SHADES.length;
+}
+
 export class VoxCanvas {
   /**
    * @param w,h,d  size in metres — x, y (up), z
@@ -53,6 +91,13 @@ export class VoxCanvas {
     this.ny = Math.max(1, Math.ceil(h / step));
     this.nz = Math.max(1, Math.ceil(d / step));
     if (opts.cells) [this.nx, this.ny, this.nz] = opts.cells;
+    // Whether every colour on this canvas becomes a family of shades, one per
+    // cube. See `SPECKLE`. Off by default: a car is already visibly cubes and
+    // does not need help, and paying for it there would be paying twice.
+    this.speckle = !!opts.speckle;
+    this._family = new Map();
+    // The head value of each shade family, for an O(1) test in `box`.
+    this._heads = new Set();
     const [ox, oy, oz] = opts.origin
       ?? [-(this.nx * step) / 2, 0, -(this.nz * step) / 2];
     this.ox = ox; this.oy = oy; this.oz = oz;
@@ -79,6 +124,23 @@ export class VoxCanvas {
    *          empty and there is no way around that.
    */
   colour(hex) {
+    if (this.speckle) {
+      const key = typeof hex === 'number' ? hex : new THREE.Color(hex).getHex();
+      const had = this._family.get(key);
+      if (had !== undefined) return had;
+      // The family is allocated contiguously so `box` can find its members by
+      // offset rather than by another map lookup per cell.
+      const first = this._plain(scaled(key, SHADES[0]));
+      for (let i = 1; i < SHADES.length; i++) this._plain(scaled(key, SHADES[i]));
+      this._family.set(key, first);
+      this._heads.add(first);
+      return first;
+    }
+    return this._plain(hex);
+  }
+
+  /** One palette slot, no family. */
+  _plain(hex) {
     const n = typeof hex === 'number' ? hex : new THREE.Color(hex).getHex();
     const r = ((n >> 16) & 255) / 255;
     const g = ((n >> 8) & 255) / 255;
@@ -113,12 +175,16 @@ export class VoxCanvas {
     const by = Math.min(this.ny, Math.max(y0, y1));
     const az = Math.max(0, Math.min(z0, z1));
     const bz = Math.min(this.nz, Math.max(z0, z1));
+    // A speckled fill writes a shade per cube; a plain one writes a run.
+    // A set lookup, not a scan. Asking the family map every call turned a
+    // house's build from 0.7 s into the wrong side of two.
+    const family = this.speckle && v > 0 && this._heads.has(v);
     for (let z = az; z < bz; z++) {
       for (let y = ay; y < by; y++) {
         let o = ax + this.nx * (y + this.ny * z);
         for (let x = ax; x < bx; x++, o++) {
           if (this.at[o]) this.count--;
-          this.at[o] = v;
+          this.at[o] = family ? v + speckleOf(x, y, z) : v;
           if (v) this.count++;
         }
       }
