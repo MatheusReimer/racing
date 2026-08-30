@@ -51,7 +51,7 @@ const BAND_ASPECT = 4.5;
 const TALL_ASPECT = 1.8;
 
 /** The district the showroom borrows its backdrop from. */
-const BACKDROP_BIOME = 'downtown';
+const BACKDROP_BIOME = 'industrial';
 
 /** How far the ground runs before the fog has finished with it. */
 const GROUND_RADIUS = 760;

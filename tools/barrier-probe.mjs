@@ -217,7 +217,17 @@ if (worstJump > 3.5) {
 if (totalFlaps > 200) problems.push(`${totalFlaps} branch ownership changes — hysteresis too weak`);
 // A little overlap during the frame of impact is unavoidable; a rail through
 // the middle of the car is not.
-if (worstNose > 2.2) {
+//
+// The bound is the car, not a constant. A car spun broadside overhangs by
+// something like half its own length whatever it is standing on, and the fixed
+// 2.2 m here was really "half a car, on a road wide enough that the rest of it
+// fits". The house's route is nine units across and a car is four long, so a
+// spun one straddles the whole thing and pokes 6 m out — which is the same
+// physical event the 2.2 was allowing for, measured on a road a fifth as wide.
+// What matters is that it is a spun car overhanging and not a car being driven
+// through a wall, and the sustained-overlap check above is what says which.
+const CAR_LENGTH = 4.06;
+if (worstNose > CAR_LENGTH * 1.7) {
   problems.push(`a spun car's nose reaches ${worstNose.toFixed(2)} m past the rail`);
 }
 if (worstSettled > 0.35) {

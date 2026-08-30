@@ -422,7 +422,7 @@ export class TrackMesh {
     // backdrop plane. The road is left hanging over nothing, which is the
     // point — it is the only way to see what the road and the barriers
     // actually contribute before anything is built back around them.
-    if (!biome.stripped) {
+    if (!biome.stripped && !biome.indoor) {
       const verge = new THREE.Mesh(buildBlockVerge(track, biome, quality), this.groundMat);
       verge.receiveShadow = !!quality?.shadows;
       verge.matrixAutoUpdate = false;

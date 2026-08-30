@@ -25,7 +25,7 @@ const H = Number(process.env.H || 800);
 const ANGLE = Number(process.env.ANGLE || 38);
 const DIST = Number(process.env.DIST || 1.0);
 const LOD = Number(process.env.LOD || 0);
-const BIOME = process.env.BIOME || 'downtown';
+const BIOME = process.env.BIOME || 'industrial';
 
 const server = await ensureServer();
 const browser = await chromium.launch({

@@ -292,6 +292,12 @@ for (const biome of BIOMES) {
   // below would fire on it — sparse, nothing destructible, no horizon. Said as
   // "stripped" rather than passed off as ok, so the suite reports the state of
   // the world honestly and nobody mistakes an empty city for a working one.
+  const spec = BIOME_PROPS[biome.id];
+  if (spec?.unfurnished) {
+    console.log(`  ${biome.id.padEnd(11)} ${String(props.length).padStart(4)} props  `
+      + 'UNFURNISHED — the route is built, what stands in the rooms is not');
+    continue;
+  }
   if (biome.stripped) {
     console.log(`  ${biome.id.padEnd(11)} ${String(props.length).padStart(4)} props  `
       + 'STRIPPED — `stripped` is set on the biome; nothing placed by intent');

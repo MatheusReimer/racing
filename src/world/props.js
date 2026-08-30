@@ -306,6 +306,19 @@ export const BIOME_PROPS = {
     scenery: { pine: 4, snow_bank: 3, pole: 2, shack: 1 },
     horizon: { ridge: 3, building: 1 },
   },
+  // The house has no furniture yet.
+  //
+  // Without an entry here it fell through to the wasteland's table and
+  // scattered barrels, rocks and dead trees through a kitchen — one of which
+  // landed on the racing line. An empty table is the honest state: the route
+  // through the rooms is built and what stands in them is not.
+  house: {
+    unfurnished: true,
+    trackside: {},
+    scenery: {},
+    horizon: {},
+  },
+
   // STRIPPED — the flag itself lives on the biome; see `stripped` in biomes.js.
   downtown: {
     trackside: {

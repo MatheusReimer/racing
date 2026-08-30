@@ -192,93 +192,86 @@ export const BIOMES = [
   },
 
   {
-    id: 'downtown',
-    name: 'Olympic City',
-    // Laid out from a block grid rather than harmonics — see track/city.js.
-    city: true,
+    id: 'house',
+    name: 'The House',
 
-    // Stripped to bare road while the city is rebuilt.
+    // Indoors, at ten times life.
     //
-    // One flag, read in three places, rather than three commented-out call
-    // sites: the props tables place nothing (`props.js`), the ground surfaces
-    // are not built (`track/mesh.js`), and the sky draws no skyline
-    // (`sky/sky.js`). Deleting this line brings all of it back at once, which
-    // is the property that matters — a strip you cannot undo in one edit is a
-    // deletion wearing a different name.
-    stripped: true,
-    tagline: 'Wet asphalt, neon, and traffic that does not know there is a race on.',
+    // The car does not shrink. An RC car is about a tenth of a real one, and
+    // shrinking the vehicle would invalidate every physics constant, every
+    // handling probe and every balance run in the project — so the house is
+    // built at 10x instead and the car that has always been 4.06 units long
+    // reads as a 1:10 model on a kitchen floor. The speed cap does the same
+    // trick: 166 at this scale is 16.6 km/h, which is what an RC car does.
+    //
+    // Laid out as a ring of rooms with a doorway between each pair. See
+    // track/house.js.
+    house: true,
+    indoor: true,
+
+    tagline: 'Kitchen to bathroom to the TV. The carpet is slower than it looks.',
     order: 5,
 
-    traffic: 1.0,
+    // No civilian traffic indoors. What the road furniture would have been is
+    // the furniture.
+    traffic: 0,
 
-    // A street circuit: busy, narrow, and lit. Chaos is high because city
-    // blocks turn rather than sweep, and the width is the tightest in the game
-    // — the pressure here comes from what is *on* the road, not from the road.
-    trackChaos: 0.50,
-    trackWidth: 17,
-    elevation: 6,
+    // A room is wide and a doorway is one car, so the pressure here is not the
+    // width of the track on average — it is the eight places a lap where it
+    // stops being wide. `trackWidth` is the room; the pinch comes from
+    // `houseWidthAt`.
+    // Nine units, and this is the number the whole layout turns on.
+    //
+    // A house has room-scale corners and there is no way round it: a doorway
+    // has to be entered square, a corner of the ring turns ninety degrees, and
+    // there is exactly one room between the two doors. Every attempt to open
+    // those corners — the swing, the bulge direction, the control spacing, the
+    // door straight — moved the minimum radius by less than a metre. It is the
+    // shape of a house.
+    //
+    // So the road gives way instead. A corner has to have more radius than the
+    // track has half-width or the inside edge folds through itself, and at
+    // radius ~6 that means a half-width under 4.5. Nine units is 90 cm of real
+    // floor for a car 18 cm wide — five car widths, which is a racing line
+    // through a room rather than a road filling it. Which is also what an RC
+    // track in a house actually is: a marked route, with the rest of the floor
+    // drivable and slower.
+    trackChaos: 0.30,
+    trackWidth: 9,
+    elevation: 0,
     offTrack: 'gravel',
 
-    // Night. Everything below is chosen so the road is the brightest thing in
-    // frame and the neon is the only saturated colour in it.
+    // Lit like a room, not like weather. A ceiling light is a broad soft key
+    // from almost straight above with very little directionality, which is why
+    // the hemisphere carries most of this and the sun almost none: a hard
+    // directional light indoors reads as a window, and there is not one.
     palette: {
-      sky: ['#080b16', '#0d1424', '#131d33'],
-      fog: '#0b1120',
-      fogDensity: 0.0068,
-      road: '#2c323c',
-      roadLine: '#d8dde6',
-      ground: '#1d2128',
-      groundAlt: '#171a20',
-      prop: '#414a57',
-      accent: '#ff2e88',
-      sun: '#8fa8d8',
-      sunAngle: 0.20,
-      ambient: '#1b2436',
+      sky: ['#2a2622', '#211e1b', '#191715'],
+      fog: '#241f1b',
+      fogDensity: 0.0042,
+      road: '#8a7c68',
+      roadLine: '#c9bda6',
+      ground: '#6f6353',
+      groundAlt: '#5c5245',
+      prop: '#9a8f7e',
+      accent: '#e0563a',
+      sun: '#ffeccd',
+      sunAngle: 0.82,
+      ambient: '#3a332c',
 
-      // Lit by street lamps that are not in the light model, so `fill` stands
-      // in for their spill: warm, from low down, and strong enough that the
-      // road reads. The moon is the key and mostly makes the wet asphalt shine.
-      // Weighted toward the hemisphere rather than the directional fill. A
-      // strong directional light grazing the ground's normal map speckles it
-      // with specular glitter — at night that reads as static, not as tarmac.
-      // Hemispherical light is diffuse only, so it lifts the scene without
-      // catching every bump.
-      // Raised again once the frontages went in: buildings walling both sides
-      // occlude most of the hemisphere, so the same rig that lit an open street
-      // leaves a canyon black.
-      // Cool and mostly hemispherical. A warm directional fill this strong
-      // turned the ground brown, which beside a city street reads as a dirt
-      // field rather than as asphalt in shadow.
-      // No warm directional fill at all. At a grazing angle it lit the pavement
-      // gold and did nothing the hemisphere was not already doing better; the
-      // lamps that justify a warm tint are emissive geometry, not this light.
-      sunIntensity: 1.9,
-      fillColor: '#9fb6d8',
-      fillIntensity: 0.10,
-      hemiColor: '#44608f',
-      hemiIntensity: 5.2,
+      sunIntensity: 0.9,
+      fillColor: '#ffe9c8',
+      fillIntensity: 0.55,
+      hemiColor: '#cbbba0',
+      hemiIntensity: 3.4,
 
-      night: true,
-      wet: true,
-
-      // The moon sits where the key light comes from, so the shadows on the
-      // street point away from the thing casting them. Bigger than the real
-      // one — half a degree is a speck, and the point of it is to be seen.
-      // Kept lower than a real moon would be at this hour: a city street is a
-      // canyon, and the band of sky a driver can actually see is a few degrees
-      // wide above the rooflines. Higher and it is a moon nobody sees.
-      moon: { size: 0.038, elevation: 0.36, color: '#e9eefc' },
-      // The matte beyond the fog: a silhouette a shade above the fog colour,
-      // so the towers separate from it without becoming a wall of cut-outs.
-      skylineColor: '#1b2740',
-      skylineWindow: '#ffd39a',
-          // Sodium and neon on wet asphalt: blacks lifted into blue so the night
-      // has depth rather than holes, midtones pulled down, and just enough
-      // magenta in the whites to read as a city rather than as moonlight.
-      grade: { lift: [0.008, 0.010, 0.026], gamma: [1.00, 1.00, 1.05], gain: [1.02, 0.98, 1.05] },
+      // No sky, no moon, no skyline: the dome is a ceiling. What is above the
+      // walls is the underside of one, and the gradient runs dark rather than
+      // bright because a ceiling is the least lit surface in a lit room.
+      grade: { lift: [0.010, 0.008, 0.006], gamma: [1.00, 1.00, 1.00], gain: [1.04, 1.00, 0.96] },
     },
 
-    propDensity: 1.25,
+    propDensity: 1.4,
     ambientLoop: 'city',
   },
 ];
@@ -309,7 +302,7 @@ export function biomeForRegion(index) {
  * memorised.
  */
 export function drawItinerary(rng, count) {
-  const first = BIOME_BY_ID.downtown ?? BIOMES[0];
+  const first = BIOME_BY_ID.house ?? BIOMES[0];
   const rest = BIOMES.filter((b) => b !== first);
   for (let i = rest.length - 1; i > 0; i--) {
     const j = rng.int(0, i);

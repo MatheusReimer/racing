@@ -104,6 +104,7 @@ export function previewTrack(seed, biome, opts = {}) {
  */
 export function findCorners(track) {
   const pts = track.path.points;
+  const cum = track.path.cum;
   const n = pts.length;
   const out = [];
 
@@ -139,11 +140,24 @@ export function findCorners(track) {
       const radius = ((la + lb) / 2) / turn;
 
       if (radius < CORNER_RADIUS) {
-        if (!run) run = { s: (i / n) * track.length, length: 0, tightest: radius, turn: cross };
+        // Where this point *is*, not what fraction of the list it is.
+        //
+        // `(i / n) * length` assumes the polyline is evenly spaced, and it is
+        // not: the resampler puts points where the curve needs them. On the
+        // circuits that existed when this was written the error was small
+        // enough to hide; on a house — a lap of tight door straights and open
+        // room arcs — a corner's reported start landed before the end of the
+        // one before it, and the briefing had two corners overlapping.
+        if (!run) {
+          run = {
+            s: cum ? cum[i] : (i / n) * track.length,
+            length: 0, tightest: radius, turn: cross,
+          };
+        }
         run.length += lb;
         if (radius < run.tightest) { run.tightest = radius; run.turn = cross; }
       } else {
-        if (pass === 1 && run && run.s >= (n - 1) / n * track.length) { close(); continue; }
+        if (pass === 1 && run && run.s >= track.length - (track.length / n)) { close(); continue; }
         close();
       }
       if (pass === 1 && out.length && run === null) break;

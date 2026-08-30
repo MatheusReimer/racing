@@ -1,5 +1,6 @@
 import { Path } from './spline.js';
 import { generateCityLayout } from './city.js';
+import { generateHouseLayout, houseWidthAt, DOOR_W } from './house.js';
 import { SURFACES } from '../vehicle/physics.js';
 import { clamp, clamp01, lerp, wrap, TAU, smoothstep } from '../core/math.js';
 
@@ -366,6 +367,14 @@ export function generateTrack(rng, biome, opts = {}) {
     });
     if (layout) return finishTrack(rng, biome, opts, layout.controls, { layout });
   }
+
+  // Indoors is laid out too, and by a third rule again: a ring of rooms with a
+  // doorway between each pair. See house.js — the car does not shrink, the
+  // house is built at ten times life.
+  if (biome.house) {
+    const layout = generateHouseLayout(rng.fork('house'), {});
+    if (layout) return finishTrack(rng, biome, opts, layout.controls, { layout });
+  }
   const R = (opts.radius ?? 300) * (opts.lengthScale ?? 1) * rng.range(0.9, 1.12);
 
   // --- Centreline harmonics ------------------------------------------------
@@ -469,13 +478,38 @@ function finishTrack(rng, biome, opts, controls, extra = {}) {
   // Narrow sections are pressure. They are placed against curvature rather
   // than at random: a pinch on a straight is a non-event, a pinch at the exit
   // of a fast corner is the moment a race is won or lost.
-  const WSAMPLES = 128;
+  // Enough samples that the profile can describe the features it is made of.
+  //
+  // A fixed 128 is one sample every fifteen metres on an outdoor circuit,
+  // which is finer than anything out there changes. Indoors the width goes
+  // from a room to a doorway and back inside twenty metres, so 128 samples on
+  // an 800 m lap stepped straight over the pinch — and the clamp that keeps
+  // the road narrower than its own corners was being interpolated around.
+  const WSAMPLES = Math.max(128, Math.round(path.length / 3));
   const baseWidth = biome.trackWidth ?? 22;
   const widthProfile = new Float32Array(WSAMPLES);
   for (let i = 0; i < WSAMPLES; i++) {
     const s = (i / WSAMPLES) * path.length;
     let w;
-    if (biome.city) {
+    if (biome.house) {
+      // Wide in a room, one car at a door. Where the width comes from is the
+      // distance to the nearest doorway, not the curvature — indoors the
+      // tightest part of the circuit is the middle of a room, which is where
+      // there is the most space.
+      const at = path.pointAt(s, { x: 0, y: 0, z: 0 });
+      w = houseWidthAt(at.x, at.z, extra.layout?.doorways ?? [],
+        baseWidth, DOOR_W / 2 + 0.4);
+
+      // No curvature clamp any more.
+      //
+      // There was one, and then a second term for the barrier rail outside it,
+      // and each fixed one probe by breaking another — which is what it looks
+      // like when a constant is standing in for a decision. The decision is the
+      // width, and it is made in the biome: at nine units the road is narrower
+      // than any corner in this house needs it to be, and nothing has to be
+      // clamped at all.
+
+    } else if (biome.city) {
       // A junction is the widest part of a street, not the narrowest. Pinching
       // the road at high curvature is right for a country circuit and exactly
       // backwards here — it would squeeze every corner in the district.
@@ -569,7 +603,18 @@ function finishTrack(rng, biome, opts, controls, extra = {}) {
   const STEP = 18;
   const candidates = [];
   if (biome.city) branches.length = Math.min(branches.length, wantBranches);
-  for (let s0 = 0; s0 < path.length; s0 += STEP) {
+
+  // Indoors there is no such thing as a wider line.
+  //
+  // The builder below shortens a sweeping curve by pushing the racing line to
+  // the inside of it. A house has no sweeping curves — it has rooms joined by
+  // doors — so every "shortcut" it produced came out between nineteen and a
+  // hundred and thirty-seven metres *longer* than the line it was shortening.
+  // A real shortcut here is a different door: under the bed, through the cat
+  // flap, behind the sofa. That is furniture, and it is not built yet, so for
+  // now a house has the pit lane and nothing else.
+  const wantOffsets = !biome.house;
+  for (let s0 = 0; wantOffsets && s0 < path.length; s0 += STEP) {
     for (const span of [110, 150, 190, 240]) {
       const s1 = s0 + span;
       if (s1 >= path.length) continue;
@@ -669,8 +714,11 @@ function finishTrack(rng, biome, opts, controls, extra = {}) {
     offTrackSurface: SURFACES[biome.offTrack || 'offroad'] || SURFACES.offroad,
     harmonics,
     seedInfo: {
-      layout: extra.layout ? 'city grid' : 'harmonics',
-      blocks: extra.layout?.cells.size ?? 0,
+      // Three layout rules now, and the summary has to name which one ran:
+      // a city traced from a block grid, a house threaded through a ring of
+      // rooms, or harmonics on a circle.
+      layout: extra.layout?.rooms ? 'room ring' : extra.layout ? 'city grid' : 'harmonics',
+      blocks: extra.layout?.cells?.size ?? extra.layout?.rooms?.length ?? 0,
       harmonics: harmonics.length,
       branches: branches.length,
     },

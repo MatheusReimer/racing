@@ -238,7 +238,8 @@ export class Sky {
     // A stripped biome gets no moon either. It is the last object in the frame
     // once the road goes, and it is drawn in the dome's shader rather than as
     // an object, so removing every mesh in the scene would not have touched it.
-    const moon = biome.stripped ? null : p.moon;
+    // Indoors there is no sky to put one in: the dome is a ceiling.
+    const moon = (biome.stripped || biome.indoor) ? null : p.moon;
     u.uMoonStrength.value = moon ? (moon.strength ?? 1) : 0;
     u.uSunStrength.value = moon ? 0 : 1;
     if (moon) {
@@ -277,7 +278,7 @@ export class Sky {
 
     // Distant towers, past anything the scatter can afford to place. On by
     // default where a district is a city; a palette can say otherwise.
-    const wantsSkyline = !biome.stripped && (p.skyline ?? !!biome.city);
+    const wantsSkyline = !biome.stripped && !biome.indoor && (p.skyline ?? !!biome.city);
     if (wantsSkyline && !this.skyline) {
       this.skyline = new Skyline(this.scene, { seed: `skyline:${biome.id}` });
     } else if (!wantsSkyline && this.skyline) {

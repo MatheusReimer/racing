@@ -212,14 +212,28 @@ export class Path {
     let best = -1;
     let bestD2 = Infinity;
 
-    if (gx >= 0 && gz >= 0 && gx < this.gridW && gz < this.gridH) {
-      const list = this.buckets[gz * this.gridW + gx];
-      if (list) {
+    // The nine buckets around the query, not the one it lands in.
+    //
+    // A bucket holds the polyline's *points*, and the nearest point to a query
+    // sitting near a bucket edge is very often in the bucket next door — or in
+    // none at all, when the resampler left a long straight with its points far
+    // apart. One bucket was enough for circuits whose points are evenly spread;
+    // a house is door straights and room arcs, and the round trip from a point
+    // on the centreline back to its own `s` came out 6.6 m wrong, which is a
+    // car and a half of lap position.
+    for (let dz2 = -1; dz2 <= 1; dz2++) {
+      const cz = gz + dz2;
+      if (cz < 0 || cz >= this.gridH) continue;
+      for (let dx2 = -1; dx2 <= 1; dx2++) {
+        const cx = gx + dx2;
+        if (cx < 0 || cx >= this.gridW) continue;
+        const list = this.buckets[cz * this.gridW + cx];
+        if (!list) continue;
         for (let k = 0; k < list.length; k++) {
           const i = list[k];
           const p = this.points[i];
-          const dx = p.x - x, dz = p.z - z;
-          const d2 = dx * dx + dz * dz;
+          const ddx = p.x - x, ddz = p.z - z;
+          const d2 = ddx * ddx + ddz * ddz;
           if (d2 < bestD2) { bestD2 = d2; best = i; }
         }
       }

@@ -49,11 +49,19 @@ for (let i = 0; i < SEEDS; i++) {
   // --- curvature: is every corner actually takeable? ---
   let minR = Infinity;
   let sharpCount = 0;
+  // The worst *ratio* of radius to the width at that point, not the smallest
+  // radius anywhere — see below.
+  let worstFold = Infinity;
+  let worstFoldR = 0;
+  let worstFoldHw = 0;
   for (let s = 0; s < p.length; s += 4) {
     const c = Math.abs(p.curvatureAt(s, 8));
     const r = c > 1e-6 ? 1 / c : Infinity;
     if (r < minR) minR = r;
     if (r < 22) sharpCount++;
+    const hwHere = track.halfWidthAt(s);
+    const ratio = r / Math.max(0.1, hwHere);
+    if (ratio < worstFold) { worstFold = ratio; worstFoldR = r; worstFoldHw = hwHere; }
   }
   // The limit is geometric, not a fixed number.
   //
@@ -65,11 +73,18 @@ for (let i = 0; i < SEEDS; i++) {
   //
   // What actually breaks is a corner tighter than the road is wide, because
   // then the inside edge folds through itself and there is no line at all.
-  const hw = track.halfWidthAt(0);
-  const foldRadius = hw * 1.15;
-  if (minR < foldRadius) {
-    problems.push(`corner radius ${minR.toFixed(1)}m is tighter than the road is wide `
-      + `(${hw.toFixed(1)}m half-width) — the inside edge folds through itself`);
+  // And it is a *local* comparison.
+  //
+  // This took the width at s=0 and compared it against the tightest radius
+  // anywhere on the lap, which is a fair test only while a circuit is roughly
+  // one width all the way round — every circuit was, until a house. A house
+  // pinches to one car at eight doorways and opens to a room between them, so
+  // the tightest corner and the narrowest road are in different places and
+  // comparing them across the lap says nothing about either. The question is
+  // whether the road folds through itself *here*.
+  if (worstFold < 1.15) {
+    problems.push(`corner radius ${worstFoldR.toFixed(1)}m is tighter than the road is wide `
+      + `there (${worstFoldHw.toFixed(1)}m half-width) — the inside edge folds through itself`);
   }
 
   // --- self-intersection ---

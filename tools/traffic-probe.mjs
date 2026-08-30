@@ -19,6 +19,21 @@ import { BIOMES } from '../src/data/biomes.js';
 import { EventBus } from '../src/core/events.js';
 
 const DT = 1 / 60;
+/**
+ * A road busy enough to test the mechanic on.
+ *
+ * This used to name the city, which carried a traffic density of 1.0 — and
+ * when the city was replaced by a house, whose density is zero because there
+ * is no civilian traffic in a kitchen, the busiest road left in the game runs
+ * at 0.55. At that density "does reading the traffic help?" came out a coin
+ * flip, which is a statement about the sample size and not about the mechanic.
+ *
+ * So the probe sets the density it needs rather than hoping a biome has it.
+ * What is under test is whether traffic can be read, not whether any
+ * particular district is busy.
+ */
+const BUSY = { ...BIOMES.find((b) => b.id === 'industrial'), traffic: 1.0 };
+
 let problems = 0;
 
 console.log('Traffic\n');
@@ -56,7 +71,7 @@ for (const biome of BIOMES) {
   let samples = 0;
   const sim = new RaceSim({
     seed: 'TR:place',
-    biome: BIOMES.find((b) => b.id === 'downtown'),
+    biome: BUSY,
     playerBuild: new Build('rotary'),
     config: { laps: 2, rivals: 0, difficulty: 1, countdown: 0 },
   });
@@ -96,7 +111,7 @@ for (const biome of BIOMES) {
   const run = (avoid, seed) => {
     const sim = new RaceSim({
       seed,
-      biome: BIOMES.find((b) => b.id === 'downtown'),
+      biome: BUSY,
       playerBuild: new Build('rotary'),
       config: { laps: 2, rivals: 0, difficulty: 1, countdown: 0 },
     });
@@ -222,7 +237,7 @@ for (const biome of BIOMES) {
   for (let seed = 0; seed < 6; seed++) {
     const sim = new RaceSim({
       seed: `TR:race${seed}`,
-      biome: BIOMES.find((b) => b.id === 'downtown'),
+      biome: BUSY,
       playerBuild: new Build('rotary'),
       config: { laps: 2, rivals: 5, difficulty: 1, countdown: 0 },
     });

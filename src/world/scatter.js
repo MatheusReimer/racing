@@ -83,6 +83,15 @@ export function generateProps(rng, track, biome, opts = {}) {
   const props = [];
   const L = track.length;
 
+  // Nothing at all in a biome with no furniture yet, either.
+  //
+  // Emptying the tables was not enough: the pit lane's workshop, crates and
+  // barrels come from a dedicated pass, and in a house they put a barrel in a
+  // doorway — three and a half metres into the racing line, in a gap that is
+  // one car wide. A pit lane indoors wants to be a garage, and that is
+  // furniture too.
+  if (spec.unfurnished) return props;
+
   // Nothing at all in a stripped biome.
   //
   // Emptying its tables was not enough: the gantries over the start line and
