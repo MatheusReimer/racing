@@ -77,7 +77,7 @@ function floor(C, spec, x0, x1, z0, z1, FLOOR_D) {
  * @param doors  which sides have an opening and where along the wall, as
  *               `{ side, at }` with side one of -x, +x, -z, +z
  */
-function buildRoom(theme, doors, palette, rng, place) {
+function buildRoom(theme, doors, palette, rng, place, clear) {
   // The floor's *top* is y = 0, not its bottom.
   //
   // Built up from zero it stood 90 cm proud of the surface the car drives on,
@@ -150,6 +150,7 @@ function buildRoom(theme, doors, palette, rng, place) {
 
   common(C, FLOOR_D, doors, place, rng, palette);
   fixtures(C, theme, FLOOR_D, rng, palette);
+  clear?.(C, FLOOR_D);
 
   return C.geometry();
 }
@@ -192,7 +193,20 @@ export function buildHouse(track, biome, rng) {
       northOut: room.cell[1] === 0,
       southOut: room.cell[1] === layout.rows - 1,
     };
-    const geo = buildRoom(room.theme, doors, palette, rng, place);
+    // And then the route is carved back out of it.
+    //
+    // Fixtures are placed against walls, and the racing line swings *toward*
+    // the outside wall to make the room worth driving through — so the two
+    // meet, and a bath ended up on the start line. It had no collision either,
+    // because the room is one mesh and the simulation knows nothing about it:
+    // the car drove through the bath.
+    //
+    // Rather than teach every fixture where the track is, the track is
+    // subtracted afterwards. Anything standing in the corridor is simply not
+    // there, which is both the correct result and the only one that cannot be
+    // got wrong by adding another piece of furniture later.
+    const geo = buildRoom(room.theme, doors, palette, rng, place,
+      (C, F) => carveRoute(C, F, track, room));
     const mesh = new THREE.Mesh(geo, material);
     mesh.position.set(room.x, 0, room.z);
     mesh.matrixAutoUpdate = false;
@@ -220,6 +234,9 @@ export function buildHouse(track, biome, rng) {
  * @param free  the two-cell band along each wall that fixtures may use; the
  *              middle of the room belongs to the route
  */
+/** The one colour the utility's airer needs that its room does not define. */
+const metalC = (C) => C.colour(0xc4c8cc);
+
 function fixtures(C, theme, FLOOR_D, rng, palette) {
   const t = Math.max(2, C.c(WALL_T));
   const x0 = t, x1 = C.nx - t;
@@ -260,7 +277,30 @@ function fixtures(C, theme, FLOOR_D, rng, palette) {
     for (const ox of [-m(4), m(3)]) {
       for (const oz of [-m(3), m(2)]) {
         C.box(tx + ox, F, tz + oz, tx + ox + m(1), F + m(7), tz + oz + m(1), wood);
+        // A chair back, on the outward side of each leg pair.
+        C.box(tx + ox, F + m(7), tz + oz, tx + ox + m(1), F + m(11), tz + oz + m(2.5), wood);
       }
+    }
+    // What is on the worktop: a kettle, a toaster, a microwave, a bowl of
+    // fruit. Small, and it is the difference between a kitchen and a plinth.
+    C.box(x0 + m(1), F + m(9), z0 + m(11), x0 + m(3.2), F + m(12.5), z0 + m(13.2), steel);
+    C.box(x0 + m(1), F + m(9), z0 + m(14), x0 + m(4), F + m(11), z0 + m(16), white);
+    C.box(x0 + m(0.5), F + m(9), z0 + m(17), x0 + m(4.5), F + m(13), z0 + m(22), steel);
+    C.box(x0 + m(1), F + m(9.5), z0 + m(18), x0 + m(1.6), F + m(12), z0 + m(21),
+      C.colour(0x2a3038));
+    // A fruit bowl on the table, and a tea towel over the cooker rail.
+    C.box(tx - m(1.2), F + m(8), tz - m(1.2), tx + m(1.2), F + m(9.2), tz + m(1.2),
+      C.colour(0xd8cdb8));
+    for (const f2 of [[0, 0, 0xd84a3a], [m(0.8), m(0.6), 0xe8b02a], [-m(0.7), m(0.5), 0x4a9a3a]]) {
+      C.box(tx + f2[0], F + m(9.2), tz + f2[1], tx + f2[0] + m(0.8), F + m(10), tz + f2[1] + m(0.8),
+        C.colour(f2[2]));
+    }
+    C.box(x0 + m(6), F + m(6), cz - m(2), x0 + m(6.6), F + m(9), cz + m(1), C.colour(0xd8e4ec));
+    // Boxes on top of the wall cupboards, which is where they live.
+    for (let i = 0; i < 3; i++) {
+      const bz = z0 + m(2) + i * m(4.5);
+      C.box(x0 + m(0.5), F + m(21), bz, x0 + m(3), F + m(24), bz + m(3.4),
+        C.colour(mix(0xc89a4a, 0xd8b880, rng.next())));
     }
   } else if (theme.id === 'bathroom') {
     // The bath along the far wall, and the water in it that overflows.
@@ -281,6 +321,25 @@ function fixtures(C, theme, FLOOR_D, rng, palette) {
       const pz = z0 + rng.int(0, Math.max(1, z1 - z0 - m(4)));
       C.box(px, F, pz, px + m(2) + rng.int(0, 4), F + 1, pz + m(2) + rng.int(0, 4), wet);
     }
+    // A shower over the bath, on a rail, with the curtain pushed to one end —
+    // and it is the curtain that makes the corner read as a shower rather than
+    // as a pipe on a wall.
+    C.box(x1 - m(1.4), F + m(20), z0, x1 - m(0.8), F + m(20.6), z0 + m(17), steel);
+    C.box(x1 - m(2), F + m(19), z0 + m(2), x1 - m(1.2), F + m(20), z0 + m(3), steel);
+    C.box(x1 - m(4), F + m(19), z0 + m(1.6), x1 - m(2), F + m(19.6), z0 + m(3.4), steel);
+    C.box(x1 - m(2), F + m(6), z0 + m(11), x1 - m(1), F + m(20), z0 + m(17),
+      C.colour(0xdfe8ee));
+    // Bottles on the edge of the bath, and a laundry basket by the door.
+    for (let i = 0; i < 4; i++) {
+      const bz = z0 + m(3) + i * m(2.4);
+      C.box(x1 - m(6.6), F + m(6), bz, x1 - m(5.8), F + m(8) + rng.int(0, 3), bz + m(0.8),
+        C.colour([0x4a9ad8, 0xd8724a, 0x8ad84a, 0xd84a9a][i]));
+    }
+    C.box(x0 + m(8), F, z1 - m(6), x0 + m(12), F + m(6), z1 - m(2), C.colour(0xc8b894));
+    C.box(x0 + m(8.5), F + m(4), z1 - m(5.5), x0 + m(11.5), F + m(7), z1 - m(2.5),
+      C.colour(0xe4e0d4));
+    // A toilet roll, on a holder, because it is the detail nobody models.
+    C.box(x0 + m(0.6), F + m(6), z1 - m(9.6), x0 + m(1.8), F + m(7.2), z1 - m(8.4), white);
   } else if (theme.id === 'bedroom') {
     // The bed, and the gap under it — which is the shortcut the theme promises
     // and is left clear on purpose.
@@ -296,6 +355,23 @@ function fixtures(C, theme, FLOOR_D, rng, palette) {
     C.box(x1 - m(3), F + m(5), z0 + m(22), x1 - m(1), F + m(7), z0 + m(24), white);
     C.box(x1 - m(3.5), F + m(7), z0 + m(21.5), x1 - m(0.5), F + m(9.5), z0 + m(24.5),
       C.colour(0xe8d8a8));
+    // A duvet heaped rather than flat, a second pillow, slippers by the bed,
+    // and a pile of clothes on the floor that nobody has dealt with.
+    for (let i = 0; i < 5; i++) {
+      const dz = z0 + m(6) + i * m(2.8);
+      C.box(x1 - m(13) - rng.int(0, 2), F + m(5.5), dz,
+        x1 - m(0.5), F + m(6.5) + rng.int(0, 2), dz + m(2.6), C.colour(0x4a6a8a));
+    }
+    C.box(x1 - m(13.6), F + m(7), z0 + m(11), x1 - m(10.6), F + m(8.6), z0 + m(16), white);
+    for (const sz2 of [z0 + m(21), z0 + m(23)]) {
+      C.box(x1 - m(9), F, sz2, x1 - m(6), F + m(1.4), sz2 + m(1.4), C.colour(0x8a5a6a));
+    }
+    for (let i = 0; i < 4; i++) {
+      const lx = x0 + m(16) + rng.int(0, m(6));
+      const lz = z1 - m(10) - rng.int(0, m(8));
+      C.box(lx, F, lz, lx + m(3), F + m(1.2) + rng.int(0, 2), lz + m(3),
+        C.colour(mix(0x8a7a9a, 0xc8b8a8, rng.next())));
+    }
     C.box(x0 + m(8), F, z0 + m(2), x0 + m(14), F + m(9), z0 + m(6), wood);
     for (let d2 = 0; d2 < 3; d2++) {
       C.box(x0 + m(8) - 1, F + m(1) + d2 * m(2.6), z0 + m(2.5),
@@ -314,6 +390,13 @@ function fixtures(C, theme, FLOOR_D, rng, palette) {
     const gx = Math.round((x0 + x1) / 2);
     const gz = Math.round((z0 + z1) / 2);
     C.box(gx - m(4), F + m(3.5), gz - m(2.5), gx + m(4), F + m(4.2), gz + m(2.5), wood);
+    // With legs. It was a tabletop hovering at knee height, which nobody
+    // notices in a chase camera and is the first thing seen from a room shot.
+    for (const ox of [-m(3.4), m(2.6)]) {
+      for (const oz of [-m(2), m(1.2)]) {
+        C.box(gx + ox, F, gz + oz, gx + ox + m(0.8), F + m(3.5), gz + oz + m(0.8), wood);
+      }
+    }
     C.box(gx - m(0.6), F + m(4.2), gz - m(0.6), gx + m(0.6), F + m(5.4), gz + m(0.6), white);
     C.box(x0 + m(1), F, z1 - m(4), x0 + m(2), F + m(15), z1 - m(3), dark);
     C.box(x0, F + m(15), z1 - m(5), x0 + m(3), F + m(19), z1 - m(2), C.colour(0xf0e2b8));
@@ -324,6 +407,24 @@ function fixtures(C, theme, FLOOR_D, rng, palette) {
     for (let i = 0; i < 3; i++) {
       const cz2 = z1 - m(6) - i * m(2);
       C.box(x1 - m(14), F, cz2, x1 - m(3), F + 1, cz2 + 1, dark);
+    }
+    // Cushions on the sofa, a shelf of photographs, a games console under the
+    // television with its own little light, and a remote left on the table.
+    for (let i = 0; i < 3; i++) {
+      const sz2 = z0 + m(6) + i * m(5.5);
+      C.box(x0 + m(2), F + m(4), sz2, x0 + m(3.6), F + m(7.4), sz2 + m(4),
+        C.colour(mix(palette.accent ?? 0xe0563a, 0xf0e2c8, 0.55 + rng.next() * 0.3)));
+    }
+    C.box(x1 - m(3.4), F, z1 - m(14), x1 - m(0.6), F + m(1.6), z1 - m(11), dark);
+    C.box(x1 - m(3), F + m(0.4), z1 - m(13.4), x1 - m(2.6), F + m(1.2), z1 - m(13),
+      C.colour(0x4fd0a0));
+    C.box(gx - m(2.4), F + m(4.2), gz + m(0.8), gx - m(1.2), F + m(4.6), gz + m(1.6), dark);
+    C.box(x0, F + m(11), z0 + m(8), x0 + m(2), F + m(11.6), z0 + m(18), wood);
+    for (let i = 0; i < 3; i++) {
+      const fz = z0 + m(9) + i * m(3);
+      C.box(x0 + m(0.4), F + m(11.6), fz, x0 + m(1.2), F + m(14), fz + m(2), white);
+      C.box(x0 + m(0.6), F + m(12), fz + m(0.3), x0 + m(1), F + m(13.6), fz + m(1.7),
+        C.colour(mix(0x6a8aa8, 0xc8a888, rng.next())));
     }
   } else if (theme.id === 'toyroom') {
     // A run of building blocks along the wall, in four colours, stacked
@@ -345,6 +446,25 @@ function fixtures(C, theme, FLOOR_D, rng, palette) {
     for (let s2 = 0; s2 < m(7); s2++) {
       C.box(x1 - m(8) - s2, F, z1 - m(8), x1 - m(8) - s2 + 1, F + m(7) - s2, z1 - m(2), wood);
     }
+    // A play mat, a loop of train track on it, a rocking horse and a bear.
+    C.box(x0 + m(12), F, z0 + m(6), x0 + m(26), F + 1, z0 + m(20), C.colour(0x4a8ac8));
+    const rx0 = x0 + m(14), rz0 = z0 + m(8), rx1 = x0 + m(24), rz1 = z0 + m(18);
+    const rail = C.colour(0x8a6a48);
+    C.box(rx0, F + 1, rz0, rx1, F + 2, rz0 + 2, rail);
+    C.box(rx0, F + 1, rz1 - 2, rx1, F + 2, rz1, rail);
+    C.box(rx0, F + 1, rz0, rx0 + 2, F + 2, rz1, rail);
+    C.box(rx1 - 2, F + 1, rz0, rx1, F + 2, rz1, rail);
+    C.box(rx0 + m(2), F + 2, rz0 - 1, rx0 + m(5), F + m(2.4), rz0 + 3, C.colour(0xd83a3a));
+    C.box(x1 - m(6), F, z0 + m(3), x1 - m(2), F + m(1.2), z0 + m(9), wood);
+    C.box(x1 - m(5.4), F + m(1.2), z0 + m(4.5), x1 - m(2.6), F + m(5), z0 + m(7.5), white);
+    C.box(x1 - m(5.4), F + m(5), z0 + m(6.6), x1 - m(3.4), F + m(7), z0 + m(8.4), white);
+    const fur = C.colour(0xb08a5a);
+    C.box(x0 + m(4), F, z1 - m(8), x0 + m(7), F + m(4), z1 - m(5), fur);
+    C.box(x0 + m(4.4), F + m(4), z1 - m(7.6), x0 + m(6.6), F + m(6.4), z1 - m(5.4), fur);
+    for (const ez of [z1 - m(7.6), z1 - m(6)]) {
+      C.box(x0 + m(4.2), F + m(6), ez, x0 + m(5), F + m(7), ez + m(0.8), fur);
+    }
+
     const ballR = m(2.4);
     for (let dy = 0; dy < ballR * 2; dy++) {
       const rr = Math.round(Math.sqrt(Math.max(0, ballR * ballR - (dy - ballR) ** 2)));
@@ -369,6 +489,28 @@ function fixtures(C, theme, FLOOR_D, rng, palette) {
     C.box(x1 - m(4), F + m(8), z0 + m(9), x1 - m(3), F + m(14), z0 + m(15), dark);
     C.box(x1 - m(9), F, z0 + m(10), x1 - m(5), F + m(4), z0 + m(14), dark);
     C.box(x1 - m(9), F + m(4), z0 + m(10), x1 - m(8), F + m(10), z0 + m(14), dark);
+    // Papers on the desk and a few that missed the bin, a filing cabinet, and
+    // a lamp bent over the keyboard.
+    for (let i = 0; i < 4; i++) {
+      const px = x1 - m(6) + rng.int(0, 4);
+      const pz = z0 + m(7) + rng.int(0, m(9));
+      C.box(px, F + m(8), pz, px + m(2.4), F + m(8) + 1, pz + m(3), white);
+    }
+    C.box(x1 - m(3), F + m(8), z0 + m(16), x1 - m(0.6), F + m(8.6), z0 + m(17.6), white);
+    C.box(x1 - m(2.2), F + m(8.6), z0 + m(16.4), x1 - m(1.4), F + m(13), z0 + m(17.2), dark);
+    C.box(x1 - m(4), F + m(12.4), z0 + m(16.4), x1 - m(1.4), F + m(13), z0 + m(17.2), dark);
+    C.box(x1 - m(4.4), F + m(11.6), z0 + m(16.2), x1 - m(3.2), F + m(12.6), z0 + m(17.4), white);
+    C.box(x1 - m(4), F, z0 + m(19), x1, F + m(7), z0 + m(23), steel);
+    for (let d3 = 0; d3 < 2; d3++) {
+      C.box(x1 - m(4) - 1, F + m(1) + d3 * m(3), z0 + m(19.5),
+        x1 - m(4), F + m(3.6) + d3 * m(3), z0 + m(22.5), dark);
+    }
+    C.box(x0 + m(6), F, z1 - m(6), x0 + m(8.4), F + m(4), z1 - m(3.6), steel);
+    for (let i = 0; i < 3; i++) {
+      const bx = x0 + m(9) + rng.int(0, m(4));
+      const bz = z1 - m(7) + rng.int(0, m(4));
+      C.box(bx, F, bz, bx + m(1.4), F + m(1.4), bz + m(1.4), white);
+    }
   } else if (theme.id === 'hall') {
     // A hall is the room with nothing in it, and it still has a hall's things:
     // coat hooks, a console table, a runner, and shoes by the wall.
@@ -389,6 +531,21 @@ function fixtures(C, theme, FLOOR_D, rng, palette) {
       const sz = z1 - m(6) - i * m(2.4);
       C.box(x0 + m(1), F, sz, x0 + m(3.5), F + m(1.6), sz + m(1.6), dark);
     }
+    // An umbrella stand with umbrellas in it, a mirror over the console, and
+    // the post nobody has picked up.
+    C.box(x1 - m(4), F, z1 - m(6), x1 - m(1.6), F + m(5), z1 - m(3.6), steel);
+    for (let i = 0; i < 3; i++) {
+      const ux = x1 - m(3.6) + i;
+      C.box(ux, F + m(5), z1 - m(5.4) + i, ux + 1, F + m(11), z1 - m(4.4) + i,
+        C.colour([0x2a3a6a, 0x6a2a3a, 0x2a5a3a][i]));
+    }
+    C.box(x1 - m(1), F + m(12), z0 + m(8), x1, F + m(19), z0 + m(14), C.colour(0xcfe4ee));
+    C.box(x1 - m(1.4), F + m(11.4), z0 + m(7.4), x1 - m(1), F + m(19.6), z0 + m(14.6), wood);
+    for (let i = 0; i < 3; i++) {
+      const lx = x0 + m(6) + rng.int(0, m(5));
+      const lz = z0 + m(4) + rng.int(0, m(4));
+      C.box(lx, F, lz, lx + m(2.4), F + 1, lz + m(1.6), white);
+    }
   } else if (theme.id === 'utility') {
     C.box(x0, F, z0 + m(3), x0 + m(6), F + m(8.5), z0 + m(9), white);
     C.box(x0 - 1, F + m(3), z0 + m(4.5), x0, F + m(6), z0 + m(7.5), dark);
@@ -401,6 +558,27 @@ function fixtures(C, theme, FLOOR_D, rng, palette) {
         C.colour(mix(0x9a7a4a, 0xb8a888, rng.next())));
     }
     C.box(x1 - m(2), F, z1 - m(4), x1 - m(1.4), F + m(14), z1 - m(3.4), wood);
+    // A clothes airer with washing on it, an ironing board, and the bottles
+    // that live on top of the machines.
+    const airX = x1 - m(12);
+    for (const oz of [z0 + m(4), z0 + m(12)]) {
+      C.box(airX, F, oz, airX + m(0.8), F + m(10), oz + m(0.8), metalC(C));
+      C.box(airX + m(6), F, oz, airX + m(6.8), F + m(10), oz + m(0.8), metalC(C));
+    }
+    for (let i = 0; i < 4; i++) {
+      const ay = F + m(6) + i * m(1.4);
+      C.box(airX, ay, z0 + m(4), airX + m(7), ay + 1, z0 + m(12.8), metalC(C));
+    }
+    for (let i = 0; i < 3; i++) {
+      const wx = airX + m(1) + i * m(2);
+      C.box(wx, F + m(4), z0 + m(5), wx + m(1.4), F + m(9.4), z0 + m(11),
+        C.colour(mix(0xd8dce4, 0xc8b8d8, rng.next())));
+    }
+    C.box(x1 - m(4), F, z1 - m(14), x1 - m(1), F + m(8), z1 - m(6), C.colour(0xd8d4c8));
+    for (let i = 0; i < 3; i++) {
+      C.box(x0 + m(1) + i * m(1.8), F + m(8.5), z0 + m(4), x0 + m(2.2) + i * m(1.8),
+        F + m(11), z0 + m(5.2), C.colour([0x4a9ad8, 0xe8a83a, 0x8ad84a][i]));
+    }
   }
 }
 
@@ -498,11 +676,55 @@ function common(C, F, doors, place, rng, palette) {
     }
   }
 
-  // A light on the ceiling, a picture on a wall, and a socket by the skirting.
+  // A ceiling.
+  //
+  // The rooms were open-topped, which is invisible from the chase camera and
+  // is exactly why it went unnoticed: a room with no lid is a courtyard, and
+  // the light hanging in one has nothing to hang from.
+  const ceiling = C.colour(0xf4f0e8);
+  C.box(0, top, 0, C.nx, top + 2, C.nz, ceiling);
+
+  // A light on it, a rose round the flex, and a smoke alarm off to one side.
   const cx = Math.round(C.nx / 2);
   const cz = Math.round(C.nz / 2);
   C.box(cx - 1, top - m(2), cz - 1, cx + 1, top, cz + 1, metal);
   C.box(cx - m(2), top - m(3.5), cz - m(2), cx + m(2), top - m(2), cz + m(2), white);
+  C.box(cx - m(3), top - 1, cz - m(3), cx + m(3), top, cz + m(3), white);
+  C.box(cx + m(9), top - 1, cz - m(7), cx + m(11), top, cz - m(5), white);
+
+  // A light switch beside each door, at the height a switch is.
+  for (const d of doors) {
+    const doorHalf = Math.max(2, C.c(DOOR_W / 2));
+    if (Math.abs(d.side) === 1) {
+      const wx = d.side < 0 ? x0 : x1 - 1;
+      const c = Math.round(C.nz / 2 + d.at / CELL);
+      C.box(wx, F + m(13), c - doorHalf - m(2.5), wx + 1, F + m(15), c - doorHalf - m(1), white);
+    } else {
+      const wz = d.side < 0 ? z0 : z1 - 1;
+      const c = Math.round(C.nx / 2 + d.at / CELL);
+      C.box(c - doorHalf - m(2.5), F + m(13), wz, c - doorHalf - m(1), F + m(15), wz + 1, white);
+    }
+  }
+
+  // A houseplant in a corner, in a pot, because every room in every house has
+  // one and it is the cheapest object here per unit of "somebody lives here".
+  if (rng.bool(0.75)) {
+    const px = rng.bool(0.5) ? x0 + m(2) : x1 - m(5);
+    const pz = rng.bool(0.5) ? z0 + m(2) : z1 - m(5);
+    const pot = C.colour(0xa8663f);
+    const leaf = C.colour(mix(0x3f7a3a, 0x2c5c30, rng.next()));
+    C.box(px, F, pz, px + m(3), F + m(3), pz + m(3), pot);
+    C.box(px + m(1.2), F + m(3), pz + m(1.2), px + m(1.8), F + m(9), pz + m(1.8), leaf);
+    for (let i = 0; i < 5; i++) {
+      const a2 = rng.next() * 6.283;
+      const rr = m(2) + rng.int(0, 3);
+      const lx = Math.round(px + m(1.5) + Math.cos(a2) * rr);
+      const lz = Math.round(pz + m(1.5) + Math.sin(a2) * rr);
+      const ly = F + m(5) + rng.int(0, m(4));
+      C.box(Math.min(lx, px + m(1)), ly, Math.min(lz, pz + m(1)),
+        Math.max(lx, px + m(2)) + 1, ly + 1, Math.max(lz, pz + m(2)) + 1, leaf);
+    }
+  }
 
   for (let i = 0; i < 2; i++) {
     const on = rng.int(0, 3);
@@ -526,5 +748,34 @@ function common(C, F, doors, place, rng, palette) {
   for (let i = 0; i < 2; i++) {
     const pz = z0 + m(4) + rng.int(0, Math.max(1, z1 - z0 - m(8)));
     C.box(x0, F + m(3), pz, x0 + 1, F + m(4.6), pz + m(1.6), white);
+  }
+}
+
+/**
+ * Take the racing line back out of a room.
+ *
+ * Every cell above the floor whose world position is inside the track's own
+ * width is cleared. The margin is a car's half-width again on top, because a
+ * wing mirror that clips a fridge nobody can see the edge of is worse than a
+ * fridge that is slightly further back than it looks.
+ *
+ * Costs one path projection per column of the room — about ten thousand for a
+ * room, a couple of hundred thousand for a house, and `Path.project` is
+ * bucketed, so it is tens of milliseconds once at load.
+ */
+function carveRoute(C, FLOOR_D, track, room) {
+  if (!track?.path) return;
+  const MARGIN = 1.4;
+  const proj = { s: 0, dist: 0, side: 0 };
+  for (let ix = 0; ix < C.nx; ix++) {
+    const wx = room.x + C.ox + (ix + 0.5) * C.step;
+    for (let iz = 0; iz < C.nz; iz++) {
+      const wz = room.z + C.oz + (iz + 0.5) * C.step;
+      track.path.project(wx, wz, proj);
+      if (proj.dist > track.halfWidthAt(proj.s) + MARGIN) continue;
+      // Clear the column above the floor. The floor itself stays: the car has
+      // to drive on something, and the tiles are what it drives on.
+      C.box(ix, FLOOR_D, iz, ix + 1, C.ny, iz + 1, 0);
+    }
   }
 }
