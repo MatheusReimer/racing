@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {
   boxOf, prism, cone, rock, extrude, loftSections,
-  mergeFaceted, triCount, facetedMaterial, shade, mix,
+  mergeFaceted, triCount, facetedMaterial, shade, mix, setVoxelDetail,
 } from './shapes.js';
 import { RNG } from '../core/rng.js';
 import { lerp, TAU } from '../core/math.js';
@@ -1900,6 +1900,9 @@ export function buildPropLibrary(biome, seed = 1) {
     // variant: at that range the difference between three silhouettes and one
     // is not visible, and three buckets is three draw calls.
     const levels = LODS.map((lod) => {
+      // Tell the grid how far away this level will be drawn from. On the
+      // faceted route this does nothing at all.
+      setVoxelDetail(lod.id);
       const rng = new RNG(`${seed}:prop:${name}`);
       const count = def.spanning ? 1 : (lod.id === 0 ? VARIANTS : lod.id === 1 ? 2 : 1);
       const variants = [];

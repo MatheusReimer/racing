@@ -156,7 +156,7 @@ export function coarsen(vox) {
  * and what colour they are, and pulls maximal same-coloured rectangles out of
  * it. A door skin comes out as one quad rather than four hundred.
  */
-export function voxGeometry(vox, { body = null, accent = null } = {}) {
+export function voxGeometry(vox, { body = null, accent = null, emitMask = false } = {}) {
   const { nx, ny, nz, step, ox, oy, oz, at, palette, paint } = vox;
   // The car's own colour, where the bake said the game may put one.
   //
@@ -165,10 +165,17 @@ export function voxGeometry(vox, { body = null, accent = null } = {}) {
   // player a colour that has to land somewhere. Without this the palette wins
   // and every RX-7 is the white one its author modelled.
   const paintRGB = body ? [body.r, body.g, body.b] : null;
+  // With no colour to substitute, `painted` still has to be computed, because
+  // it is what the mask reports.
+  const wantPaint = paintRGB || emitMask;
   const dim = [nx, ny, nz];
   const pos = [];
   const col = [];
   const idx = [];
+  // Which vertices a per-instance colour is allowed to tint. Traffic needs it:
+  // the cars share one geometry and are told apart by an instance colour, and
+  // without a mask that colour lands on the glass and the lamps too.
+  const msk = emitMask ? [] : null;
 
   const solid = (x, y, z) => (
     x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz
@@ -237,14 +244,15 @@ export function voxGeometry(vox, { body = null, accent = null } = {}) {
             // rectangle is only merged across cells that agreed — so asking
             // the first is asking all of them.
             cell[axis] = slice; cell[u] = a; cell[v] = b;
-            const painted = paintRGB && paint
-              && paint[cell[0] + nx * (cell[1] + ny * cell[2])];
-            const rgb = painted
+            const painted = !!(wantPaint && paint
+              && paint[cell[0] + nx * (cell[1] + ny * cell[2])]);
+            const rgb = painted && paintRGB
               ? paintRGB
               : [palette[(c - 1) * 3], palette[(c - 1) * 3 + 1], palette[(c - 1) * 3 + 2]];
             for (const q of quad) {
               pos.push(q[0], q[1], q[2]);
               col.push(rgb[0], rgb[1], rgb[2]);
+              if (msk) msk.push(painted ? 1 : 0);
             }
             idx.push(start, start + 1, start + 2, start, start + 2, start + 3);
             a += w;
@@ -257,6 +265,7 @@ export function voxGeometry(vox, { body = null, accent = null } = {}) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3));
+  if (msk) geo.setAttribute('paintMask', new THREE.BufferAttribute(new Float32Array(msk), 1));
   geo.setIndex(idx);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();

@@ -66,11 +66,15 @@ export const cellFor = (maxDim) => Math.max(WORLD_CELL, maxDim / TARGET_CELLS);
  * @param maxTris  give up above this and keep the original
  * @returns a new geometry, or the one passed in
  */
-export function voxelise(geo, { cell = null, maxCells = 8e6, maxTris = 30000 } = {}) {
+export function voxelise(geo, detail = 0,
+  { cell = null, maxCells = 8e6, maxTris = 30000, mask = null } = {}) {
   const posAttr = geo.attributes?.position;
   if (!posAttr) return geo;
   const pos = posAttr.array;
   const col = geo.attributes.color?.array ?? null;
+  // A per-vertex channel to carry through, by name. Traffic uses `paintMask`
+  // to say which of its cells a per-instance colour may tint.
+  const src = mask ? (geo.attributes[mask]?.array ?? null) : null;
   const idx = geo.index?.array ?? null;
   const faces = (idx ? idx.length : pos.length / 3) / 3;
   if (!faces) return geo;
@@ -82,8 +86,11 @@ export function voxelise(geo, { cell = null, maxCells = 8e6, maxTris = 30000 } =
       if (pos[i + k] > b[k + 3]) b[k + 3] = pos[i + k];
     }
   }
-  // Scaled to the object unless the caller insisted.
-  const step = cell ?? cellFor(Math.max(b[3] - b[0], b[4] - b[1], b[5] - b[2]));
+  // Scaled to the object, then to how far away it will be drawn. Each rung
+  // doubles the cube and quarters the cells, which is what makes a field of a
+  // hundred boulders drawable rather than merely buildable.
+  const step = (cell ?? cellFor(Math.max(b[3] - b[0], b[4] - b[1], b[5] - b[2])))
+    * (2 ** Math.max(0, detail));
 
   // A cell of margin either side, so a face flush with the bound still lands.
   const ox = b[0] - step;
@@ -96,6 +103,7 @@ export function voxelise(geo, { cell = null, maxCells = 8e6, maxTris = 30000 } =
 
   const acc = new Float32Array(nx * ny * nz * 3);
   const hits = new Uint32Array(nx * ny * nz);
+  const maskAcc = src ? new Float32Array(nx * ny * nz) : null;
 
   const at = (t, k) => (idx ? idx[t * 3 + k] : t * 3 + k) * 3;
   for (let t = 0; t < faces; t++) {
@@ -126,14 +134,17 @@ export function voxelise(geo, { cell = null, maxCells = 8e6, maxTris = 30000 } =
         const y = ((pos[a + 1] * w + pos[c1 + 1] * u + pos[c2 + 1] * v) - oy) / step | 0;
         const z = ((pos[a + 2] * w + pos[c1 + 2] * u + pos[c2 + 2] * v) - oz) / step | 0;
         if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) continue;
-        const stepI = x + nx * (y + ny * z);
-        hits[stepI]++;
-        const o = stepI * 3;
+        const cellI = x + nx * (y + ny * z);
+        hits[cellI]++;
+        const o = cellI * 3;
         if (col) {
           acc[o] += col[a] * w + col[c1] * u + col[c2] * v;
           acc[o + 1] += col[a + 1] * w + col[c1 + 1] * u + col[c2 + 1] * v;
           acc[o + 2] += col[a + 2] * w + col[c1 + 2] * u + col[c2 + 2] * v;
         } else { acc[o] += 1; acc[o + 1] += 1; acc[o + 2] += 1; }
+        if (maskAcc) {
+          maskAcc[cellI] += src[a / 3] * w + src[c1 / 3] * u + src[c2 / 3] * v;
+        }
       }
     }
   }
@@ -144,6 +155,7 @@ export function voxelise(geo, { cell = null, maxCells = 8e6, maxTris = 30000 } =
   const index = new Map();
   const palette = [];
   const grid = new Uint16Array(nx * ny * nz);
+  const paint = maskAcc ? new Uint8Array(nx * ny * nz) : null;
   let filled = 0;
   for (let c = 0; c < hits.length; c++) {
     const n = hits[c];
@@ -159,13 +171,16 @@ export function voxelise(geo, { cell = null, maxCells = 8e6, maxTris = 30000 } =
       palette.push(((key >> 10) & 31) / 31, ((key >> 5) & 31) / 31, (key & 31) / 31);
     }
     grid[c] = slot + 1;
+    // Mostly masked, not merely touched by it — the same rule the car bake uses
+    // for a cell that straddles a panel and a window.
+    if (paint) paint[c] = maskAcc[c] / n > 0.5 ? 1 : 0;
   }
   if (!filled) return geo;
 
   const out = voxGeometry({
     nx, ny, nz, step, ox, oy, oz,
-    at: grid, palette: Float32Array.from(palette), paint: null, count: filled,
-  });
+    at: grid, palette: Float32Array.from(palette), paint, count: filled,
+  }, { emitMask: !!paint });
   if (out.index.count / 3 > maxTris) { out.dispose(); return geo; }
   geo.dispose();
   return out;

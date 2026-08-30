@@ -2,6 +2,20 @@ import * as THREE from 'three';
 import { boxOf, prism, mergeFaceted, facetedMaterial, triCount } from '../world/shapes.js';
 import { RNG } from '../core/rng.js';
 
+/**
+ * How big a civilian's cubes are.
+ *
+ * Coarser than a racer's, which are about 3 cm, and that is deliberate for the
+ * same reason these are a few hundred triangles rather than thirty thousand: a
+ * hatchback you pass at 180 km/h is a silhouette, and keeping it plainer than
+ * the machine you are driving is what makes yours read as the special one.
+ */
+const TRAFFIC_CELL = 0.14;
+
+// Set at boot when the world is on the grid; null when it is not.
+let voxelBody = null;
+export function useVoxelTraffic(fn) { voxelBody = fn; }
+
 // Civilian cars.
 //
 // Deliberately not built by `VehicleMesh`. A racer is ~30k triangles because it
@@ -183,16 +197,33 @@ function buildBody(spec, rng) {
       parts.push(rim);
     }
   }
-  const painted = mergeFaceted(paint);
-  const fitted = mergeFaceted(parts);
+  // Merged raw, all three times.
+  //
+  // `mergeFaceted` is where the world goes on the voxel grid, and this builder
+  // merges twice before merging those two — so a civilian came out as a grid of
+  // a grid of a grid, which is a much coarser grid, which is why they were
+  // blocks. The mask went with it: it is a vertex count into the merged
+  // buffer, and voxelising changes how many vertices there are.
+  const painted = mergeFaceted(paint, { voxel: false });
+  const fitted = mergeFaceted(parts, { voxel: false });
   const nPaint = painted.attributes.position.count;
-  const body = mergeFaceted([painted, fitted]);
+  let body = mergeFaceted([painted, fitted], { voxel: false });
   // 1 on bodywork, 0 on everything else. The paint geometry goes in first, so
   // the split is a count rather than a search.
   const mask = new Float32Array(body.attributes.position.count);
   mask.fill(1, 0, nPaint);
   body.setAttribute('paintMask', new THREE.BufferAttribute(mask, 1));
-  return { body, glass: mergeFaceted(glass) };
+
+  // And then once, deliberately, at a cell a car deserves rather than one a
+  // shed does. A civilian is four metres long; at the world's 15 cm it is
+  // twenty-seven cubes, which reads as a car, and the mask rides through the
+  // grid so the per-instance colour still lands only on paint.
+  let glassGeo = mergeFaceted(glass, { voxel: false });
+  if (voxelBody) {
+    body = voxelBody(body, 0, { cell: TRAFFIC_CELL, mask: 'paintMask', maxTris: 4000 });
+    glassGeo = glassGeo && voxelBody(glassGeo, 0, { cell: TRAFFIC_CELL, maxTris: 2000 });
+  }
+  return { body, glass: glassGeo };
 }
 
 function buildLights(spec) {

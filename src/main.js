@@ -540,9 +540,11 @@ class Game {
 // Bodies before the first car. `VehicleMesh` is built mid-race when a rival
 // spawns, so it has to stay synchronous; fetching here means it always is.
 await loadHulls();
-// Voxel bodies, on request. `?vox=1` while the look is being brought in; when
-// it lands this becomes the default and the decimated route the fallback.
-if (new URLSearchParams(location.search).has('vox')) {
+// Voxel bodies and a voxel world, which is now the game rather than a preview
+// of one. `?smooth=1` still boots the decimated cars and the faceted props —
+// kept because the two are worth putting side by side, and because it is the
+// fallback if a machine cannot afford the grid.
+if (!new URLSearchParams(location.search).has('smooth')) {
   const { loadVox } = await import('./data/bodies/index.js');
   await loadVox();
   // And the world with them: props are built from six primitives and every one
@@ -551,6 +553,10 @@ if (new URLSearchParams(location.search).has('vox')) {
     import('./world/shapes.js'), import('./world/voxelise.js'),
   ]);
   useVoxelWorld(voxelise);
+  // Traffic merges three times before it is done, so it opts out of the funnel
+  // and asks for the grid once, at its own cell. See `trafficmesh.js`.
+  const { useVoxelTraffic } = await import('./race/trafficmesh.js');
+  useVoxelTraffic(voxelise);
 }
 // And cut them, so the first race does not pay for it on the grid.
 warmHulls(HULLS);
