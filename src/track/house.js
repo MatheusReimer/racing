@@ -201,15 +201,61 @@ export function generateHouseLayout(rng, opts = {}) {
   const mx = ((cols - 1) * ROOM_W) / 2;
   const mz = ((rows - 1) * ROOM_D) / 2;
 
+  // What kind of room each one is to drive through.
+  //
+  // Every room used to be the same: the same sweep, the same doorway offset,
+  // the same everything, and a lap was twenty-four identical corners. A
+  // circuit needs somewhere to commit and somewhere to recover.
+  //
+  //   straight — the exit door lines up with the entry door, so the route runs
+  //              dead through. Several in a row make a real straight, which is
+  //              the thing this layout could not previously produce at all.
+  //   soft     — a wide early sweep, the room used as one long curve.
+  //   hard     — a late apex, tight, and *anchored* so the smoothing pass
+  //              cannot flatten it back into the average of its neighbours.
+  //
+  // A room where the ring turns a corner is never straight: the route has to
+  // change direction there whatever anybody wants.
+  const N = rooms.length;
+  const turnsHere = (i) => {
+    const p0 = rooms[(i - 1 + N) % N].cell;
+    const p1 = rooms[i].cell;
+    const p2 = rooms[(i + 1) % N].cell;
+    return (p1[0] - p0[0]) !== (p2[0] - p1[0]) || (p1[1] - p0[1]) !== (p2[1] - p1[1]);
+  };
+  const kinds = [];
+  let run = 0;
+  for (let i = 0; i < N; i++) {
+    if (turnsHere(i)) { kinds.push(rng.bool(0.45) ? 'hard' : 'soft'); run = 0; continue; }
+    // On a straight side, straights come in runs — one straight room between
+    // two curves is not a straight, it is a pause.
+    if (run > 0) { kinds.push('straight'); run--; continue; }
+    if (rng.bool(0.5)) { run = rng.int(1, 3); kinds.push('straight'); continue; }
+    kinds.push(rng.bool(0.4) ? 'hard' : 'soft');
+  }
+
+  // Then the doorway offsets, which is where a straight actually comes from.
+  //
+  // The offsets used to alternate blindly, so even a room with no sweep in it
+  // had its two doors at opposite ends of their walls and the route through it
+  // was a diagonal. A straight room takes the offset it was entered by.
+  const biases = new Array(N);
+  biases[N - 1] = rng.bool(0.5) ? 1 : -1;
+  for (let i = 0; i < N; i++) {
+    const entry = biases[(i - 1 + N) % N];
+    biases[i] = kinds[i] === 'straight' ? entry : -entry;
+  }
+
   const controls = [];
   const doorways = [];
-  let bias = rng.bool(0.5) ? 1 : -1;
   let prev = null;
   for (let i = 0; i < rooms.length; i++) {
     const a = rooms[i];
     const b = rooms[(i + 1) % rooms.length];
-    const d = doorway(a.cell, b.cell, bias);
-    const enter = prev ?? doorway(rooms[(i - 1 + rooms.length) % rooms.length].cell, a.cell, -bias);
+    const kind = kinds[i];
+    const d = doorway(a.cell, b.cell, biases[i]);
+    const enter = prev
+      ?? doorway(rooms[(i - 1 + rooms.length) % rooms.length].cell, a.cell, biases[(i - 1 + N) % N]);
 
     // The line through a room is a curve, not a diagonal.
     //
@@ -257,7 +303,11 @@ export function generateHouseLayout(rng, opts = {}) {
     // anywhere else in the game is 949. This is the compromise: enough of a
     // sweep through each room to be worth driving, smoothed afterwards so it
     // is a sweep and not a kink.
-    const swing = Math.min(ROOM_W, ROOM_D) * 0.52;
+    // How far out of its way the route goes, per kind. A straight goes none,
+    // a soft room is used as one long curve, and a hard one turns late in a
+    // smaller space.
+    const swing = Math.min(ROOM_W, ROOM_D)
+      * (kind === 'straight' ? 0 : kind === 'hard' ? 0.30 : 0.62);
     let mxr; let mzr;
     if (sumLen > 0.35) {
       // A corner room: the doors point somewhere in common, so bulge the
@@ -300,16 +350,23 @@ export function generateHouseLayout(rng, opts = {}) {
     const bx = 2 * mxr - (p0x + p2x) * 0.5;
     const bz = 2 * mzr - (p0z + p2z) * 0.5;
     for (let k = 0; k <= 4; k++) {
-      const t = k / 4;
+      // A hard corner apexes late: the curve is sampled with the parameter
+      // biased toward the exit, which is where a driver turns in when the
+      // corner is meant to hurt.
+      const u0 = k / 4;
+      const t = kind === 'hard' ? u0 * u0 : u0;
       const u = 1 - t;
       controls.push({
         x: u * u * p0x + 2 * u * t * bx + t * t * p2x,
         y: 0,
         z: u * u * p0z + 2 * u * t * bz + t * t * p2z,
+        // The apex of a hard corner is pinned, or sixty passes of smoothing
+        // average it into its neighbours and every corner on the circuit is
+        // the same corner again. This is the one place the line stays sharp.
+        anchor: kind === 'hard' && k === 2,
       });
     }
 
-    bias = -bias;
     // Which two rooms it joins, so the shell builder knows which wall to cut
     // the opening in rather than guessing from the position.
     doorways.push({

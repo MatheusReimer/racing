@@ -253,49 +253,149 @@ function fixtures(C, theme, FLOOR_D, rng, palette) {
   const accent = C.colour(palette.accent ?? 0xe0563a);
 
   if (theme.id === 'kitchen') {
-    // A run of units along one wall, with a worktop over them.
-    C.box(x0, F, z0, x0 + m(6), F + m(8.5), z1 - m(4), white);
-    C.box(x0, F + m(8.5), z0, x0 + m(6.4), F + m(9), z1 - m(4), dark);
-    // The cooker, and the pot on it that is the room's hazard.
+    // The run of units, and they are units rather than a plinth: a kickboard
+    // set back at the floor, doors with a gap between them, and a handle on
+    // each. Three fills apiece and it is the difference between a kitchen and
+    // a long grey box against a wall.
+    const cabinet = C.colour(0xe4e0d6);
+    const handle = C.colour(0xa8adb2);
+    C.box(x0, F + m(1), z0, x0 + m(6), F + m(8.5), z1 - m(4), cabinet);
+    C.box(x0, F, z0, x0 + m(4.6), F + m(1), z1 - m(4), C.colour(0x8f8b82));
+    for (let z = z0 + 1; z < z1 - m(5); z += m(5)) {
+      C.box(x0 - 1, F + m(1.4), z, x0, F + m(8.2), z + m(4.4), cabinet);
+      C.box(x0 - 1, F + m(7.2), z + m(1.6), x0, F + m(7.6), z + m(2.8), handle);
+    }
+    // The worktop, oversailing the doors, in something that is not white.
+    C.box(x0, F + m(8.5), z0, x0 + m(6.6), F + m(9.2), z1 - m(4), C.colour(0x4a4740));
+
+    // The cooker: a hob with four rings on it, a door with a window, and a
+    // hood over it with a light underneath.
     const cz = Math.round((z0 + z1) / 2);
     C.box(x0, F, cz - m(3), x0 + m(6), F + m(9), cz + m(3), steel);
-    C.box(x0 + m(1), F + m(9), cz - m(2), x0 + m(5), F + m(11.5), cz + m(2), dark);
-    // The fridge, at the end of the run: the tallest thing in the room.
+    C.box(x0 - 1, F + m(2), cz - m(2.6), x0, F + m(7), cz + m(2.6), C.colour(0x2a2f36));
+    C.box(x0 - 1, F + m(7.4), cz - m(2.6), x0, F + m(8), cz + m(2.6), handle);
+    for (const rx of [x0 + m(1.4), x0 + m(3.8)]) {
+      for (const rz of [cz - m(1.8), cz + m(0.6)]) {
+        C.box(rx, F + m(9.2), rz, rx + m(1.6), F + m(9.4), rz + m(1.6), C.colour(0x24282e));
+      }
+    }
+    // The pot, with a lid and a handle, which is the room's hazard.
+    C.box(x0 + m(1.6), F + m(9.4), cz - m(1.6), x0 + m(4.2), F + m(11.6), cz + m(1), dark);
+    C.box(x0 + m(1.2), F + m(11.6), cz - m(2), x0 + m(4.6), F + m(12.2), cz + m(1.4), steel);
+    C.box(x0 + m(2.6), F + m(12.2), cz - m(0.6), x0 + m(3.2), F + m(12.8), cz, steel);
+    C.box(x0 + m(4.6), F + m(10.2), cz - m(0.8), x0 + m(5.6), F + m(10.8), cz + m(0.2), dark);
+    C.box(x0, F + m(17), cz - m(3.4), x0 + m(5), F + m(21), cz + m(3.4), steel);
+    C.box(x0 + m(1.4), F + m(16.4), cz - m(2.6), x0 + m(4), F + m(17), cz + m(2.6), white);
+
+    // The fridge, with a handle down its edge and magnets on the door.
     C.box(x0, F, z1 - m(6), x0 + m(6.5), F + m(18), z1, white);
-    C.box(x0 - 1, F + m(6), z1 - m(6), x0, F + m(6.6), z1, steel);
-    // Wall cupboards over the run, a tiled splashback between them and the
-    // worktop, a sink cut into it, and a bin by the door.
-    C.box(x0, F + m(14), z0, x0 + m(4), F + m(21), z1 - m(8), white);
-    C.box(x0, F + m(9), z0, x0 + 1, F + m(14), z1 - m(4), C.colour(0xdfe6e8));
-    C.box(x0 + m(1), F + m(8), z0 + m(3), x0 + m(5), F + m(9), z0 + m(9), steel);
-    C.box(x0 + m(2.5), F + m(9), z0 + m(5.5), x0 + m(3.2), F + m(11), z0 + m(6.2), steel);
+    C.box(x0 - 1, F + m(4), z1 - m(5.6), x0, F + m(13), z1 - m(5), handle);
+    C.box(x0 - 1, F + m(9), z1 - m(6), x0, F + m(9.4), z1, C.colour(0xd8d4cc));
+    for (let i = 0; i < 4; i++) {
+      const mz = z1 - m(5) + rng.int(0, m(4));
+      const my = F + m(10) + rng.int(0, m(6));
+      C.box(x0 - 1, my, mz, x0, my + m(0.8), mz + m(0.8),
+        C.colour([0xd8503a, 0x3a7ad8, 0xe8c22a, 0x4aa858][i]));
+    }
+
+    // Wall cupboards over the run, and the splashback tiled rather than plain.
+    C.box(x0, F + m(14), z0, x0 + m(4), F + m(21), z1 - m(8), cabinet);
+    for (let z = z0 + 1; z < z1 - m(9); z += m(5)) {
+      C.box(x0 - 1, F + m(14.4), z, x0, F + m(20.6), z + m(4.4), cabinet);
+      C.box(x0 - 1, F + m(15), z + m(1.6), x0, F + m(15.4), z + m(2.8), handle);
+    }
+    const tileA = C.colour(0xdfe6e8);
+    const tileB = C.colour(0xcdd6d8);
+    for (let z = z0; z < z1 - m(4); z += 3) {
+      for (let y = F + m(9); y < F + m(14); y += 3) {
+        C.box(x0, y, z, x0 + 1, y + 3, z + 3,
+          ((z / 3 | 0) + (y / 3 | 0)) % 2 ? tileA : tileB);
+      }
+    }
+
+    // The sink: a bowl sunk into the worktop, a mixer tap, a draining board.
+    C.box(x0 + m(0.8), F + m(7.4), z0 + m(3), x0 + m(5.2), F + m(9.2), z0 + m(8), steel);
+    C.box(x0 + m(1.2), F + m(7.8), z0 + m(3.4), x0 + m(4.8), F + m(9.2), z0 + m(7.6), dark);
+    C.box(x0 + m(0.6), F + m(9.2), z0 + m(3.2), x0 + m(1.4), F + m(12), z0 + m(4), steel);
+    C.box(x0 + m(0.6), F + m(11.6), z0 + m(3.2), x0 + m(3), F + m(12), z0 + m(4), steel);
+    for (let i = 0; i < 5; i++) {
+      C.box(x0 + m(1), F + m(9.2), z0 + m(8.4) + i * m(0.8),
+        x0 + m(5), F + m(9.4), z0 + m(8.8) + i * m(0.8), steel);
+    }
+
+    // Worktop things: a kettle with a spout, a toaster with slots, a knife
+    // block with knives in it, a chopping board leaning up, mugs.
+    C.box(x0 + m(1), F + m(9.2), z0 + m(15), x0 + m(3.2), F + m(12.6), z0 + m(17.2), steel);
+    C.box(x0 + m(3.2), F + m(11), z0 + m(15.8), x0 + m(4), F + m(12), z0 + m(16.4), steel);
+    C.box(x0 + m(1), F + m(9.2), z0 + m(18), x0 + m(4), F + m(11.2), z0 + m(20), C.colour(0xb8bcc0));
+    for (const oz of [z0 + m(18.6), z0 + m(19.2)]) {
+      C.box(x0 + m(1.6), F + m(11.2), oz, x0 + m(3.4), F + m(11.4), oz + m(0.3), dark);
+    }
+    C.box(x0 + m(1), F + m(9.2), z0 + m(21.4), x0 + m(2.6), F + m(12), z0 + m(23), wood);
+    for (let i = 0; i < 3; i++) {
+      C.box(x0 + m(1.4) + i * m(0.5), F + m(12), z0 + m(21.8),
+        x0 + m(1.7) + i * m(0.5), F + m(14) + i, z0 + m(22.2), dark);
+    }
+    C.box(x0 + m(0.6), F + m(9.2), z0 + m(11), x0 + m(1), F + m(13), z0 + m(15), wood);
+    for (let i = 0; i < 3; i++) {
+      C.box(x0 + m(4) + i * m(1.2), F + m(9.2), z0 + m(11),
+        x0 + m(4.8) + i * m(1.2), F + m(10.2), z0 + m(11.8),
+        C.colour([0xd8d4cc, 0x4a8ad8, 0xd8724a][i]));
+    }
+
+    // A bin with a pedal, a clock on the wall, and a mat in front of the sink.
     C.box(x1 - m(4), F, z1 - m(5), x1 - m(1), F + m(7), z1 - m(2), C.colour(0x4a5058));
+    C.box(x1 - m(4.2), F + m(7), z1 - m(5.2), x1 - m(0.8), F + m(7.6), z1 - m(1.8), steel);
+    C.box(x1 - m(4.4), F + m(0.4), z1 - m(4.4), x1 - m(3.6), F + m(0.8), z1 - m(3.4), steel);
+    const clockZ = Math.round((z0 + z1) / 2) + m(9);
+    C.box(x1 - 1, F + m(17), clockZ, x1, F + m(21), clockZ + m(4), white);
+    C.box(x1 - 2, F + m(18.6), clockZ + m(1.6), x1 - 1, F + m(19.4), clockZ + m(2.4), dark);
+    C.box(x0 + m(6.6), F, z0 + m(3), x0 + m(12), F + 1, z0 + m(9), C.colour(0x8a5a4a));
+
     // A table with chairs, out in the room, which the route goes round.
     const tx = Math.round((x0 + x1) / 2) + m(4);
     const tz = Math.round((z0 + z1) / 2);
     C.box(tx - m(5), F + m(7), tz - m(4), tx + m(5), F + m(8), tz + m(4), wood);
-    for (const ox of [-m(4), m(3)]) {
-      for (const oz of [-m(3), m(2)]) {
+    // The table's own legs, at its corners.
+    for (const ox of [-m(4.4), m(3.4)]) {
+      for (const oz of [-m(3.4), m(2.4)]) {
         C.box(tx + ox, F, tz + oz, tx + ox + m(1), F + m(7), tz + oz + m(1), wood);
-        // A chair back, on the outward side of each leg pair.
-        C.box(tx + ox, F + m(7), tz + oz, tx + ox + m(1), F + m(11), tz + oz + m(2.5), wood);
       }
     }
-    // What is on the worktop: a kettle, a toaster, a microwave, a bowl of
-    // fruit. Small, and it is the difference between a kitchen and a plinth.
-    C.box(x0 + m(1), F + m(9), z0 + m(11), x0 + m(3.2), F + m(12.5), z0 + m(13.2), steel);
-    C.box(x0 + m(1), F + m(9), z0 + m(14), x0 + m(4), F + m(11), z0 + m(16), white);
-    C.box(x0 + m(0.5), F + m(9), z0 + m(17), x0 + m(4.5), F + m(13), z0 + m(22), steel);
-    C.box(x0 + m(1), F + m(9.5), z0 + m(18), x0 + m(1.6), F + m(12), z0 + m(21),
-      C.colour(0x2a3038));
-    // A fruit bowl on the table, and a tea towel over the cooker rail.
+    // And four chairs, each a seat with legs under it and a back behind it.
+    //
+    // They were a leg and a back at the same four points, with nothing joining
+    // them: four slabs standing round a table. A chair is the seat — it is the
+    // part you can see from above, which is the only angle anybody sees this
+    // room from.
+    const chair = (cx2, cz2, facing) => {
+      C.box(cx2 - m(2), F + m(4.4), cz2 - m(2), cx2 + m(2), F + m(5.2), cz2 + m(2), wood);
+      for (const lx of [cx2 - m(1.8), cx2 + m(1.2)]) {
+        for (const lz of [cz2 - m(1.8), cz2 + m(1.2)]) {
+          C.box(lx, F, lz, lx + m(0.6), F + m(4.4), lz + m(0.6), wood);
+        }
+      }
+      // The back goes on the side away from the table, which is what `facing`
+      // is for — all four of them had it on the same side to begin with, and
+      // one of the four was then sitting with its back to the food.
+      if (facing === -1) C.box(cx2 - m(2), F + m(5.2), cz2 - m(2), cx2 - m(1.3), F + m(10), cz2 + m(2), wood);
+      else if (facing === 1) C.box(cx2 + m(1.3), F + m(5.2), cz2 - m(2), cx2 + m(2), F + m(10), cz2 + m(2), wood);
+      else if (facing === -2) C.box(cx2 - m(2), F + m(5.2), cz2 - m(2), cx2 + m(2), F + m(10), cz2 - m(1.3), wood);
+      else C.box(cx2 - m(2), F + m(5.2), cz2 + m(1.3), cx2 + m(2), F + m(10), cz2 + m(2), wood);
+    };
+    chair(tx - m(7.5), tz - m(1), -1);
+    chair(tx + m(7.5), tz - m(1), 1);
+    chair(tx - m(1), tz - m(6.5), -2);
+    chair(tx - m(1), tz + m(6.5), 2);
+    // A fruit bowl on it, and a folded newspaper.
     C.box(tx - m(1.2), F + m(8), tz - m(1.2), tx + m(1.2), F + m(9.2), tz + m(1.2),
       C.colour(0xd8cdb8));
     for (const f2 of [[0, 0, 0xd84a3a], [m(0.8), m(0.6), 0xe8b02a], [-m(0.7), m(0.5), 0x4a9a3a]]) {
       C.box(tx + f2[0], F + m(9.2), tz + f2[1], tx + f2[0] + m(0.8), F + m(10), tz + f2[1] + m(0.8),
         C.colour(f2[2]));
     }
-    C.box(x0 + m(6), F + m(6), cz - m(2), x0 + m(6.6), F + m(9), cz + m(1), C.colour(0xd8e4ec));
+    C.box(tx + m(1.6), F + m(8), tz - m(3), tx + m(4.4), F + m(8.3), tz - m(1), white);
+
     // Boxes on top of the wall cupboards, which is where they live.
     for (let i = 0; i < 3; i++) {
       const bz = z0 + m(2) + i * m(4.5);

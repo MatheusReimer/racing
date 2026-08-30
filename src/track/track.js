@@ -500,14 +500,23 @@ function finishTrack(rng, biome, opts, controls, extra = {}) {
       w = houseWidthAt(at.x, at.z, extra.layout?.doorways ?? [],
         baseWidth, DOOR_W / 2 + 0.4);
 
-      // No curvature clamp any more.
+      // Clamped by the corner it is in, and this time it is earning its keep.
       //
-      // There was one, and then a second term for the barrier rail outside it,
-      // and each fixed one probe by breaking another — which is what it looks
-      // like when a constant is standing in for a decision. The decision is the
-      // width, and it is made in the biome: at nine units the road is narrower
-      // than any corner in this house needs it to be, and nothing has to be
-      // clamped at all.
+      // There was a clamp here once, standing in for a decision that had not
+      // been made: the route was uniformly kinked and the clamp was fighting
+      // the kinks. It came out when the line was smoothed and the width was
+      // chosen honestly. It goes back in now for the opposite reason — the
+      // route has *deliberately* tight corners in it, because a lap of
+      // twenty-four identical bends is not a circuit, and a hard corner that
+      // is also narrow is a hard corner rather than a fault.
+      //
+      // The rail is included, not just the road: the barrier sits outside the
+      // edge, so on the inside of a bend it is on a tighter radius than the
+      // tarmac, and it is the rail that folds first.
+      const curv = Math.abs(path.curvatureAt(s, 8));
+      if (curv > 1e-6) {
+        w = Math.min(w, 2 * ((1 / curv) / 1.25 - BARRIER_RAIL_OFFSET));
+      }
 
     } else if (biome.city) {
       // A junction is the widest part of a street, not the narrowest. Pinching
