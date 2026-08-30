@@ -2,9 +2,15 @@ import * as THREE from 'three';
 import { RNG } from '../core/rng.js';
 import { clamp01, lerp, TAU } from '../core/math.js';
 
-// Low-poly primitives.
+// Faceted primitives — the last geometry in the game that is not on the grid.
 //
-// Everything the world is built from, in a deliberately faceted style: flat
+// The style here is voxel. Every prop, every building, every metre of ground
+// and every car is drawn as cells, and this file used to be what the world was
+// built from. It is not any more: what survives is the merge helper, the shared
+// material, the two colour utilities, and the primitives that traffic still
+// uses for a civilian car's bolt-ons.
+//
+// Kept faceted rather than smoothed for the same reason the rest is cubes: flat
 // shading, visible edges, colour carried in vertex attributes so a whole prop
 // type is one material and one draw call.
 //

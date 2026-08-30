@@ -16,9 +16,9 @@
 //
 //   - The reference can be as heavy as you like. A 200k-triangle scan and a
 //     50-triangle game asset both reduce to fifteen rings, so the right
-//     reference is the *accurate* one rather than the one that is already
-//     low-poly. Measuring a stylised game car only copies somebody else's
-//     stylisation, which is the problem, not the fix.
+//     reference is the *accurate* one rather than the one that has already
+//     been simplified. Measuring a stylised game car only copies somebody
+//     else's stylisation, which is the problem, not the fix.
 //   - The result is checkable. A hand-tuned profile is somebody's memory of a
 //     car; a measured one is 4.06 m long because the thing it came from is.
 
@@ -207,7 +207,7 @@ function bounds(...lists) {
  *
  * Not by collecting the vertices near it, which is what this did first and is
  * wrong for exactly the models worth measuring. A flat panel has vertices only
- * at its corners — on a low-poly van the whole roof is one quad, so every
+ * at its corners — on a coarse model of a van the whole roof is one quad, so every
  * station between its two ends samples nothing and the roof measures as a hole.
  * A dense model fails the other way: a slab catches thousands of interior
  * vertices and the section becomes whatever is inside the shell.

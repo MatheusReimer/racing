@@ -1,6 +1,6 @@
 // What part of a car a triangle belongs to, from the material it wears.
 //
-// Shared by tools/lowpoly.mjs and tools/decimate.mjs. A class, not a colour:
+// Shared by tools/hull.mjs and tools/decimate.mjs. A class, not a colour:
 // shipping the reference's own paint would fight the game, where each vehicle
 // picks its own, while "this is glass" lets the game paint it and keep the
 // layout.

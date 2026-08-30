@@ -47,6 +47,7 @@ uniform vec3  uMoonColor;
 // x = cos(outer radius), y = cos(inner radius): the disc's soft edge, as
 // cosines so the fragment never needs an acos.
 uniform vec2  uMoonEdge;
+uniform float uSkyCell;
 uniform float uMoonStrength;
 varying vec3 vDir;
 
@@ -59,8 +60,35 @@ float noise(vec2 p) {
              mix(hash(i + vec2(0,1)), hash(i + vec2(1,1)), f.x), f.y);
 }
 
+/**
+ * The sky, on a grid.
+ *
+ * Everything in this world is cells and the dome behind it was a perfectly
+ * smooth ramp — the one surface that gave the style away as a decision about
+ * geometry rather than a way of seeing. Snapping the *direction* rather than
+ * the colour is what makes it cubic: every expression below reads the snapped
+ * direction instead of the raw one, so the gradient, the sun, the moon and the
+ * haze all become
+ * constant across a cell at once, and none of them needed changing to do it.
+ *
+ * The azimuth step widens as the elevation climbs, because a band of constant
+ * angular width narrows toward the pole and cells that go thin near the zenith
+ * are stripes, not cubes.
+ */
+vec3 voxelDir(vec3 v) {
+  vec3 d = normalize(v);
+  float el = asin(clamp(d.y, -1.0, 1.0));
+  el = floor(el / uSkyCell + 0.5) * uSkyCell;
+  float cs = max(0.12, cos(el));
+  float azStep = uSkyCell / cs;
+  float az = atan(d.z, d.x);
+  az = floor(az / azStep + 0.5) * azStep;
+  return vec3(cs * cos(az), sin(el), cs * sin(az));
+}
+
 void main() {
-  float h = clamp(vDir.y, -1.0, 1.0);
+  vec3 d = uSkyCell > 0.0 ? voxelDir(vDir) : normalize(vDir);
+  float h = clamp(d.y, -1.0, 1.0);
 
   // Two-stage gradient. The lower stop is compressed hard toward the horizon
   // because that is the band the player actually looks at while driving.
@@ -69,8 +97,10 @@ void main() {
   vec3 col = mix(uHorizon, uMid, t1);
   col = mix(col, uZenith, t2);
 
-  // Sun: a soft disc plus a wide bloom-feeding halo.
-  float sd = max(dot(normalize(vDir), normalize(uSunDir)), 0.0);
+  // Sun: a soft disc plus a wide bloom-feeding halo. On the snapped direction
+  // it comes out as a cluster of cells with a stepped corona, which is the
+  // brightest thing in the frame and so the one that has to agree.
+  float sd = max(dot(d, normalize(uSunDir)), 0.0);
   float disc = pow(sd, 1.0 / max(uSunSize, 1e-3));
   float halo = pow(sd, 6.0) * 0.35;
   col += uSunColor * (disc * 2.4 + halo) * uSunStrength;
@@ -78,7 +108,6 @@ void main() {
   // Moon. A disc with a soft rim and a wide halo, plus the same value noise
   // used for the haze mottling its face — a flat white dot reads as a bug.
   if (uMoonStrength > 0.0) {
-    vec3 d = normalize(vDir);
     float md = dot(d, uMoonDir);
     float disc = smoothstep(uMoonEdge.x, uMoonEdge.y, md);
     if (disc > 0.0) {
@@ -96,7 +125,7 @@ void main() {
 
   // Haze band sitting on the horizon, drifting slowly.
   float band = exp(-abs(h) * 5.0);
-  float n = noise(vec2(atan(vDir.z, vDir.x) * 2.2 + uTime * 0.012, h * 5.0));
+  float n = noise(vec2(atan(d.z, d.x) * 2.2 + uTime * 0.012, h * 5.0));
   col = mix(col, uHorizon * 1.12, band * uHaze * (0.55 + n * 0.45));
 
   // Below the horizon fades to the ground haze so the dome never shows an
@@ -137,6 +166,11 @@ export class Sky {
         uMoonColor: { value: new THREE.Color('#e8eefb') },
         uMoonEdge: { value: new THREE.Vector2(Math.cos(0.030), Math.cos(0.026)) },
         uMoonStrength: { value: 0 },
+        // Radians per sky cell. About two and a half degrees, which puts
+        // thirty-odd bands between the horizon and the zenith — enough that
+        // the sky reads as built and few enough that a band is a shape rather
+        // than a dither. Zero turns the grid off entirely.
+        uSkyCell: { value: 0.045 },
       },
     });
 

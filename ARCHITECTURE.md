@@ -188,7 +188,8 @@ centre at no extra cost.
 
 Roughly **29.7k triangles per car**, so a six-car field is ~178k — a number
 WebGL2 does not notice, and the whole reason to spend it here rather than pretend
-a low-poly look requires a low-poly budget.
+a voxel look requires a tiny budget. It does not: the style is a grid, not a
+shortage of triangles.
 
 The split matters more than the total. It was originally ~3k of tread blocks
 against ~1.2k of bodywork, which is exactly backwards: the silhouette is what a
@@ -264,38 +265,38 @@ Reward relevance is weighted toward tags the build already carries. A uniform
 roll across sixty parts almost never continues a theme, so a build never
 coheres. With weighting, 9 of 12 probe runs develop a dominant theme.
 
-## The world, and why it is faceted
+## The world, and why it is voxel
 
-The map was empty, and the fix was a scatter system rather than more terrain
-detail. `world/scatter.js` places ~280 props per circuit in four bands, and the
-band a prop lands in is a design decision, not a distance:
+**The style is voxel.** Cars, buildings, street furniture, scenery and the
+ground are all built as cells on a grid and meshed with the greedy mesher in
+`vehicle/voxmesh.js`. Nothing is sampled onto the grid from smooth geometry —
+that was tried, at the merge funnel in `world/shapes.js`, and it does not work:
+sampling gives back the shape it was given, and a box sampled onto a grid is
+still a box. A facade spent 7,134 triangles saying what 228 had already said.
+Every generator was rewritten to draw *on* the grid instead, in
+`world/buildings.js`, `world/street.js`, `world/yard.js` and `world/nature.js`,
+and the whole world got cheaper doing it: downtown went from 98,670 unique
+triangles to 40,802.
 
-- **road** — light, smashable clusters *on* the racing line, always hugging one
-  side so the far half stays clear. This is the band that turns Weight and
-  Impact into navigation stats: the same barrel stack is a route for a Truck
-  (8 damage across a race) and a hazard for a Rocket (71).
-- **verge** — punishes cutting a corner without walling it off.
-- **outer / far** — scenery. Grandstands, cranes, spires: the things that make a
-  circuit somewhere rather than a ribbon in a void.
+The cell is not one size. It grows with how far away a thing is normally seen —
+2.4 cm on a car, 12 cm on an oil drum, 20 cm on street furniture, 40 cm on a
+building, 8 m on the far ground — so a cube subtends roughly the same angle on
+screen wherever it is. Things of comparable size standing next to each other
+share a cell exactly, which is the half of the rule that stops a street looking
+assembled from separate models.
 
-Props are data (`generateProps` returns plain objects) so the simulation owns
-destruction and the balance runs smash exactly the barrels the played game does.
-Rendering is one `InstancedMesh` per (type, variant): ~280 props cost about
-fifteen draw calls, and a destroyed one is hidden by zeroing its instance matrix
-rather than by rebuilding the buffer.
+**Non-indexed where it is not voxel.** `world/shapes.js` still emits
+*non-indexed* geometry for what is left — traffic's bolt-ons — because
+`computeVertexNormals()` averages the normals of every face sharing a vertex,
+which is correct for a curved surface and exactly wrong here. The voxel mesher
+has no such problem: it emits four fresh vertices per quad and shares none
+between quads, so every normal is its own face's.
 
-**Faceted, not smooth.** `world/shapes.js` emits *non-indexed* geometry
-throughout, because `computeVertexNormals()` averages the normals of every face
-sharing a vertex — correct for a curved surface, and exactly wrong for this
-look, since it turns a deliberate facet into a soft blur. Non-indexed costs
-about 3x the vertices; that is the price of the style and at these counts it is
-nowhere near mattering.
-
-Vehicle bodies use polygonal cross-sections (a sampled squircle) rather than
-rectangles, so the loft produces chamfered shoulders and a real silhouette while
-every face stays flat. Cars went from 640 to ~6,500 triangles: sixteen rings of
-sixteen sides, a visible interior behind the glass, and wheels with staggered
-tread, paired spokes, a brake disc and a caliper.
+Vehicle bodies used to be lofted from polygonal cross-sections, then traced as
+hulls from reference models. Both are gone: a car is a `.vox` grid baked from
+its reference by `dev/bake.js`, meshed in eight slabs so a hit can rebuild one
+of them rather than the whole car. `?smooth` still loads the traced hulls, which
+is what keeps `tools/hull.mjs` and the `.bin` files in the tree.
 
 ## Track edges
 

@@ -197,7 +197,7 @@ function loft(sections, color, opts = {}) {
 }
 
 /**
- * Build a car from a hull traced off a real one by tools/lowpoly.mjs.
+ * Build a car from a hull traced off a real one by tools/hull.mjs.
  *
  * Same stitch-and-cap as `loft`, and deliberately so: what changes is only
  * where a ring's points come from. `loft` evaluates a squircle, which is how
@@ -2086,7 +2086,7 @@ export class VehicleMesh {
 
       // --- wheel arches -------------------------------------------------------
       // Wheels are rebuilt, never traced: one radius per angle cannot describe an
-      // arch that curls under itself, so `lowpoly.mjs` measures them instead and
+      // arch that curls under itself, so `hull.mjs` measures them instead and
       // the numbers land here. Scaled with the car, so a build that stretches the
       // body does not leave its wheels behind.
 

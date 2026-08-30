@@ -40,14 +40,17 @@ const POOL_VERT = /* glsl */`
 attribute vec2 corner;     // [-1,1] across the quad
 attribute vec3 tint;       // colour, already multiplied by intensity
 attribute float shape;     // 0 = lamp pool, 1 = headlight beam
+attribute vec2 cell;       // one light cube, in corner units, per axis
 uniform float uFogNear;
 uniform float uFogFar;
 varying vec2 vCorner;
+varying vec2 vCell;
 varying vec3 vTint;
 varying float vShape;
 varying float vFade;
 void main() {
   vCorner = corner;
+  vCell = cell;
   vTint = tint;
   vShape = shape;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
@@ -59,29 +62,69 @@ void main() {
   gl_Position = projectionMatrix * mv;
 }`;
 
+// Light, in cells.
+//
+// The world is cubes and the light falling on it was a smooth gradient, which
+// is the one surface in the frame that gave the grid away as a choice about
+// geometry rather than a style. So the falloff is evaluated at the centre of a
+// light cell rather than at the fragment, and its result is stepped into a
+// small number of levels: a headlight is a mosaic of lit squares on the road,
+// a lamp pool is a blocky disc, and both are made of the same size of cube as
+// the things they are lit by.
+//
+// Two quantisations, and they do different jobs. Snapping *position* is what
+// makes the light cubic. Snapping *intensity* is what stops each cube being an
+// imperceptibly different shade from its neighbour — without it the mosaic is
+// there and invisible, because a gradient sampled per cell is still a gradient.
+const LIGHT_LEVELS = 5.0;
+
+/**
+ * How big a cube of light is, in metres.
+ *
+ * Chosen against the surfaces it lands on rather than against the beam: the
+ * street furniture standing in it is on a twenty-centimetre cell and the near
+ * ground is on a stepped ribbon of about a third of a metre, so light in the
+ * same range reads as part of the same world. Much finer and the mosaic stops
+ * being visible at speed, which is the only place anybody sees it.
+ */
+const LIGHT_CELL = 0.30;
+
 const POOL_FRAG = /* glsl */`
 varying vec2 vCorner;
+varying vec2 vCell;
 varying vec3 vTint;
 varying float vShape;
 varying float vFade;
-void main() {
+
+float shapeAt(vec2 p) {
   // Pool: quadratic falloff from the centre, reaching zero at the rim so the
   // edge of the quad is never a visible seam across the tarmac.
-  float r = length(vCorner);
+  float r = length(p);
   float pool = 1.0 - clamp(r, 0.0, 1.0);
   pool *= pool;
 
   // Beam: local +Y runs away from the car. It fans out with distance and dies
   // before the far edge; the near ramp stops it starting as a hard line drawn
   // across the bumper.
-  float t = clamp(vCorner.y * 0.5 + 0.5, 0.0, 1.0);
+  float t = clamp(p.y * 0.5 + 0.5, 0.0, 1.0);
   float halfWidth = mix(0.34, 1.0, t);
-  float lat = clamp(abs(vCorner.x) / halfWidth, 0.0, 1.0);
+  float lat = clamp(abs(p.x) / halfWidth, 0.0, 1.0);
   float falloff = 1.0 - t;
   float beam = (1.0 - lat * lat) * falloff * falloff * smoothstep(0.0, 0.12, t);
 
-  float f = mix(pool, beam, vShape) * vFade;
-  if (f < 0.002) discard;
+  return mix(pool, beam, vShape);
+}
+
+void main() {
+  // The centre of the light cube this fragment is inside.
+  vec2 q = (floor(vCorner / vCell) + 0.5) * vCell;
+  float f = shapeAt(q) * vFade;
+
+  // Stepped, and the bottom step is dropped rather than dimmed: a cube either
+  // has light in it or it does not, and a ring of near-black cubes round the
+  // edge is a smudge with corners.
+  f = floor(f * ${LIGHT_LEVELS.toFixed(1)} + 0.5) / ${LIGHT_LEVELS.toFixed(1)};
+  if (f <= 0.0) discard;
   gl_FragColor = vec4(vTint * f, 1.0);
 }`;
 
@@ -104,13 +147,27 @@ void main() {
   gl_Position = projectionMatrix * mv;
 }`;
 
+// A halo, in cells too.
+//
+// This one is quantised in *screen* space rather than in the world, and that is
+// the honest thing rather than a shortcut: a halo is not a surface, it is glare
+// — the light the air and the eye do with a bright thing, drawn as a sprite
+// facing the camera. It has no place in the world to be cubic in. So it is
+// cubic in the only space it exists in, which also means its cubes stay the
+// same size on screen as the lamp recedes, exactly as glare does.
+const HALO_CELLS = 7.0;
+
 const HALO_FRAG = /* glsl */`
 uniform sampler2D uSprite;
 varying vec3 vTint;
 varying float vFade;
 void main() {
-  float a = texture2D(uSprite, gl_PointCoord).a * vFade;
-  if (a < 0.004) discard;
+  // The centre of the cell this fragment is in, sampled once for the whole
+  // cell so the sprite's gradient comes out as blocks.
+  vec2 q = (floor(gl_PointCoord * ${HALO_CELLS.toFixed(1)}) + 0.5) / ${HALO_CELLS.toFixed(1)};
+  float a = texture2D(uSprite, q).a * vFade;
+  a = floor(a * ${LIGHT_LEVELS.toFixed(1)} + 0.5) / ${LIGHT_LEVELS.toFixed(1)};
+  if (a <= 0.0) discard;
   gl_FragColor = vec4(vTint * a, 1.0);
 }`;
 
@@ -198,6 +255,11 @@ export class LightPools {
     this.corner = new Float32Array(this.max * 4 * 2);
     this.tint = new Float32Array(this.max * 4 * 3);
     this.shape = new Float32Array(this.max * 4);
+    // A light cube is a fixed size in metres, and the shader works in the
+    // quad's own [-1,1] coordinates, so each quad carries the conversion. It
+    // differs per quad because a beam is eighteen metres long and a lamp pool
+    // is four across.
+    this.cell = new Float32Array(this.max * 4 * 2);
 
     const geo = new THREE.BufferGeometry();
     const dyn = THREE.DynamicDrawUsage;
@@ -205,6 +267,7 @@ export class LightPools {
     geo.setAttribute('corner', new THREE.BufferAttribute(this.corner, 2).setUsage(dyn));
     geo.setAttribute('tint', new THREE.BufferAttribute(this.tint, 3).setUsage(dyn));
     geo.setAttribute('shape', new THREE.BufferAttribute(this.shape, 1).setUsage(dyn));
+    geo.setAttribute('cell', new THREE.BufferAttribute(this.cell, 2).setUsage(dyn));
 
     const idx = new Uint32Array(this.max * 6);
     for (let i = 0; i < this.max; i++) {
@@ -278,6 +341,16 @@ export class LightPools {
     const s = slot * 4;
     this.shape[s] = shape; this.shape[s + 1] = shape;
     this.shape[s + 2] = shape; this.shape[s + 3] = shape;
+
+    // Corner units per light cube. Clamped so a very small pool cannot ask for
+    // a cell bigger than itself and come out as one lit square.
+    const c = slot * 8;
+    const cx2 = Math.min(0.5, LIGHT_CELL / Math.max(0.05, halfX));
+    const cy2 = Math.min(0.5, LIGHT_CELL / Math.max(0.05, halfY));
+    for (let i = 0; i < 4; i++) {
+      this.cell[c + i * 2] = cx2;
+      this.cell[c + i * 2 + 1] = cy2;
+    }
   }
 
   /**
@@ -378,6 +451,7 @@ export class LightPools {
     this.geo.getAttribute('position').needsUpdate = true;
     this.geo.getAttribute('tint').needsUpdate = true;
     this.geo.getAttribute('shape').needsUpdate = true;
+    this.geo.getAttribute('cell').needsUpdate = true;
   }
 
   dispose() {

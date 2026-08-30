@@ -3,6 +3,10 @@
 An action roguelike racer in the browser. Build a machine over a run of races
 and find out how far that particular machine can get.
 
+Everything is voxel. Cars, buildings, scenery and the ground are built as cells
+on a grid — nothing is sampled onto one from smooth geometry, because sampling
+gives back the shape it was given.
+
 Three.js r180 on WebGL2 is the only runtime dependency. There are no art
 assets: every texture, mesh and sound is generated at load or synthesised live.
 

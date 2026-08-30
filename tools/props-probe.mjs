@@ -279,7 +279,7 @@ for (const biome of BIOMES) {
 
   // Detail must fall with distance, and the near band must not be empty —
   // "everything is far away" would pass a triangle budget and look like a
-  // desert of low-poly blobs.
+  // desert of shapeless blocks.
   const byLod = [0, 0, 0, 0];
   // Four levels since the kerb band was split off; clamping at 2 folded the
   // horizon into the mid-field and made the finest and the coarsest bands

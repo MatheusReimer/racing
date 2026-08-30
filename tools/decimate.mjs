@@ -4,7 +4,7 @@
 //   node tools/decimate.mjs <model> <name> --length=4.06 [--target=50000]
 //                           [--exclude=a,b] [--wheels=a,b] [--flip]
 //
-// tools/lowpoly.mjs traces a hull by walking cross-sections, which is the right
+// tools/hull.mjs traces a hull by walking cross-sections, which is the right
 // shape of answer at a thousand triangles and the wrong one at fifty thousand.
 // A section resampled onto N angles is star-shaped by construction: one radius
 // per direction, so nothing that folds back under itself survives — not a wheel

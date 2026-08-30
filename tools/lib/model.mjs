@@ -1,4 +1,4 @@
-// Model readers shared by tools/silhouette.mjs and tools/lowpoly.mjs.
+// Model readers shared by tools/silhouette.mjs and tools/hull.mjs.
 //
 // Lifted verbatim out of silhouette.mjs when a second tool needed to read the
 // same files. Between them .glb, .obj and .stl cover what an accurate car model

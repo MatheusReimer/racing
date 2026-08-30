@@ -74,7 +74,7 @@ varying vec2 vUv;
 // The renderer asks for no MSAA — it is expensive on a scaled buffer and does
 // nothing for the alpha-tested and shader-drawn edges here — and the render
 // scale plus the dither were standing in for it. That works for gradients and
-// not for silhouettes, and a low-poly game is nothing but silhouettes: every
+// not for silhouettes, and a voxel game is nothing but silhouettes: every
 // hard edge crawls as the car moves, which is exactly the frame in which it
 // gets looked at.
 //

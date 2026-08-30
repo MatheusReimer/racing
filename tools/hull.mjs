@@ -1,6 +1,10 @@
-// Rebuild a car as a low-poly hull from an accurate reference.
+// Rebuild a car as a traced hull from an accurate reference.
 //
-//   node tools/lowpoly.mjs <model> <name> --length=4.06 [--rings=28] [--radial=16]
+// Superseded by the voxel bake — the game builds its cars from `.vox` grids now
+// — and kept because `?smooth` still loads these hulls, and because the class
+// pass in `lib/classify.mjs` is shared with tools/decimate.mjs.
+//
+//   node tools/hull.mjs <model> <name> --length=4.06 [--rings=28] [--radial=16]
 //                          [--exclude=a,b] [--wheels=a,b] [--flip]
 //
 // Where tools/silhouette.mjs measures a reference down to twenty numbers a
@@ -23,8 +27,8 @@
 //     applies to what comes out of here, and `source` below records which one.
 //   - Undercuts are lost. One radius per angle cannot express a wheel arch that
 //     curls back under itself, so arches read as recesses rather than tunnels.
-//     That is the trade low-poly is, and it is why wheels are measured and
-//     rebuilt rather than traced.
+//     That is the trade a single-radius hull makes, and it is why wheels are
+//     measured and rebuilt rather than traced.
 
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { basename } from 'node:path';
@@ -33,7 +37,7 @@ import { readModel } from './lib/model.mjs';
 const args = process.argv.slice(2);
 const pos = args.filter((a) => !a.startsWith('--'));
 if (pos.length < 2) {
-  console.log('usage: node tools/lowpoly.mjs <model> <name> --length=4.06'
+  console.log('usage: node tools/hull.mjs <model> <name> --length=4.06'
     + ' [--rings=28] [--radial=16] [--exclude=a,b] [--wheels=a,b] [--flip]');
   process.exit(1);
 }
@@ -193,9 +197,9 @@ function sliceSegments(tris, zc) {
  * bonnet section and a roof section are each sampled across their own extent
  * instead of one of them being squashed into a couple of bins.
  *
- * Segments are walked rather than their endpoints taken: a section of a
- * low-poly panel is two points a metre apart, and binning only endpoints leaves
- * every angle between them empty.
+ * Segments are walked rather than their endpoints taken: a section of a flat
+ * panel is two points a metre apart, and binning only endpoints leaves every
+ * angle between them empty.
  */
 function ring(zc) {
   const seg = sliceSegments(body, zc);
@@ -392,7 +396,7 @@ const out = {
 
 mkdirSync('src/data/bodies', { recursive: true });
 const path = `src/data/bodies/${NAME}.js`;
-writeFileSync(path, `// ${NAME} — low-poly hull traced from ${basename(file)} by tools/lowpoly.mjs.
+writeFileSync(path, `// ${NAME} — traced hull from ${basename(file)} by tools/hull.mjs.
 //
 // ${rings.length} sections of ${RADIAL} radii. Each 'rings' row is [z, cy, r0..r${RADIAL - 1}]: a
 // station along the car, the height its outline is centred on, and the distance
