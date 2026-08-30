@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { buildBlockTerrain, terrainRoll } from './terrain.js';
+import { buildBlockTerrain, buildBlockVerge, terrainRoll } from './terrain.js';
 import { paintMarkings } from './markings.js';
 import { asphaltTexture, groundTexture, roadNormal } from '../materials/noise.js';
 import { BARRIER_RAIL_OFFSET, ROAD_LIFT, BRANCH_LIFT } from './track.js';
@@ -267,141 +267,7 @@ function buildBarrier(track, lengthOf, offsetAt, accent, closed = true) {
 // Going denser than this all the way out cost roughly a quarter of the low
 // tier's real-time headroom for detail that sits behind fog: vertex count, not
 // extent, is what the ground charges for.
-// Cut back to the near band. Everything past it is blocks now — see
-// `terrain.js` — and a ribbon that still reached five hundred metres would be
-// a smooth sheet lying underneath them, showing through every gap and fighting
-// them for depth wherever the two agreed to within a centimetre.
-//
-// The outermost column is `NEAR_BAND`: the blocks start exactly where this
-// stops, and quantise their heights downward so the seam is a step down rather
-// than a wall.
-const VERGE_PROFILE = [
-  -46, -38, -30, -22, -15, -9,
-  0,
-  9, 15, 22, 30, 38, 46,
-];
 
-/**
- * Decimate the lateral profile for a quality tier, and stop it at the tier's
- * draw distance — columns past the far plane are vertices nobody ever sees.
- *
- * The centre column is at an even index and the profile is symmetric, so taking
- * every 2nd or 3rd entry keeps 0 and both extremes without special cases.
- */
-function vergeProfile(detail) {
-  // The far columns are gone, so there is nothing left to clip against the
-  // draw distance: forty-six metres is inside every tier's far plane. What is
-  // left to trade is how finely the near band is cut, and the outermost column
-  // has to survive whatever stride is chosen or the blocks start in mid-air.
-  const stride = detail >= 0.95 ? 1 : 2;
-  return VERGE_PROFILE.filter((v, i) => i % stride === 0 || Math.abs(v) === 46);
-}
-
-function buildVerge(track, biome, quality = {}) {
-  const L = track.length;
-  const detail = quality.terrainDetail ?? 1;
-  const rings = Math.max(8, Math.floor(L / lerp(14, 9, detail)));
-  // Lateral profile out from the centreline. Dense near the road where detail
-  // is visible, thinning with distance — but reaching far enough that the fog,
-  // not a seam, is what ends the terrain.
-  //
-  // This used to be nine columns ending at 260 m, which left a single 65 m quad
-  // spanning the middle distance: the ground relief was there in the maths and
-  // invisible in the mesh, because there were no vertices to carry it. Beyond
-  // 260 m it became a flat 2.6 km sheet, and at these fog densities that sheet
-  // is still 60% visible.
-  const profile = vergeProfile(detail);
-  const cols = profile.length;
-
-  const pos = new Float32Array(rings * cols * 3);
-  const col = new Float32Array(rings * cols * 3);
-  const uv = new Float32Array(rings * cols * 2);
-
-  const p = { x: 0, y: 0, z: 0 };
-  const t = { x: 0, z: 0 };
-  const elev = biome.elevation ?? 8;
-
-  for (let i = 0; i < rings; i++) {
-    const s = (i / rings) * L;
-    track.path.pointAt(s, p);
-    track.path.tangentAt(s, t);
-    const nx = t.z, nz = -t.x;
-    const hw = track.halfWidthAt(s);
-
-    for (let j = 0; j < cols; j++) {
-      const want = profile[j];
-      // Push the inner columns just past the road edge so the verge starts
-      // where the asphalt ends, whatever the width is here.
-      const lateral = Math.sign(want) * Math.max(Math.abs(want), hw + 1.8);
-      const off = Math.abs(lateral) - hw;
-
-      const x = p.x + nx * lateral;
-      const z = p.z + nz * lateral;
-
-      // Hug the road at the verge, then fall away and get lumpy with distance.
-      //
-      // The height comes from the road nearest *this vertex*, not from the ring
-      // that produced it. The profile reaches hundreds of metres out from every
-      // cross-section, so on any circuit that folds back near itself — a city
-      // grid always does — a ring's sheet is laid straight across a different
-      // street, carrying the elevation of the street it came from. Half a metre
-      // of that is enough to bury the road it lands on: the whole city circuit
-      // was being driven on the pavement mesh, with the asphalt, the lane
-      // markings and the kerbs hidden underneath it, and any decal on the road
-      // hidden with them.
-      //
-      // Asking the track how high it is here instead makes the verge a function
-      // of position, so overlapping sheets agree with each other and every one
-      // of them sits below the road it covers.
-      const base = track.groundAt(x, z);
-      const blend = clamp01(off / 70);
-      const roll = terrainRoll(x, z);
-      // City ground is a plane the blocks sit on, not rolling country.
-      const relief = biome.city ? 0.06 : 0.42;
-      const drop = biome.city ? 0.8 : 4.0;
-      const y = lerp(base - 0.30, base - drop + roll * elev * relief, blend);
-
-      const k = i * cols + j;
-      pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = z;
-
-      // Brightness modulation around 1.0 — large-scale variation only.
-      //
-      // Flattened right down in a city. Terrain variation reads as ground you
-      // could drive on, and beside a street the correct reading is pavement:
-      // uniform, dark, and not competing with the road for attention. The
-      // undulating version put a bright warm patch beside the kerb that looked
-      // like a field had been left between the buildings.
-      const shade = biome.city
-        ? 0.90 + clamp01(0.5 + roll * 0.3) * 0.10
-        : 0.82 + clamp01(0.5 + roll * 0.3) * 0.36;
-      col[k * 3] = shade; col[k * 3 + 1] = shade; col[k * 3 + 2] = shade;
-
-      uv[k * 2] = lateral * 0.09;
-      uv[k * 2 + 1] = s * 0.09;
-    }
-  }
-
-  const idx = new Uint32Array(rings * (cols - 1) * 6);
-  let w = 0;
-  for (let i = 0; i < rings; i++) {
-    const i0 = i * cols;
-    const i1 = ((i + 1) % rings) * cols;
-    for (let j = 0; j < cols - 1; j++) {
-      const a = i0 + j, b = i0 + j + 1, c = i1 + j, d = i1 + j + 1;
-      idx[w++] = a; idx[w++] = c; idx[w++] = b;
-      idx[w++] = b; idx[w++] = c; idx[w++] = d;
-    }
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  geo.setIndex(new THREE.BufferAttribute(idx, 1));
-  geo.computeVertexNormals();
-  geo.computeBoundingSphere();
-  return geo;
-}
 
 /**
  * Far-field fill. The verge covers what the player can resolve; this plane
@@ -540,7 +406,7 @@ export class TrackMesh {
     });
     this.materials.push(this.groundMat);
 
-    const verge = new THREE.Mesh(buildVerge(track, biome, quality), this.groundMat);
+    const verge = new THREE.Mesh(buildBlockVerge(track, biome, quality), this.groundMat);
     verge.receiveShadow = !!quality?.shadows;
     verge.matrixAutoUpdate = false;
     verge.renderOrder = -10;

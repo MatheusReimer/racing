@@ -10,6 +10,10 @@ import {
   voxWorkshop, voxHospital, voxSpire, voxGrandstand,
   voxWorkshopGlow, voxHospitalGlow, voxRidge,
 } from './buildings.js';
+import {
+  voxStreetlight, voxTrafficLight, voxNeonSign, voxBillboard, voxBusStop,
+  voxJerseyBarrier, voxDumpster, voxContainer, voxCrate, voxMarker,
+} from './street.js';
 import { lerp, TAU } from '../core/math.js';
 
 // The things that make a track a place.
@@ -124,53 +128,6 @@ function barrel(rng, pal, ctx = {}) {
     parts.push(boxOf(0.07, 0.16, 0.03, shade(c, 0.4), {
       x: -0.1 + i * 0.1, y: 0.57, z: 0.415, rng,
     }));
-  }
-  return mergeFaceted(parts);
-}
-
-function crate(rng, pal, ctx = {}) {
-  const s = 0.9 + rng.spread(0.15);
-  const wood = mix(0x8a6a42, 0x6b5133, rng.next());
-  const parts = [boxOf(s, s * 0.85, s, wood, { y: s * 0.42, rng, variation: 0.1 })];
-  // Bracing planks catch the light and read the shape at distance.
-  for (const z of [-s / 2 - 0.02, s / 2 + 0.02]) {
-    parts.push(boxOf(s * 1.02, 0.1, 0.04, shade(wood, 0.75), { y: s * 0.2, z, rng }));
-    parts.push(boxOf(s * 1.02, 0.1, 0.04, shade(wood, 0.75), { y: s * 0.66, z, rng }));
-  }
-  // Corner posts and a stencil, so a crate is not just a cube.
-  if (ctx.fine === false) return mergeFaceted(parts);
-  for (const ix of [-1, 1]) for (const iz of [-1, 1]) {
-    parts.push(boxOf(0.09, s * 0.85, 0.09, shade(wood, 0.62), {
-      x: ix * (s / 2 - 0.03), y: s * 0.42, z: iz * (s / 2 - 0.03), rng,
-    }));
-  }
-  for (const ix of [-s / 2 - 0.02, s / 2 + 0.02]) {
-    parts.push(boxOf(0.04, 0.1, s * 1.02, shade(wood, 0.75), { x: ix, y: s * 0.2, rng }));
-    parts.push(boxOf(0.04, 0.1, s * 1.02, shade(wood, 0.75), { x: ix, y: s * 0.66, rng }));
-  }
-  parts.push(boxOf(s * 0.34, s * 0.22, 0.03, shade(wood, 1.35), {
-    y: s * 0.44, z: s / 2 + 0.05, rng,
-  }));
-  return mergeFaceted(parts);
-}
-
-function markerBoard(rng, pal, ctx = {}) {
-  const parts = [];
-  parts.push(prism(S(10, ctx), 0.07, 0.06, 1.5, 0x51565d, { rng }));
-  parts.push(boxOf(1.05, 0.62, 0.06, 0xf2f2f0, { y: 1.55, rng, variation: 0.02 }));
-  // Chevron, in the biome accent.
-  for (let i = 0; i < 3; i++) {
-    parts.push(boxOf(0.22, 0.5, 0.03, pal.accent, {
-      x: -0.32 + i * 0.32, y: 1.55, z: 0.05, rng, variation: 0.03,
-    }));
-  }
-  // Back brace and fixings: the board had no thickness from behind.
-  if (ctx.fine === false) return mergeFaceted(parts);
-  parts.push(boxOf(0.08, 0.08, 0.5, 0x51565d, { y: 1.35, z: -0.2, rng }));
-  parts.push(boxOf(1.05, 0.07, 0.05, 0x3f4349, { y: 1.84, z: -0.05, rng }));
-  parts.push(boxOf(1.05, 0.07, 0.05, 0x3f4349, { y: 1.26, z: -0.05, rng }));
-  for (const ix of [-0.42, 0.42]) for (const iy of [1.32, 1.78]) {
-    parts.push(prism(S(6, ctx), 0.045, 0.045, 0.04, 0x2e3238, { x: ix, y: iy, z: 0.06, rng }));
   }
   return mergeFaceted(parts);
 }
@@ -413,42 +370,6 @@ function cactus(rng, pal, ctx = {}) {
   return mergeFaceted(parts);
 }
 
-function container(rng, pal, ctx = {}) {
-  const fine = ctx.fine !== false;
-  const L = 6.1, W = 2.44, H = 2.6;
-  const c = [0xa8442e, 0x2e5aa8, 0x4a7a3a, 0xb08a2e, 0x8a8a90][rng.int(0, 4)];
-  const parts = [boxOf(L, H, W, c, { y: H / 2, rng, variation: 0.07 })];
-  // Ribbing along both flanks: this is the whole visual identity of a container.
-  const ribs = fine ? 16 : 0;
-  for (let i = 0; i < ribs; i++) {
-    const x = -L / 2 + 0.3 + i * ((L - 0.6) / (ribs - 1));
-    for (const z of [-W / 2 - 0.02, W / 2 + 0.02]) {
-      parts.push(boxOf(0.11, H * 0.9, 0.05, shade(c, 0.86), { x, y: H / 2, z, rng }));
-    }
-  }
-  // Doors and corner castings.
-  if (!fine) return mergeFaceted(parts);
-  parts.push(boxOf(0.06, H * 0.92, W * 0.96, shade(c, 0.7), { x: L / 2 + 0.02, y: H / 2, rng }));
-  // Locking bars and hinges — the end that reads as a door.
-  for (const z of (fine ? [-0.75, -0.25, 0.25, 0.75] : [])) {
-    parts.push(prism(S(8, ctx), 0.05, 0.05, H * 0.86, shade(c, 0.5), {
-      x: L / 2 + 0.07, y: H * 0.07, z: z * W * 0.5, rng,
-    }));
-    parts.push(boxOf(0.14, 0.16, 0.1, 0x2e3135, { x: L / 2 + 0.09, y: H * 0.5, z: z * W * 0.5, rng }));
-  }
-  for (let i = 0; fine && i < 9; i++) {
-    parts.push(boxOf(0.09, 0.06, W * 0.94, shade(c, 0.9), {
-      x: -L / 2 + 0.5 + i * ((L - 1) / 8), y: H + 0.03, rng,
-    }));
-  }
-  for (const ix of [-1, 1]) for (const iz of [-1, 1]) for (const iy of [0, 1]) {
-    parts.push(boxOf(0.3, 0.3, 0.3, 0x35383c, {
-      x: ix * (L / 2 - 0.15), y: iy ? H - 0.15 : 0.15, z: iz * (W / 2 - 0.15), rng,
-    }));
-  }
-  return mergeFaceted(parts);
-}
-
 function crane(rng, pal, ctx = {}) {
   const h = 14 + rng.range(0, 8);
   const parts = [];
@@ -624,104 +545,6 @@ function bones(rng, pal, ctx = {}) {
   return mergeFaceted(parts);
 }
 
-
-
-// ---------------------------------------------------------------------------
-// City
-// ---------------------------------------------------------------------------
-//
-// Underground's street furniture. These sit close to the road because that is
-// what a street circuit is — the walls are right there — so they are built at
-// the near detail level far more often than the wasteland's scenery is.
-
-function streetlight(rng, pal, ctx = {}) {
-  const h = 8 + rng.range(0, 2.5);
-  const parts = [
-    prism(S(10, ctx), 0.19, 0.13, h, 0x33383f, { rng, variation: 0.05 }),
-    prism(S(12, ctx), 0.32, 0.28, 0.35, 0x2a2e34, { rng }),
-  ];
-  // Curved boom, as three shortening segments.
-  let x = 0, y = h;
-  for (let i = 0; i < 3; i++) {
-    const seg = boxOf(0.9, 0.13, 0.13, 0x33383f, { rng });
-    seg.rotateZ(-0.30 - i * 0.22);
-    seg.translate(x + 0.45, y - i * 0.06, 0);
-    parts.push(seg);
-    x += 0.85;
-  }
-  parts.push(boxOf(0.95, 0.16, 0.42, 0x3a4048, { x: x + 0.2, y: y - 0.42, rng }));
-  return mergeFaceted(parts);
-}
-
-streetlight.glow = (rng, pal, ctx = {}) => mergeFaceted([
-  boxOf(0.80, 0.07, 0.34, 0xfff3d2, { x: 2.75, y: 8.6, rng }),
-]);
-
-function trafficLight(rng, pal, ctx = {}) {
-  const h = 5.4;
-  const parts = [
-    prism(S(10, ctx), 0.16, 0.12, h, 0x2b3037, { rng }),
-    boxOf(2.6, 0.12, 0.12, 0x2b3037, { x: 1.3, y: h - 0.15, rng }),
-    boxOf(0.42, 1.15, 0.34, 0x1d2127, { x: 2.35, y: h - 0.75, rng }),
-  ];
-  return mergeFaceted(parts);
-}
-
-trafficLight.glow = (rng, pal, ctx = {}) => {
-  // One of the three lit, chosen per variant, so a junction is not a row of
-  // identical greens.
-  const which = rng.int(0, 2);
-  const colours = [0xff3020, 0xffc020, 0x30ff70];
-  return mergeFaceted([
-    boxOf(0.20, 0.20, 0.06, colours[which], { x: 2.35, y: 5.4 - 0.35 - which * 0.33, z: 0.19 }),
-  ]);
-};
-
-function neonSign(rng, pal, ctx = {}) {
-  const h = 3.2 + rng.range(0, 2.4);
-  const w = 1.1 + rng.range(0, 1.6);
-  return mergeFaceted([
-    prism(S(8, ctx), 0.13, 0.11, h, 0x24282e, { rng }),
-    boxOf(w, h * 0.42, 0.16, 0x16191e, { y: h * 0.78, rng }),
-  ]);
-}
-
-neonSign.glow = (rng, pal, ctx = {}) => {
-  const h = 3.2 + rng.range(0, 2.4);
-  const w = 1.1 + rng.range(0, 1.6);
-  const hue = [0xff2e88, 0x2ee8ff, 0xa8ff3a, 0xff8a1e, 0xc46bff][rng.int(0, 4)];
-  const parts = [boxOf(w * 0.86, h * 0.30, 0.06, hue, { y: h * 0.78, z: 0.10 })];
-  // A bar under the sign, which is what actually paints the road below it.
-  parts.push(boxOf(w * 0.94, 0.09, 0.09, hue, { y: h * 0.56, z: 0.08 }));
-  return mergeFaceted(parts);
-};
-
-function jerseyBarrier(rng, pal, ctx = {}) {
-  const l = 3.0;
-  return mergeFaceted([
-    boxOf(l, 0.30, 0.62, 0xb9b6ae, { y: 0.15, rng, variation: 0.05 }),
-    boxOf(l, 0.44, 0.34, 0xc2bfb7, { y: 0.52, rng, variation: 0.05 }),
-    boxOf(l, 0.14, 0.24, 0xa8a49c, { y: 0.81, rng, variation: 0.05 }),
-  ]);
-}
-
-function dumpster(rng, pal, ctx = {}) {
-  const c = [0x2f5f3a, 0x2a4a6b, 0x6b3a2a][rng.int(0, 2)];
-  const parts = [
-    boxOf(2.1, 1.15, 1.25, c, { y: 0.72, rng, variation: 0.08 }),
-    boxOf(2.16, 0.10, 1.30, shade(c, 0.7), { y: 1.32, rng }),
-  ];
-  if (ctx.fine !== false) {
-    for (const ix of [-1, 1]) {
-      parts.push(prism(S(8, ctx), 0.16, 0.16, 0.14, 0x1a1d21, { rng })
-        .rotateZ(Math.PI / 2));
-      parts[parts.length - 1].translate(ix * 0.9, 0.16, 0.55);
-      parts.push(boxOf(0.1, 0.28, 0.1, shade(c, 0.6), { x: ix * 1.0, y: 1.0, z: 0.6, rng }));
-    }
-  }
-  return mergeFaceted(parts);
-}
-
 function palm(rng, pal, ctx = {}) {
   const h = 6 + rng.range(0, 4);
   const trunk = 0x5a4c3a;
@@ -783,65 +606,6 @@ function palm(rng, pal, ctx = {}) {
  * the traffic.
  */
 
-// ---------------------------------------------------------------------------
-// Street furniture
-// ---------------------------------------------------------------------------
-
-function billboard(rng, pal, ctx = {}) {
-  const h = 6.5 + rng.range(0, 3);
-  const w = 7.5 + rng.range(0, 2.5);
-  const parts = [];
-  for (const iz of [-1, 1]) {
-    parts.push(prism(S(10, ctx), 0.24, 0.20, h, 0x3a4048,
-      { z: iz * w * 0.28, rng, variation: 0.05 }));
-  }
-  // The panel faces the road, so it is thin along X like every other sign here.
-  parts.push(boxOf(0.28, 3.4, w, 0x1b2026, { x: -0.1, y: h + 1.7, rng }));
-  parts.push(boxOf(0.42, 0.22, w + 0.5, 0x2c3238, { x: -0.15, y: h + 3.5, rng }));
-  if (ctx.fine !== false) {
-    // Lamp bar on a bracket above, angled down at the face.
-    for (let i = -1; i <= 1; i++) {
-      parts.push(boxOf(0.5, 0.16, 0.5, 0x333940, { x: -0.7, y: h + 3.6, z: i * w * 0.3, rng }));
-    }
-  }
-  return mergeFaceted(parts);
-}
-
-billboard.glow = (rng, pal, ctx = {}) => {
-  const h = 6.5 + rng.range(0, 3);
-  const w = 7.5 + rng.range(0, 2.5);
-  const hue = [0xff3d6e, 0x3ad2ff, 0xffd23a, 0x9b6bff, 0x4dff9b][rng.int(0, 4)];
-  return mergeFaceted([
-    boxOf(0.10, 3.0, w * 0.94, hue, { x: -0.26, y: h + 1.7 }),
-    boxOf(0.16, 0.10, w * 0.7, 0xfff4dd, { x: -0.72, y: h + 3.52 }),
-  ]);
-};
-
-function busStop(rng, pal, ctx = {}) {
-  const parts = [];
-  const w = 4.6;
-  const d = 1.5;
-  // Roof and its four legs.
-  parts.push(boxOf(d + 0.3, 0.14, w, 0x2f353c, { x: 0.1, y: 2.55, rng }));
-  for (const ix of [-1, 1]) for (const iz of [-1, 1]) {
-    parts.push(prism(S(8, ctx), 0.09, 0.09, 2.5,
-      0x3a4048, { x: ix * d * 0.45, z: iz * w * 0.44, rng }));
-  }
-  // Glazed back wall, away from the road, and a bench inside it.
-  parts.push(boxOf(0.10, 2.0, w * 0.94, 0x161c24, { x: d * 0.5, y: 1.35, rng }));
-  parts.push(boxOf(0.55, 0.10, w * 0.7, 0x4a4038, { x: d * 0.28, y: 0.85, rng }));
-  // The lit advertising panel at one end — the reason this earns its light.
-  parts.push(boxOf(0.34, 2.0, 1.35, 0x22282f, { x: 0, y: 1.3, z: -w * 0.42, rng }));
-  return mergeFaceted(parts);
-}
-
-busStop.glow = (rng, pal, ctx = {}) => {
-  const w = 4.6;
-  return mergeFaceted([
-    boxOf(0.12, 1.7, 1.1, 0xf2f6ff, { x: -0.20, y: 1.3, z: -w * 0.42 }),
-    boxOf(0.9, 0.07, w * 0.86, 0xdfe9ff, { x: 0.1, y: 2.44 }),
-  ]);
-};
 
 // ---------------------------------------------------------------------------
 // Registry
@@ -858,8 +622,8 @@ busStop.glow = (rng, pal, ctx = {}) => {
 export const PROP_TYPES = {
   tyre_stack: { build: tyreStack, place: TRACKSIDE, radius: 0.75, footprint: 0.9, toughness: 60, height: 1.4 },
   barrel: { build: barrel, place: TRACKSIDE, radius: 0.5, footprint: 0.6, toughness: 40, height: 1.1 },
-  crate: { build: crate, place: TRACKSIDE, radius: 0.6, footprint: 0.8, toughness: 55, height: 0.9 },
-  marker: { build: markerBoard, place: TRACKSIDE, radius: 0.35, footprint: 0.7, toughness: 25, height: 2.2 },
+  crate: { build: voxCrate, place: TRACKSIDE, radius: 0.6, footprint: 1.3, toughness: 55, height: 1.1 },
+  marker: { build: voxMarker, place: TRACKSIDE, radius: 0.35, footprint: 0.7, toughness: 25, height: 2.2 },
 
   gantry: { build: gantry, place: SCENERY, radius: 0, toughness: null, height: 6.5, spanning: true },
   // `footprint` is how much room a prop needs, which is not `radius`.
@@ -898,30 +662,30 @@ export const PROP_TYPES = {
   cactus: { build: cactus, place: TRACKSIDE, radius: 0.45, footprint: 1.3, toughness: 35, height: 4 },
   bones: { build: bones, place: SCENERY, radius: 1.8, footprint: 5.7, toughness: null, height: 1.4 },
 
-  container: { build: container, place: TRACKSIDE, radius: 3.1, footprint: 4.3, toughness: 320, height: 2.6 },
+  container: { build: voxContainer, place: TRACKSIDE, radius: 3.1, footprint: 4.3, toughness: 320, height: 2.6 },
   crane: { build: crane, place: SCENERY, radius: 1.6, footprint: 1.3, toughness: null, height: 20 },
   pipes: { build: pipes, place: SCENERY, radius: 1.0, footprint: 22.0, toughness: null, height: 2.5 },
 
   spire: { build: voxSpire, place: SCENERY, radius: 1.6, footprint: 4.0, toughness: null, height: 19 },
   streetlight: {
-    build: streetlight, glow: streetlight.glow,
+    build: voxStreetlight, glow: voxStreetlight.glow,
     place: TRACKSIDE, radius: 0.3, footprint: 0.4, toughness: null, height: 9,
     // The boom reaches out along local +X; it belongs over the road.
     faceRoad: 1,
   },
   traffic_light: {
-    build: trafficLight, glow: trafficLight.glow,
-    place: TRACKSIDE, radius: 0.25, footprint: 0.2, toughness: null, height: 5.4,
+    build: voxTrafficLight, glow: voxTrafficLight.glow,
+    place: TRACKSIDE, radius: 0.25, footprint: 0.9, toughness: null, height: 5.6,
     faceRoad: 1,
   },
   neon_sign: {
-    build: neonSign, glow: neonSign.glow,
+    build: voxNeonSign, glow: voxNeonSign.glow,
     place: TRACKSIDE, radius: 0.3, footprint: 1.6, toughness: null, height: 5,
   },
   jersey_barrier: {
-    build: jerseyBarrier, place: TRACKSIDE, radius: 1.6, footprint: 2.0, toughness: 260, height: 1,
+    build: voxJerseyBarrier, place: TRACKSIDE, radius: 1.6, footprint: 2.0, toughness: 260, height: 1,
   },
-  dumpster: { build: dumpster, place: TRACKSIDE, radius: 1.2, footprint: 1.5, toughness: 90, height: 1.4 },
+  dumpster: { build: voxDumpster, place: TRACKSIDE, radius: 1.2, footprint: 2.2, toughness: 90, height: 1.6 },
   palm: { build: palm, place: SCENERY, radius: 0.4, footprint: 0.6, toughness: 120, height: 9 },
 
   // --- frontages ---
@@ -957,11 +721,11 @@ export const PROP_TYPES = {
   },
 
   billboard: {
-    build: billboard, glow: billboard.glow,
-    place: SCENERY, radius: 0.5, footprint: 4.1, toughness: null, height: 11, faceRoad: -1,
+    build: voxBillboard, glow: voxBillboard.glow,
+    place: SCENERY, radius: 0.5, footprint: 5.6, toughness: null, height: 12, faceRoad: -1,
   },
   bus_stop: {
-    build: busStop, glow: busStop.glow,
+    build: voxBusStop, glow: voxBusStop.glow,
     place: TRACKSIDE, radius: 1.4, footprint: 3.5, toughness: null, height: 2.7, faceRoad: -1,
   },
 

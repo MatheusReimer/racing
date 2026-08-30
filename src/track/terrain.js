@@ -354,12 +354,167 @@ export const _internal = { CELL, heightAt, riseFor };
  *             against and what the scatter already has to hand
  */
 export function surfaceAt(track, biome, x, z, off, lateral = null) {
-  const base = track.groundAt(x, z);
-  const far = heightAt(track, biome, x, z);
-  const beyond = Math.abs(lateral ?? off) >= NEAR_BAND;
-  if (beyond) {
+  const lat = Math.abs(lateral ?? off);
+  if (lat >= NEAR_BAND) {
     const rise = riseFor(biome);
-    return Math.floor(far / rise) * rise;
+    return Math.floor(heightAt(track, biome, x, z) / rise) * rise;
   }
-  return base - 0.30 + (far - (base - 0.30)) * clamp01(off / 70);
+  // Inside the band, the same step the verge is built with — otherwise a prop
+  // beside the road stands on the height the ground used to have rather than
+  // the one it has.
+  return vergeLevel(track, biome, x, z, off, lat, lat - off);
+}
+
+/**
+ * One cell of the near band's height, quantised as the verge quantises it.
+ *
+ * Shared by the mesh and the scatter so a barrel is on the step it looks like
+ * it is on. The step grows from nothing at the kerb to the biome's full
+ * terrace by the time the world blocks take over: a two-metre riser beside the
+ * racing line would be a wall, and the same riser two hundred metres out is
+ * the landscape.
+ */
+export function vergeLevel(track, biome, x, z, off, lateral, hw) {
+  const base = track.groundAt(x, z);
+  const smooth = base - 0.30
+    + (heightAt(track, biome, x, z) - (base - 0.30)) * clamp01(off / 70);
+  const q = riseFor(biome) * clamp01((Math.abs(lateral) - (hw + 3)) / (NEAR_BAND - 8));
+  return q < 0.05 ? smooth : Math.floor(smooth / q) * q;
+}
+
+/**
+ * The near band, in blocks that follow the road.
+ *
+ * The far ground went on a world-aligned grid and the forty-six metres beside
+ * the asphalt stayed a smooth sheet, because that band has a job the grid
+ * cannot do: it has to meet the road exactly, at whatever height and width the
+ * road happens to be, on a curve. A world grid cannot promise that — its cells
+ * are eight metres of straight edge and the road is neither.
+ *
+ * So this is a grid in the *road's* space instead. Rings along the centreline,
+ * columns out from it, and every cell flat at its own quantised height with a
+ * riser to its neighbours. It hugs the road because its rows are the road's
+ * rows, and it steps because every cell is level.
+ *
+ * Two details make the seams work at both ends:
+ *
+ *   * the innermost column is not quantised at all. It sits exactly where the
+ *     old smooth verge put it, thirty centimetres under the road edge, so the
+ *     asphalt still meets ground and not a cliff.
+ *   * the step grows with distance — a few centimetres at the kerb, the
+ *     biome's full terrace height by the time it hands over to the world
+ *     blocks. A two-metre riser beside the racing line would be a wall; the
+ *     same riser two hundred metres out is the landscape.
+ */
+export function buildBlockVerge(track, biome, quality = {}) {
+  const L = track.length;
+  const detail = quality.terrainDetail ?? 1;
+  // About four metres of road per ring, which is the same order as the block
+  // field's cell: the two grids disagree about direction, and there is no
+  // hiding that, but they can at least agree about size.
+  const along = detail >= 0.95 ? 4 : 6;
+  const rings = Math.max(8, Math.round(L / along));
+  const across = detail >= 0.95 ? 3.5 : 5;
+  // Columns out to the near band on both sides, plus the centre pair that sit
+  // against the road edge.
+  const cols = [];
+  for (let v = -NEAR_BAND; v <= NEAR_BAND + 0.001; v += across) cols.push(v);
+
+  const pos = [];
+  const col = [];
+  const uv = [];
+  const idx = [];
+  const p = { x: 0, y: 0, z: 0 };
+  const t = { x: 0, z: 0 };
+
+  // One pass to find every cell's corner positions and height, then one to
+  // emit. Heights are wanted before the risers can be built, and a cell needs
+  // its neighbour's.
+  const nx2 = rings, nz2 = cols.length;
+  const px = new Float32Array(nx2 * nz2);
+  const pz = new Float32Array(nx2 * nz2);
+  const py = new Float32Array(nx2 * nz2);
+  const sh = new Float32Array(nx2 * nz2);
+  const uu = new Float32Array(nx2 * nz2);
+
+  for (let i = 0; i < rings; i++) {
+    const s = (i / rings) * L;
+    track.path.pointAt(s, p);
+    track.path.tangentAt(s, t);
+    const nx = t.z, nz = -t.x;
+    const hw = track.halfWidthAt(s);
+
+    for (let j = 0; j < nz2; j++) {
+      const want = cols[j];
+      // Push the inner columns just past the road edge so the verge starts
+      // where the asphalt ends, whatever the width is here.
+      const lateral = Math.sign(want || 1) * Math.max(Math.abs(want), hw + 1.8);
+      const off = Math.abs(lateral) - hw;
+      const x = p.x + nx * lateral;
+      const z = p.z + nz * lateral;
+
+      const y = vergeLevel(track, biome, x, z, off, lateral, hw);
+
+      const k = i * nz2 + j;
+      px[k] = x; pz[k] = z; py[k] = y;
+      uu[k] = lateral;
+      const roll = terrainRoll(x, z);
+      sh[k] = biome.city
+        ? 0.90 + clamp01(0.5 + roll * 0.3) * 0.10
+        : 0.82 + clamp01(0.5 + roll * 0.3) * 0.36;
+    }
+  }
+
+  const vert = (x, y, z, u, v, shade) => {
+    const at = pos.length / 3;
+    pos.push(x, y, z);
+    col.push(shade, shade, shade);
+    uv.push(u * 0.09, v * 0.09);
+    return at;
+  };
+  const quad = (a, b, c, d) => {
+    idx.push(a, b, c, a, c, d);
+  };
+
+  for (let i = 0; i < rings; i++) {
+    const i1 = (i + 1) % rings;
+    const s0 = (i / rings) * L;
+    const s1 = s0 + L / rings;
+    for (let j = 0; j < nz2 - 1; j++) {
+      const a = i * nz2 + j;
+      const b = i * nz2 + j + 1;
+      const c = i1 * nz2 + j;
+      const d = i1 * nz2 + j + 1;
+      // The top. Flat, at the mean of its corners' levels — which for cells
+      // that quantised to the same step is exactly that step, and for the ones
+      // straddling a step is the half-way surface a riser then covers.
+      const shade = (sh[a] + sh[b]) * 0.5;
+      const v0 = vert(px[a], py[a], pz[a], uu[a], s0, shade);
+      const v1 = vert(px[b], py[b], pz[b], uu[b], s0, shade);
+      const v2 = vert(px[d], py[d], pz[d], uu[d], s1, shade);
+      const v3 = vert(px[c], py[c], pz[c], uu[c], s1, shade);
+      quad(v0, v3, v2, v1);
+
+      // The riser between this column and the next, where they differ. Drawn
+      // as its own pair of triangles so the top stays level: a quad stretched
+      // between two heights is a ramp, and a ramp is what this is replacing.
+      if (py[a] !== py[b] || py[c] !== py[d]) {
+        const dark = shade * 0.84;
+        const r0 = vert(px[b], py[a], pz[b], uu[b], s0, dark);
+        const r1 = vert(px[b], py[b], pz[b], uu[b], s0, dark);
+        const r2 = vert(px[d], py[d], pz[d], uu[d], s1, dark);
+        const r3 = vert(px[d], py[c], pz[d], uu[d], s1, dark);
+        quad(r0, r1, r2, r3);
+      }
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uv), 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  geo.computeBoundingSphere();
+  return geo;
 }
